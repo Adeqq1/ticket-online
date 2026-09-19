@@ -12,4 +12,8 @@ test("matches application paths without accepting extra segments", () => {
   expect(matchRoute("/checkout/nusa-malam")).toEqual({ name: "checkout", id: "nusa-malam" });
   expect(matchRoute("/tiket/a1b2c3d4")).toEqual({ name: "ticket", id: "a1b2c3d4" });
   expect(matchRoute("/konser/nusa-malam/extra")).toEqual({ name: "not-found" });
+  expect(matchRoute("/halaman-yang-tidak-ada")).toEqual({ name: "not-found" });
+  expect(matchRoute("/panduan/extra")).toEqual({ name: "not-found" });
+  expect(matchRoute("/tiket/")).toEqual({ name: "not-found" });
+  expect(matchRoute("/konser/%E0%A4%A")).toEqual({ name: "not-found" });
 });

@@ -1,0 +1,12 @@
+.not-found-page { min-height: 68dvh; display: grid; grid-template-columns: minmax(0, .82fr) minmax(280px, 1.18fr); gap: clamp(40px, 10vw, 150px); align-items: center; padding-block: 92px 124px; overflow: hidden; }
+.not-found-copy { position: relative; z-index: 1; max-width: 560px; }
+.not-found-kicker { margin: 0 0 18px; color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: .14em; }
+.not-found-copy h1 { max-width: 600px; margin: 0 0 22px; font-size: clamp(48px, 6.2vw, 82px); line-height: .94; }
+.not-found-copy > p:not(.not-found-kicker) { max-width: 430px; margin: 0 0 30px; color: var(--muted); font-size: 18px; line-height: 1.55; }
+.not-found-number { justify-self: end; color: var(--surface); font-size: clamp(190px, 29vw, 440px); font-weight: 800; letter-spacing: -.13em; line-height: .7; user-select: none; }
+@media (max-width: 767px) {
+  .not-found-page { min-height: 72dvh; grid-template-columns: 1fr; gap: 70px; padding-block: 72px 96px; }
+  .not-found-copy h1 { font-size: clamp(46px, 13vw, 68px); }
+  .not-found-copy > p:not(.not-found-kicker) { font-size: 16px; }
+  .not-found-number { justify-self: start; font-size: min(58vw, 250px); }
+}
