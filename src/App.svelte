@@ -12,7 +12,7 @@
 </script>
 
 <SiteHeader page={route.name === "home" ? "home" : route.name === "concerts" ? "concerts" : "other"} />
-<main id="konten">
+<main id="konten" tabindex="-1">
   {#if route.name === "home"}<HomePage />
   {:else if route.name === "concerts"}<ConcertCatalogPage />
   {:else if route.name === "concert-detail"}<ConcertDetailPage id={route.id} />
