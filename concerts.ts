@@ -21,19 +21,22 @@ function tiers(status: TicketStatus): TicketTier[] {
   ];
 }
 
-function concert(id: string, artist: string, city: string, venue: string, date: string, startsAt: string, genre: Genre, price: number, status: TicketStatus): Concert {
-  return { id, artist, city, venue, address: `Jl. Musik Raya, ${city}`, date, startsAt, genre, price, status, image: `https://picsum.photos/seed/${id}/900/1100`, description: `${artist} hadir dalam konser contoh dengan pilihan tiket untuk area panggung dan penonton.`, lineup: [artist, "Pembuka Sore", "Tamu Spesial"], zones, ticketTiers: tiers(status).map((tier) => tier.name === "Festival" ? { ...tier, price } : tier) };
+export const formatEventDate = new Intl.DateTimeFormat("id-ID", { dateStyle: "full", timeStyle: "short", timeZone: "Asia/Jakarta" });
+export function eventDate(startsAt: string) { return `${formatEventDate.format(new Date(startsAt))} WIB`; }
+
+function concert(id: string, artist: string, city: string, venue: string, startsAt: string, genre: Genre, price: number, status: TicketStatus): Concert {
+  return { id, artist, city, venue, address: `Jl. Musik Raya, ${city}`, date: eventDate(startsAt), startsAt, genre, price, status, image: `https://picsum.photos/seed/${id}/900/1100`, description: `${artist} hadir dalam konser contoh dengan pilihan tiket untuk area panggung dan penonton.`, lineup: [artist, "Pembuka Sore", "Tamu Spesial"], zones, ticketTiers: tiers(status).map((tier) => tier.name === "Festival" ? { ...tier, price } : tier) };
 }
 
 export const concerts: Concert[] = [
-  concert("nusa-malam", "Nusa Malam", "Jakarta", "Ruang Selatan", "Sabtu, 24 Agustus", "2027-08-24T19:30:00+07:00", "Indie", 225000, "Early Bird"),
-  concert("ruang-senja", "Ruang Senja", "Bandung", "Gudang Bunyi", "Jumat, 30 Agustus", "2027-08-30T19:30:00+07:00", "Rock", 175000, "Presale"),
-  concert("dini-hari", "Dini Hari", "Yogyakarta", "Balai Irama", "Minggu, 8 September", "2027-09-08T19:30:00+07:00", "Pop", 350000, "Presale"),
-  concert("laut-kaca", "Laut Kaca", "Surabaya", "Panggung Timur", "Sabtu, 14 September", "2027-09-14T19:30:00+07:00", "Indie", 275000, "Sold Out"),
-  concert("ritme-kota", "Ritme Kota", "Jakarta", "Aula Tengah", "Sabtu, 21 September", "2027-09-21T19:30:00+07:00", "Pop", 450000, "Early Bird"),
-  concert("bara-utara", "Bara Utara", "Bandung", "Pabrik Nada", "Jumat, 27 September", "2027-09-27T19:30:00+07:00", "Rock", 300000, "Presale"),
-  concert("kamar-biru", "Kamar Biru", "Yogyakarta", "Teras Suara", "Sabtu, 5 Oktober", "2027-10-05T19:30:00+07:00", "Indie", 150000, "Early Bird"),
-  concert("gelombang-pagi", "Gelombang Pagi", "Surabaya", "Titik Temu", "Minggu, 13 Oktober", "2027-10-13T19:30:00+07:00", "Pop", 500000, "Presale"),
+  concert("nusa-malam", "Nusa Malam", "Jakarta", "Ruang Selatan", "2027-08-24T19:30:00+07:00", "Indie", 225000, "Early Bird"),
+  concert("ruang-senja", "Ruang Senja", "Bandung", "Gudang Bunyi", "2027-08-30T19:30:00+07:00", "Rock", 175000, "Presale"),
+  concert("dini-hari", "Dini Hari", "Yogyakarta", "Balai Irama", "2027-09-08T19:30:00+07:00", "Pop", 350000, "Presale"),
+  concert("laut-kaca", "Laut Kaca", "Surabaya", "Panggung Timur", "2027-09-14T19:30:00+07:00", "Indie", 275000, "Sold Out"),
+  concert("ritme-kota", "Ritme Kota", "Jakarta", "Aula Tengah", "2027-09-21T19:30:00+07:00", "Pop", 450000, "Early Bird"),
+  concert("bara-utara", "Bara Utara", "Bandung", "Pabrik Nada", "2027-09-27T19:30:00+07:00", "Rock", 300000, "Presale"),
+  concert("kamar-biru", "Kamar Biru", "Yogyakarta", "Teras Suara", "2027-10-05T19:30:00+07:00", "Indie", 150000, "Early Bird"),
+  concert("gelombang-pagi", "Gelombang Pagi", "Surabaya", "Titik Temu", "2027-10-13T19:30:00+07:00", "Pop", 500000, "Presale"),
 ];
 
 export const featuredConcerts = concerts.slice(0, 4);

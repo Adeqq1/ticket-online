@@ -1,4 +1,4 @@
-import { concerts, formatRupiah, type Concert } from "./concerts.ts";
+import { concerts, eventDate, formatRupiah, type Concert } from "./concerts.ts";
 
 export type ConcertFilters = { query: string; genres: string[]; city: string; maxPrice: number };
 
@@ -44,7 +44,7 @@ if (typeof document !== "undefined") {
     body.className = "concert-card-body";
     const meta = document.createElement("p");
     meta.className = "concert-meta";
-    meta.textContent = `${concert.date}, ${concert.genre}`;
+    meta.textContent = `${eventDate(concert.startsAt)}, ${concert.genre}`;
     const title = document.createElement("h2");
     title.textContent = concert.artist;
     const venue = document.createElement("p");

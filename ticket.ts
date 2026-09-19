@@ -1,7 +1,7 @@
-import type { Concert, TicketTier } from "./concerts.ts";
+import { eventDate, type Concert, type TicketTier } from "./concerts.ts";
 
 export type TicketLine = { tierName: string; quantity: number; gate: string; allocation: string };
-export type TicketSnapshot = { version: 1; id: string; reference: string; issuedAt: string; attendeeName: string; concert: Pick<Concert, "id" | "artist" | "venue" | "city" | "address" | "date" | "startsAt" | "image">; lines: TicketLine[] };
+export type TicketSnapshot = { version: 1; id: string; reference: string; issuedAt: string; attendeeName: string; concert: Pick<Concert, "id" | "artist" | "venue" | "city" | "address" | "startsAt" | "image">; lines: TicketLine[] };
 
 export function ticketStorageKey(id: string) { return `ticket-online:ticket:${id}`; }
 export function ticketAllocation(tier: TicketTier, quantity: number, reference: string) {
@@ -12,12 +12,14 @@ export function ticketAllocation(tier: TicketTier, quantity: number, reference: 
   return `Row ${row}, Kursi ${start}-${start + quantity - 1}`;
 }
 export function createTicketSnapshot(id: string, reference: string, attendeeName: string, concert: Concert, lines: Array<{ tier: TicketTier; quantity: number }>): TicketSnapshot {
-  return { version: 1, id, reference, issuedAt: new Date().toISOString(), attendeeName, concert: { id: concert.id, artist: concert.artist, venue: concert.venue, city: concert.city, address: concert.address, date: concert.date, startsAt: concert.startsAt, image: concert.image }, lines: lines.map(({ tier, quantity }) => ({ tierName: tier.name, quantity, gate: tier.gate, allocation: ticketAllocation(tier, quantity, reference) })) };
+  return { version: 1, id, reference, issuedAt: new Date().toISOString(), attendeeName, concert: { id: concert.id, artist: concert.artist, venue: concert.venue, city: concert.city, address: concert.address, startsAt: concert.startsAt, image: concert.image }, lines: lines.map(({ tier, quantity }) => ({ tierName: tier.name, quantity, gate: tier.gate, allocation: ticketAllocation(tier, quantity, reference) })) };
 }
 export function parseTicketSnapshot(value: string | null): TicketSnapshot | null {
   try {
     const ticket = JSON.parse(value ?? "") as TicketSnapshot;
-    if (ticket?.version !== 1 || !/^[\w-]{8,}$/.test(ticket.id) || !/^TO-[A-Z0-9]{10}$/.test(ticket.reference) || !ticket.attendeeName || !ticket.concert?.artist || !ticket.concert?.venue || !ticket.concert?.date || Number.isNaN(Date.parse(ticket.concert.startsAt)) || !Array.isArray(ticket.lines) || !ticket.lines.length || ticket.lines.some((line) => !line || typeof line !== "object" || !line.tierName || !line.gate || !line.allocation || !Number.isInteger(line.quantity) || line.quantity < 1)) return null;
+    const text = (candidate: unknown): candidate is string => typeof candidate === "string" && candidate.trim().length > 0;
+    const concert = ticket?.concert;
+    if (ticket?.version !== 1 || !text(ticket.id) || !/^[\w-]{8,}$/.test(ticket.id) || !text(ticket.reference) || !/^TO-[A-Z0-9]{10}$/.test(ticket.reference) || !text(ticket.issuedAt) || !Number.isFinite(Date.parse(ticket.issuedAt)) || !text(ticket.attendeeName) || !text(concert?.id) || !text(concert?.artist) || !text(concert?.venue) || !text(concert?.city) || !text(concert?.address) || !text(concert?.startsAt) || !Number.isFinite(Date.parse(concert.startsAt)) || !text(concert?.image) || !Array.isArray(ticket.lines) || !ticket.lines.length || ticket.lines.some((line) => !line || typeof line !== "object" || !text(line.tierName) || !text(line.gate) || !text(line.allocation) || !Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 6)) return null;
     return ticket;
   } catch { return null; }
 }
@@ -44,7 +46,7 @@ if (typeof document !== "undefined") {
     setText("#ticket-title", ticket.concert.artist);
     setText(".pass-venue", `${ticket.concert.venue}, ${ticket.concert.city}`);
     setText("[data-attendee]", ticket.attendeeName);
-    setText("[data-date]", `${ticket.concert.date}, 19.30 WIB`);
+    setText("[data-date]", eventDate(ticket.concert.startsAt));
     setText("[data-venue]", `${ticket.concert.venue}, ${ticket.concert.city}`);
     setText("[data-address]", ticket.concert.address);
     setText(".ticket-reference", ticket.reference);
@@ -62,8 +64,9 @@ if (typeof document !== "undefined") {
     const countdown = app.querySelector<HTMLElement>("[data-countdown]")!;
     const accessibleCountdown = app.querySelector<HTMLElement>("[data-countdown-accessible]")!;
     const startsAt = ticket.concert.startsAt;
-    let lastMinute = "";
-    function updateCountdown() { const remaining = timeRemaining(startsAt); const text = remaining.started ? "Event telah dimulai" : `${remaining.days} hari · ${String(remaining.hours).padStart(2, "0")} jam · ${String(remaining.minutes).padStart(2, "0")} menit · ${String(remaining.seconds).padStart(2, "0")} detik`; countdown.textContent = text; const minuteText = remaining.started ? text : `${remaining.days} hari, ${remaining.hours} jam, dan ${remaining.minutes} menit`; if (minuteText !== lastMinute) { accessibleCountdown.textContent = minuteText; lastMinute = minuteText; } return remaining.started; }
+     accessibleCountdown.textContent = "Sisa waktu event dapat dibaca pada penghitung waktu.";
+     let wasStarted = false;
+     function updateCountdown() { const remaining = timeRemaining(startsAt); const text = remaining.started ? "Event telah dimulai" : `${remaining.days} hari · ${String(remaining.hours).padStart(2, "0")} jam · ${String(remaining.minutes).padStart(2, "0")} menit · ${String(remaining.seconds).padStart(2, "0")} detik`; countdown.textContent = text; if (remaining.started && !wasStarted) accessibleCountdown.textContent = "Event telah dimulai"; wasStarted = remaining.started; return remaining.started; }
     const timer = updateCountdown() ? undefined : window.setInterval(() => { if (updateCountdown() && timer) window.clearInterval(timer); }, 1_000);
     window.addEventListener("pagehide", () => { if (timer) window.clearInterval(timer); }, { once: true });
     app.querySelector<HTMLButtonElement>("#print-ticket")!.addEventListener("click", () => window.print());
