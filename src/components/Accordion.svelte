@@ -12,13 +12,14 @@
 <div class="accordion" aria-label={name}>
   {#each items as item, index}
     {@const panelId = `${name.toLowerCase().replaceAll(" ", "-")}-${index}`}
+    {@const triggerId = `${panelId}-trigger`}
     <div class="accordion-item">
-      <button class="accordion-trigger" type="button" aria-expanded={openIndex === index} aria-controls={panelId} onclick={() => toggle(index)}>
+      <button id={triggerId} class="accordion-trigger" type="button" aria-expanded={openIndex === index} aria-controls={panelId} onclick={() => toggle(index)}>
         <span>{item.question}</span>
         <span class="accordion-icon" aria-hidden="true">+</span>
       </button>
       {#if openIndex === index}
-        <div class="accordion-panel" id={panelId} role="region">
+        <div class="accordion-panel" id={panelId} role="region" aria-labelledby={triggerId}>
           <p>{item.answer}</p>
         </div>
       {/if}

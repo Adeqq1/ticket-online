@@ -4,7 +4,7 @@
   const purchaseSteps = [
     { question: "Bagaimana simulasi pembelian tiket berjalan?", answer: "Pilih konser dari katalog, buka detail acara, lalu pilih jenis tiket yang tersedia. Isi data pemesan, pilih metode pembayaran, dan tinjau kembali detail pesanan sebelum menekan tombol Buat pesanan." },
     { question: "Apakah pembayaran di website ini benar-benar diproses?", answer: "Belum. Tiket Online saat ini adalah frontend simulasi. Pilihan QRIS, virtual account, dan GoPay hanya menggambarkan alur pembayaran yang akan tersedia pada versi produksi." },
-    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah pesanan simulasi selesai, e-ticket tersimpan di halaman Tiket saya pada browser yang sama. Buka tiket tersebut untuk melihat detail acara dan QR e-ticket." }
+    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah pesanan simulasi selesai, e-ticket demo tersimpan di halaman Tiket saya pada browser yang sama. QR dan reference di halaman ini hanya visual demo dan tidak dapat digunakan untuk masuk event." }
   ];
 
   const paymentRules = [
@@ -15,13 +15,13 @@
   const refundRules = [
     { question: "Apakah tiket bisa dibatalkan atau di-refund?", answer: "Untuk versi produksi, refund dan pembatalan mengikuti kebijakan masing-masing acara. Sebelum membayar, periksa ketentuan refund pada detail konser. Pada versi simulasi ini belum ada transaksi atau proses refund nyata." },
     { question: "Bagaimana jika acara dibatalkan penyelenggara?", answer: "Jika acara dibatalkan atau dijadwalkan ulang, penyelenggara akan menentukan opsi pengembalian dana atau penggunaan tiket. Informasi resmi akan dikirim melalui kontak pemesan yang terdaftar." },
-    { question: "Apakah tiket yang sudah dipindai masih bisa digunakan lagi?", answer: "Tidak. QR e-ticket hanya dapat digunakan sekali untuk satu kali check-in. Jangan membagikan QR kepada orang lain sebelum kamu masuk venue." }
+    { question: "Apakah tiket yang sudah dipindai masih bisa digunakan lagi?", answer: "Pada versi produksi, QR valid akan digunakan sekali untuk satu kali check-in. Pada simulasi ini tidak ada pemindaian atau check-in nyata, dan QR demo tidak dapat digunakan di venue." }
   ];
 
   const wristbandSteps = [
-    { question: "Apa yang perlu disiapkan sebelum menuju meja penukaran?", answer: "Buka halaman Tiket saya, pilih tiket untuk acara tersebut, dan siapkan QR e-ticket di layar ponsel. Pastikan brightness layar cukup dan detail tiket mudah dibaca." },
-    { question: "Bagaimana proses penukaran wristband di venue?", answer: "Datang ke meja check-in atau penukaran wristband, tunjukkan QR e-ticket kepada petugas, lalu biarkan QR dipindai. Petugas akan memverifikasi tiket dan memberikan wristband sesuai kategori tiketmu." },
-    { question: "Bolehkah menggunakan screenshot QR e-ticket?", answer: "Simpan e-ticket di halaman Tiket saya agar status dan detailnya tetap terbaru. Screenshot hanya boleh digunakan jika aturan penyelenggara mengizinkannya dan QR tetap terlihat jelas." }
+    { question: "Apa yang perlu disiapkan sebelum menuju meja penukaran?", answer: "Pada versi produksi, buka e-ticket valid dan siapkan QR di layar ponsel sebelum menuju meja penukaran wristband. Pada simulasi ini QR hanya visual demo dan tidak dapat digunakan untuk masuk event." },
+    { question: "Bagaimana proses penukaran wristband di venue?", answer: "Pada versi produksi, tunjukkan QR valid kepada petugas untuk diverifikasi sebelum menerima wristband sesuai kategori tiket. Pada simulasi ini tidak ada pemindaian, verifikasi, atau check-in venue yang nyata." },
+    { question: "Bolehkah menggunakan screenshot QR e-ticket?", answer: "Ikuti aturan penyelenggara pada versi produksi karena screenshot mungkin tidak diterima. QR pada aplikasi ini adalah visual demo, tidak memiliki status check-in, dan tidak dapat digunakan di venue." }
   ];
 </script>
 
@@ -35,7 +35,7 @@
     <p class="eyebrow">PANDUAN TIKET</p>
     <h1 id="guide-title">Semua yang perlu kamu tahu sebelum datang.</h1>
   </div>
-  <p class="guide-intro">Ikuti alur pembelian, pahami ketentuannya, dan datang ke venue dengan e-ticket yang siap dipindai.</p>
+  <p class="guide-intro">Ikuti alur pembelian, pahami ketentuannya, dan bedakan fitur simulasi dari proses venue versi produksi.</p>
 </section>
 
 <nav class="guide-index shell" aria-label="Daftar isi panduan">
@@ -45,7 +45,7 @@
   <a href="#penukaran"><span>04</span> Penukaran wristband</a>
 </nav>
 
-<main class="guide-content shell">
+<div class="guide-content shell">
   <section class="guide-section" id="cara-kerja" aria-labelledby="cara-kerja-title">
     <div class="guide-section-heading"><span>01</span><h2 id="cara-kerja-title">Cara kerja pembelian tiket.</h2></div>
     <Accordion name="Cara kerja" items={purchaseSteps} />
@@ -62,7 +62,7 @@
   </section>
 
   <section class="guide-section" id="penukaran" aria-labelledby="penukaran-title">
-    <div class="guide-section-heading"><span>04</span><h2 id="penukaran-title">Tukar QR e-ticket menjadi wristband.</h2></div>
+    <div class="guide-section-heading"><span>04</span><h2 id="penukaran-title">Rencana penukaran QR menjadi wristband.</h2></div>
     <Accordion name="Penukaran wristband" items={wristbandSteps} />
   </section>
-</main>
+</div>
