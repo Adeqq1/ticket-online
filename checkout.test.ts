@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { getConcertById, parseQuantities } from "./concerts.ts";
-import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, orderSubtotal, voucherDiscount } from "./checkout.ts";
+import { getConcertById, parseQuantities } from "./src/lib/concerts.ts";
+import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, orderSubtotal, voucherDiscount } from "./src/lib/checkout.ts";
 
 test("accepts only valid ticket quantities from checkout URL", () => {
   const concert = getConcertById("nusa-malam")!;

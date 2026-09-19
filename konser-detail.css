@@ -7,7 +7,7 @@
 .detail-hero h1 { max-width: 660px; margin: 0 0 20px; font-size: clamp(48px, 7vw, 88px); line-height: .94; letter-spacing: -.07em; }
 .detail-summary { margin: 8px 0; color: color-mix(in srgb, var(--canvas) 80%, transparent); font-size: 17px; }
 .detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: clamp(40px, 7vw, 100px); padding-block: 76px 140px; }
-.detail-main > section:not(.ticket-selection) { max-width: 720px; padding: 36px 0; }
+.detail-main > [role="tabpanel"] { max-width: 720px; padding: 36px 0; }
 .detail-main h2, .cart h2 { margin: 0 0 16px; font-size: clamp(30px, 4vw, 48px); line-height: 1; letter-spacing: -.06em; }
 .detail-main p, .terms-list { color: var(--muted); line-height: 1.6; }
 .tabs { display: flex; gap: 20px; overflow-x: auto; border-bottom: 1px solid var(--line); }

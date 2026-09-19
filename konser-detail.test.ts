@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { concerts, getConcertById } from "./concerts.ts";
-import { cartTotal, changeQuantity, initialState, ticketCount } from "./konser-detail.ts";
+import { concerts, getConcertById } from "./src/lib/concerts.ts";
+import { cartTotal, changeQuantity, initialState, ticketCount } from "./src/lib/cart.ts";
 
 test("resolves unique URL-safe concert IDs", () => {
   expect(new Set(concerts.map((concert) => concert.id)).size).toBe(concerts.length);
