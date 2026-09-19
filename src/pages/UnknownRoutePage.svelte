@@ -1,6 +1,4 @@
-<script lang="ts">
-  let { onHome }: { onHome: () => void } = $props();
-</script>
+<script lang="ts"></script>
 
 <svelte:head>
   <title>Halaman tidak ditemukan | Tiket Online</title>
@@ -13,7 +11,7 @@
     <p class="not-found-kicker">ERROR 404</p>
     <h1 id="not-found-title">Halaman ini tidak ditemukan.</h1>
     <p>Alamat yang kamu buka mungkin salah atau halamannya sudah dipindahkan. Kita bisa mengantarmu kembali ke awal.</p>
-    <button class="button" type="button" onclick={onHome}>Kembali ke Beranda</button>
+    <a class="button" href="/">Kembali ke Beranda</a>
   </div>
   <div class="not-found-number" aria-hidden="true">404</div>
 </section>

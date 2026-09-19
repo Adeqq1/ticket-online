@@ -10,23 +10,7 @@
   import GuidePage from "./pages/GuidePage.svelte";
   import UnknownRoutePage from "./pages/UnknownRoutePage.svelte";
   import { matchRoute } from "./lib/route.ts";
-  import { onMount, tick } from "svelte";
-
-  let route = $state(matchRoute(location.pathname));
-
-  async function navigate(path: string) {
-    history.pushState({}, "", path);
-    route = matchRoute(location.pathname);
-    await tick();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    document.querySelector<HTMLElement>("#konten")?.focus();
-  }
-
-  onMount(() => {
-    const handlePopState = () => { route = matchRoute(location.pathname); };
-    addEventListener("popstate", handlePopState);
-    return () => removeEventListener("popstate", handlePopState);
-  });
+  const route = matchRoute(location.pathname);
 </script>
 
 <SiteHeader page={route.name === "home" ? "home" : route.name === "concerts" ? "concerts" : route.name === "my-tickets" ? "my-tickets" : route.name === "guide" ? "guide" : "other"} />
@@ -38,6 +22,6 @@
   {:else if route.name === "ticket"}<TicketPage id={route.id} />
   {:else if route.name === "my-tickets"}<MyTicketsPage />
   {:else if route.name === "guide"}<GuidePage />
-  {:else}<UnknownRoutePage onHome={() => navigate("/")} />{/if}
+  {:else}<UnknownRoutePage />{/if}
 </main>
 <SiteFooter />
