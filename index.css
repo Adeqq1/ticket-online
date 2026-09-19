@@ -17,12 +17,11 @@ h2 { margin-bottom: 0; max-width: 620px; font-size: clamp(38px, 4.5vw, 62px); li
 .search-control input { min-width: 0; flex: 1; min-height: 48px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--radius); background: transparent; color: var(--ink); }
 .search-control input::placeholder { color: var(--muted); opacity: 1; }
 .sample-note { margin: 22px 0 16px; color: var(--muted); font-size: 13px; }
-.event-list { display: grid; grid-template-columns: 1.3fr .9fr .9fr .9fr; align-items: start; gap: 16px; }
+.event-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 .event-card { min-width: 0; background: var(--surface); border-radius: var(--radius); overflow: hidden; }
 .event-card:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
 .event-card-link { display: block; height: 100%; }
 .event-card:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
-.event-card:first-child { margin-top: -64px; }
 .event-card img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; filter: saturate(.76); }
 .event-card-copy { padding: 16px; }
 .event-card-copy p { margin-bottom: 28px; color: var(--accent); font-size: 12px; font-weight: 700; }
@@ -56,6 +55,7 @@ h2 { margin-bottom: 0; max-width: 620px; font-size: clamp(38px, 4.5vw, 62px); li
 .ticket-bottom { margin-top: 28px; align-items: end; }
 .ticket-code { font-family: "Courier New", monospace; font-size: 19px; letter-spacing: .06em; }
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 1023px) and (min-width: 768px) { .event-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
   .shell { width: min(100% - 32px, 1280px); }
   .nav { gap: 12px; }
@@ -67,9 +67,8 @@ h2 { margin-bottom: 0; max-width: 620px; font-size: clamp(38px, 4.5vw, 62px); li
   .event-section, .journey, .ticket-section { padding-block: 82px; }
   .section-intro, .journey, .payment, .ticket-section { grid-template-columns: 1fr; gap: 30px; }
   .section-intro { margin-bottom: 30px; }
-  .event-list { display: flex; overflow-x: auto; margin-inline: -16px; padding: 64px 16px 8px; scroll-snap-type: x mandatory; }
+  .event-list { display: flex; overflow-x: auto; margin-inline: -16px; padding: 0 16px 8px; scroll-snap-type: x mandatory; }
   .event-card { flex: 0 0 min(78vw, 320px); scroll-snap-align: start; }
-  .event-card:first-child { margin-top: -32px; }
   .journey-lead { position: static; }
   .journey-list li { grid-template-columns: 40px 1fr; gap: 12px; }
   .journey-list p { grid-column: 2; }

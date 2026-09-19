@@ -1,4 +1,4 @@
-import { featuredConcerts, type Concert } from "./concerts.ts";
+import { eventDate, featuredConcerts, type Concert } from "./concerts.ts";
 
 const events = featuredConcerts;
 
@@ -26,7 +26,7 @@ if (typeof document !== "undefined") {
         const link = document.createElement("a");
         link.className = "event-card-link";
         link.href = `/konser/${event.id}`;
-        link.innerHTML = `<img src="${event.image}" alt="Poster contoh konser ${event.artist}" width="900" height="1100" loading="lazy" /><div class="event-card-copy"><p>${event.date}</p><h3>${event.artist}</h3><span>${event.venue}, ${event.city}</span></div>`;
+        link.innerHTML = `<img src="${event.image}" alt="Poster contoh konser ${event.artist}" width="900" height="1100" loading="lazy" /><div class="event-card-copy"><p>${eventDate(event.startsAt)}</p><h3>${event.artist}</h3><span>${event.venue}, ${event.city}</span></div>`;
         article.append(link);
         return article;
       }),

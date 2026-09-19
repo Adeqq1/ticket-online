@@ -1,4 +1,5 @@
-import { formatRupiah, getConcertById, parseQuantities, type Concert, type TicketTier } from "./concerts.ts";
+import { eventDate, formatRupiah, getConcertById, parseQuantities, type Concert, type TicketTier } from "./concerts.ts";
+import { createTicketSnapshot, ticketStorageKey } from "./ticket.ts";
 
 export type CheckoutLine = { tier: TicketTier; quantity: number };
 export type Buyer = { name: string; email: string; phone: string; identity: string };
@@ -66,7 +67,7 @@ if (typeof document !== "undefined") {
         buyer.email = (buyerForm.elements.namedItem("email") as HTMLInputElement).value.trim();
         buyer.phone = (buyerForm.elements.namedItem("phone") as HTMLInputElement).value.trim();
         buyer.identity = (buyerForm.elements.namedItem("identity") as HTMLInputElement).value.trim();
-        if (name === "name") return setError(name, buyer.name.length >= 2, "Masukkan nama lengkap.");
+        if (name === "name") return setError(name, buyer.name.length >= 2 && buyer.name.length <= 80, "Masukkan nama lengkap maksimal 80 karakter.");
         if (name === "email") return setError(name, isValidEmail(buyer.email), "Masukkan alamat email yang valid.");
         if (name === "phone") return setError(name, isValidPhone(buyer.phone), "Masukkan nomor HP yang valid.");
         return setError(name, isValidIdentity(buyer.identity), "Nomor identitas harus terdiri dari 12-20 angka.");
@@ -74,10 +75,11 @@ if (typeof document !== "undefined") {
       function validateBuyer() { return (["name", "email", "phone", "identity"] as const).map(validateField).every(Boolean); }
       buyerForm.addEventListener("submit", (event) => { event.preventDefault(); if (validateBuyer()) setStep(2); else buyerForm.querySelector<HTMLInputElement>("[aria-invalid=\"true\"]")?.focus(); });
       buyerForm.querySelectorAll<HTMLInputElement>("input").forEach((input) => input.addEventListener("blur", () => validateField(input.name as keyof Buyer)));
+      (buyerForm.elements.namedItem("name") as HTMLInputElement).maxLength = 80;
       paymentForm.addEventListener("submit", (event) => { event.preventDefault(); payment = (paymentForm.elements.namedItem("payment") as RadioNodeList).value; const error = document.querySelector<HTMLElement>("#payment-error")!; const fieldset = paymentForm.querySelector("fieldset")!; error.textContent = payment ? "" : "Pilih metode pembayaran terlebih dahulu."; fieldset.setAttribute("aria-invalid", String(!payment)); if (!payment) { paymentForm.querySelector<HTMLInputElement>("input[type=radio]")?.focus(); return; } document.querySelector<HTMLElement>("[data-buyer-name]")!.textContent = buyer.name; document.querySelector<HTMLElement>("[data-buyer-contact]")!.textContent = `${buyer.email} · ${buyer.phone}`; document.querySelector<HTMLElement>("[data-payment]")!.textContent = payment; setStep(3); });
       document.querySelectorAll<HTMLButtonElement>("[data-back], [data-edit]").forEach((button) => button.addEventListener("click", () => setStep(Number(button.dataset.back ?? button.dataset.edit))));
       voucherForm.addEventListener("submit", (event) => { event.preventDefault(); voucher = document.querySelector<HTMLInputElement>("#voucher")!.value; const discount = voucherDiscount(subtotal, voucher); const message = document.querySelector<HTMLElement>("#voucher-message")!; message.textContent = discount ? "Promo HEMAT10 diterapkan." : "Kode promo tidak valid."; message.classList.toggle("is-valid", Boolean(discount)); document.querySelector<HTMLElement>("#discount-row")!.hidden = !discount; document.querySelector<HTMLElement>("#discount-value")!.textContent = `-${formatRupiah.format(discount)}`; document.querySelector<HTMLElement>("#grand-total")!.textContent = formatRupiah.format(total()); });
-      document.querySelector<HTMLButtonElement>("#place-order")!.addEventListener("click", () => { finalTotal = total(); completed = true; voucherForm.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach((control) => { control.disabled = true; }); success.hidden = false; document.querySelector<HTMLElement>("[data-success-email]")!.textContent = buyer.email; document.querySelector<HTMLElement>("#booking-code")!.textContent = `TO-${concert.id.slice(0, 3).toUpperCase()}-${String(finalTotal).slice(-5)}`; document.querySelector<HTMLElement>("#grand-total")!.textContent = formatRupiah.format(finalTotal); setStep(3); });
+      document.querySelector<HTMLButtonElement>("#place-order")!.addEventListener("click", () => { finalTotal = total(); completed = true; voucherForm.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach((control) => { control.disabled = true; }); success.hidden = false; document.querySelector<HTMLElement>("[data-success-email]")!.textContent = buyer.email; const id = crypto.randomUUID(); const reference = `TO-${crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`; document.querySelector<HTMLElement>("#booking-code")!.textContent = reference; document.querySelector<HTMLElement>("#grand-total")!.textContent = formatRupiah.format(finalTotal); try { sessionStorage.setItem(ticketStorageKey(id), JSON.stringify(createTicketSnapshot(id, reference, buyer.name, concert, lines))); const link = Object.assign(document.createElement("a"), { className: "button", href: `/tiket/${id}`, textContent: "Lihat e-ticket" }); success.append(link); } catch { const message = document.createElement("p"); message.className = "success-note"; message.textContent = "E-ticket demo tidak dapat disimpan di browser ini."; success.append(message); } setStep(3); });
     }
   }
 }

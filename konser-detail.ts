@@ -1,4 +1,4 @@
-import { formatRupiah, getConcertById, parseQuantities, type Concert, type TicketTier } from "./concerts.ts";
+import { eventDate, formatRupiah, getConcertById, parseQuantities, type Concert, type TicketTier } from "./concerts.ts";
 
 type Tab = "description" | "lineup" | "location" | "terms";
 export type DetailState = { activeTab: Tab; selectedZoneId: string | null; quantities: Record<string, number> };

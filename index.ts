@@ -2,6 +2,7 @@ import index from "./index.html";
 import konser from "./konser.html";
 import konserDetail from "./konser-detail.html";
 import checkout from "./checkout.html";
+import ticket from "./ticket.html";
 
 const server = Bun.serve({
   routes: {
@@ -9,6 +10,7 @@ const server = Bun.serve({
     "/konser": konser,
     "/konser/:id": konserDetail,
     "/checkout/:id": checkout,
+    "/tiket/:id": ticket,
   },
   development: {
     hmr: true,
