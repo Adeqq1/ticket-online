@@ -5,6 +5,7 @@ export type Route =
   | { name: "checkout"; id: string }
   | { name: "ticket"; id: string }
   | { name: "my-tickets" }
+  | { name: "guide" }
   | { name: "not-found" };
 
 export function matchRoute(pathname: string): Route {
@@ -12,6 +13,7 @@ export function matchRoute(pathname: string): Route {
   if (path === "/") return { name: "home" };
   if (path === "/konser") return { name: "concerts" };
   if (path === "/tiket-saya") return { name: "my-tickets" };
+  if (path === "/panduan") return { name: "guide" };
   for (const [prefix, name] of [["/konser/", "concert-detail"], ["/checkout/", "checkout"], ["/tiket/", "ticket"]] as const) {
     if (!path.startsWith(prefix)) continue;
     const encoded = path.slice(prefix.length);
