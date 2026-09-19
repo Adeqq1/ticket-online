@@ -39,3 +39,12 @@ export const concerts: Concert[] = [
 export const featuredConcerts = concerts.slice(0, 4);
 export const formatRupiah = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 export function getConcertById(id: string | undefined) { return concerts.find((concert) => concert.id === id); }
+export function parseQuantities(concert: Concert, params: URLSearchParams) {
+  return Object.fromEntries(concert.ticketTiers.flatMap((tier) => {
+    const value = params.get(tier.id);
+    if (!value || !/^\d+$/.test(value)) return [];
+    const quantity = Number(value);
+    const limit = Math.min(tier.stock, tier.maxPerOrder);
+    return quantity > 0 && quantity <= limit ? [[tier.id, quantity]] : [];
+  }));
+}
