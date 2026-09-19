@@ -27,7 +27,7 @@
   async function completeOrder() {
     if (!concert) return;
     completed = true; ticketId = crypto.randomUUID(); reference = `TO-${crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
-    try { sessionStorage.setItem(ticketStorageKey(ticketId), JSON.stringify(createTicketSnapshot(ticketId, reference, buyer.name, concert, lines))); }
+    try { localStorage.setItem(ticketStorageKey(ticketId), JSON.stringify(createTicketSnapshot(ticketId, reference, buyer.name, concert, lines))); }
     catch { storageFailed = true; }
     await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
   }
