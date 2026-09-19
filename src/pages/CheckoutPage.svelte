@@ -3,7 +3,7 @@
   import { eventDate, formatRupiah, getConcertById } from "../lib/concerts.ts";
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, orderSubtotal, voucherDiscount, type Buyer } from "../lib/checkout.ts";
-  import { createTicketSnapshot, ticketStorageKey } from "../lib/tickets.ts";
+  import { createTicketSnapshot, saveTicketSnapshot } from "../lib/tickets.ts";
   let { id }: { id: string } = $props();
   const concert = $derived(getConcertById(id));
   const lines = $derived(concert ? checkoutLines(concert, new URLSearchParams(location.search)) : []);
@@ -27,8 +27,7 @@
   async function completeOrder() {
     if (!concert) return;
     completed = true; ticketId = crypto.randomUUID(); reference = `TO-${crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
-    try { localStorage.setItem(ticketStorageKey(ticketId), JSON.stringify(createTicketSnapshot(ticketId, reference, buyer.name, concert, lines))); }
-    catch { storageFailed = true; }
+    storageFailed = !saveTicketSnapshot(createTicketSnapshot(ticketId, reference, buyer.name, concert, lines));
     await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
   }
 </script>

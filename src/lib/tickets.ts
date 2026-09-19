@@ -7,6 +7,11 @@ export function ticketStorageKey(id: string) { return `ticket-online:ticket:${id
 const ticketKeyPrefix = "ticket-online:ticket:";
 function getStorage(name: "localStorage" | "sessionStorage") { try { return globalThis[name]; } catch { return null; } }
 function readStorage(storage: Storage | null, key: string) { try { return storage?.getItem(key) ?? null; } catch { return null; } }
+export function saveTicketSnapshot(ticket: TicketSnapshot, local = getStorage("localStorage"), session = getStorage("sessionStorage")) {
+  const value = JSON.stringify(ticket);
+  try { local?.setItem(ticketStorageKey(ticket.id), value); return true; } catch { }
+  try { session?.setItem(ticketStorageKey(ticket.id), value); return true; } catch { return false; }
+}
 export function loadTicketSnapshot(id: string) {
   const key = ticketStorageKey(id);
   const localStorage = getStorage("localStorage");
@@ -18,16 +23,20 @@ export function loadTicketSnapshot(id: string) {
   try { localStorage?.setItem(key, JSON.stringify(session)); } catch { /* localStorage may be unavailable */ }
   return session;
 }
-export function listTicketSnapshots() {
+export function listTicketSnapshots(storages = [getStorage("localStorage"), getStorage("sessionStorage")]) {
   const tickets = new Map<string, TicketSnapshot>();
-  for (const storage of [getStorage("localStorage"), getStorage("sessionStorage")]) {
+  for (const [storageIndex, storage] of storages.entries()) {
     if (!storage) continue;
     try {
       for (let index = 0; index < storage.length; index += 1) {
         const key = storage.key(index);
         if (!key?.startsWith(ticketKeyPrefix)) continue;
         const ticket = parseTicketSnapshot(storage.getItem(key));
-        if (ticket?.id === key.slice(ticketKeyPrefix.length)) tickets.set(ticket.id, ticket);
+        if (ticket?.id !== key.slice(ticketKeyPrefix.length)) continue;
+        if (!tickets.has(ticket.id)) tickets.set(ticket.id, ticket);
+        if (storageIndex === 1 && !readStorage(storages[0] ?? null, key)) {
+          try { storages[0]?.setItem(key, JSON.stringify(ticket)); } catch { /* migration is best effort */ }
+        }
       }
     } catch { /* storage access can fail in private browsing */ }
   }
