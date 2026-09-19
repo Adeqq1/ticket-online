@@ -1,5 +1,3 @@
-import "./index.css";
-
 type Event = {
   artist: string;
   city: string;

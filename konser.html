@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Jelajahi konser berdasarkan genre, kota, dan anggaran di Tiket Online." />
+    <title>Konser | Tiket Online</title>
+    <link rel="preconnect" href="https://picsum.photos" />
+    <link rel="stylesheet" href="./shared.css" />
+    <link rel="stylesheet" href="./konser.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#konten">Lewati ke konten</a>
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Navigasi utama">
+        <a class="wordmark" href="/" aria-label="Tiket Online, beranda"><span class="wordmark-mark" aria-hidden="true">TO</span><span>Tiket Online</span></a>
+        <div class="nav-links"><a href="/konser" aria-current="page">Konser</a><a href="/#cara-kerja">Cara kerja</a><a href="/#pembayaran">Pembayaran</a></div>
+        <a class="button button-small" href="#filter">Filter konser</a>
+      </nav>
+    </header>
+
+    <main class="catalog" id="konten">
+      <section class="catalog-intro shell" aria-labelledby="catalog-title">
+        <p class="eyebrow">KATALOG KONSER</p>
+        <h1 id="catalog-title">Cari panggung yang ingin kamu datangi.</h1>
+        <p>Jelajahi contoh konser berdasarkan genre, kota, dan anggaran tiketmu.</p>
+      </section>
+
+      <section class="catalog-content shell" id="filter" aria-labelledby="filter-title">
+        <form class="filters" id="concert-filters">
+          <h2 id="filter-title">Saring konser</h2>
+          <div class="filter-search">
+            <label for="concert-query">Cari konser</label>
+            <input id="concert-query" name="query" type="search" autocomplete="off" placeholder="Artis, venue, atau kota" />
+          </div>
+          <fieldset class="genre-fieldset">
+            <legend>Genre</legend>
+            <div class="genre-chips">
+              <label><input type="checkbox" name="genre" value="Rock" /><span>Rock</span></label>
+              <label><input type="checkbox" name="genre" value="Pop" /><span>Pop</span></label>
+              <label><input type="checkbox" name="genre" value="Indie" /><span>Indie</span></label>
+            </div>
+          </fieldset>
+          <div class="filter-city">
+            <label for="concert-city">Kota</label>
+            <select id="concert-city" name="city">
+              <option value="">Semua kota</option>
+              <option value="Jakarta">Jakarta</option>
+              <option value="Bandung">Bandung</option>
+              <option value="Yogyakarta">Yogyakarta</option>
+              <option value="Surabaya">Surabaya</option>
+            </select>
+          </div>
+          <div class="filter-price">
+            <label for="concert-price">Anggaran maksimum</label>
+            <div><output id="price-output" for="concert-price">Sampai Rp1.500.000</output><input id="concert-price" name="price" type="range" min="100000" max="1500000" value="1500000" step="50000" /></div>
+          </div>
+          <button class="text-button reset-filters" id="reset-filters" type="button">Reset filter</button>
+        </form>
+
+        <div class="results">
+          <div class="results-topline"><p class="sample-note">Data konser di bawah adalah contoh.</p><p class="results-count" id="results-count" aria-live="polite"></p></div>
+          <div class="concert-grid" id="concert-grid"></div>
+          <section class="catalog-empty" id="catalog-empty" hidden aria-labelledby="empty-title">
+            <h2 id="empty-title">Belum ada konser yang cocok.</h2>
+            <p>Ubah kata kunci atau longgarkan filter genre, kota, dan anggaranmu.</p>
+            <button class="button" id="empty-reset" type="button">Reset filter</button>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer"><div class="shell footer-inner"><a class="wordmark" href="/"><span class="wordmark-mark" aria-hidden="true">TO</span><span>Tiket Online</span></a><p>Untuk malam yang layak kamu datangi.</p><div class="footer-links"><a href="/konser">Konser</a><a href="/#pembayaran">Pembayaran</a><a href="mailto:halo@ticket-online.example">Hubungi kami</a></div></div></footer>
+    <script type="module" src="./konser.ts"></script>
+  </body>
+</html>
