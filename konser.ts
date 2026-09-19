@@ -81,7 +81,7 @@ if (typeof document !== "undefined") {
     if (!grid || !count || !empty) return;
     const matches = filterConcerts(currentFilters());
     grid.replaceChildren(...matches.map(createCard));
-    count.textContent = `${matches.length} konser ditemukan`;
+    count.textContent = matches.length ? `${matches.length} konser ditemukan` : "Tidak ada konser ditemukan";
     empty.hidden = matches.length !== 0;
   }
 
@@ -93,11 +93,14 @@ if (typeof document !== "undefined") {
     query?.focus();
   }
 
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    render();
+  });
   form?.addEventListener("input", () => {
     if (output && price) output.value = `Sampai ${rupiah.format(Number(price.value))}`;
     render();
   });
-  form?.addEventListener("change", render);
   resetButtons.forEach((button) => button.addEventListener("click", reset));
   render();
 }

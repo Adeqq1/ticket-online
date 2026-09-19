@@ -16,6 +16,7 @@ img { display: block; max-width: 100%; }
 .wordmark-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius); background: var(--ink); color: var(--canvas); font-size: 10px; letter-spacing: -0.06em; }
 .nav-links { display: flex; gap: 24px; margin-left: auto; font-size: 14px; color: var(--muted); }
 .nav-links a:hover, .footer-links a:hover, .text-button:hover { color: var(--accent); }
+.text-button { border: 0; padding: 0; background: transparent; color: var(--accent); font-weight: 700; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 20px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font-weight: 700; white-space: nowrap; transition: transform 180ms ease, background 180ms ease; }
 .button:hover { background: var(--ink); border-color: var(--ink); }
 .button:active { transform: translateY(1px) scale(.98); }
