@@ -19,6 +19,8 @@ h2 { margin-bottom: 0; max-width: 620px; font-size: clamp(38px, 4.5vw, 62px); li
 .sample-note { margin: 22px 0 16px; color: var(--muted); font-size: 13px; }
 .event-list { display: grid; grid-template-columns: 1.3fr .9fr .9fr .9fr; align-items: start; gap: 16px; }
 .event-card { min-width: 0; background: var(--surface); border-radius: var(--radius); overflow: hidden; }
+.event-card-link, .concert-card-link { display: block; height: 100%; }
+.event-card:focus-within, .concert-card:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
 .event-card:first-child { margin-top: -64px; }
 .event-card img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; filter: saturate(.76); }
 .event-card-copy { padding: 16px; }

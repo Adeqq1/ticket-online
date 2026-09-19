@@ -1,26 +1,6 @@
-export type Concert = {
-  artist: string;
-  city: string;
-  venue: string;
-  date: string;
-  genre: "Rock" | "Pop" | "Indie";
-  price: number;
-  status: "Early Bird" | "Presale" | "Sold Out";
-  image: string;
-};
+import { concerts, formatRupiah, type Concert } from "./concerts.ts";
 
 export type ConcertFilters = { query: string; genres: string[]; city: string; maxPrice: number };
-
-const concerts: Concert[] = [
-  { artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", date: "Sabtu, 24 Agustus", genre: "Indie", price: 225000, status: "Early Bird", image: "https://picsum.photos/seed/nusa-malam-jakarta/900/1100" },
-  { artist: "Ruang Senja", city: "Bandung", venue: "Gudang Bunyi", date: "Jumat, 30 Agustus", genre: "Rock", price: 175000, status: "Presale", image: "https://picsum.photos/seed/ruang-senja-bandung/900/1100" },
-  { artist: "Dini Hari", city: "Yogyakarta", venue: "Balai Irama", date: "Minggu, 8 September", genre: "Pop", price: 350000, status: "Presale", image: "https://picsum.photos/seed/dini-hari-yogyakarta/900/1100" },
-  { artist: "Laut Kaca", city: "Surabaya", venue: "Panggung Timur", date: "Sabtu, 14 September", genre: "Indie", price: 275000, status: "Sold Out", image: "https://picsum.photos/seed/laut-kaca-surabaya/900/1100" },
-  { artist: "Ritme Kota", city: "Jakarta", venue: "Aula Tengah", date: "Sabtu, 21 September", genre: "Pop", price: 450000, status: "Early Bird", image: "https://picsum.photos/seed/ritme-kota-jakarta/900/1100" },
-  { artist: "Bara Utara", city: "Bandung", venue: "Pabrik Nada", date: "Jumat, 27 September", genre: "Rock", price: 300000, status: "Presale", image: "https://picsum.photos/seed/bara-utara-bandung/900/1100" },
-  { artist: "Kamar Biru", city: "Yogyakarta", venue: "Teras Suara", date: "Sabtu, 5 Oktober", genre: "Indie", price: 150000, status: "Early Bird", image: "https://picsum.photos/seed/kamar-biru-yogyakarta/900/1100" },
-  { artist: "Gelombang Pagi", city: "Surabaya", venue: "Titik Temu", date: "Minggu, 13 Oktober", genre: "Pop", price: 500000, status: "Presale", image: "https://picsum.photos/seed/gelombang-pagi-surabaya/900/1100" },
-];
 
 export function filterConcerts(filters: ConcertFilters, source = concerts): Concert[] {
   const query = filters.query.trim().toLocaleLowerCase("id-ID");
@@ -29,8 +9,6 @@ export function filterConcerts(filters: ConcertFilters, source = concerts): Conc
     return matchesQuery && (!filters.genres.length || filters.genres.includes(concert.genre)) && (!filters.city || concert.city === filters.city) && concert.price <= filters.maxPrice;
   });
 }
-
-const rupiah = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 
 if (typeof document !== "undefined") {
   const form = document.querySelector<HTMLFormElement>("#concert-filters");
@@ -50,6 +28,9 @@ if (typeof document !== "undefined") {
   function createCard(concert: Concert) {
     const article = document.createElement("article");
     article.className = `concert-card${concert.status === "Sold Out" ? " is-sold-out" : ""}`;
+    const link = document.createElement("a");
+    link.className = "concert-card-link";
+    link.href = `/konser/${concert.id}`;
     const image = document.createElement("img");
     image.src = concert.image;
     image.alt = `Poster contoh konser ${concert.artist}`;
@@ -63,7 +44,7 @@ if (typeof document !== "undefined") {
     body.className = "concert-card-body";
     const meta = document.createElement("p");
     meta.className = "concert-meta";
-    meta.textContent = `${concert.date} · ${concert.genre}`;
+    meta.textContent = `${concert.date}, ${concert.genre}`;
     const title = document.createElement("h2");
     title.textContent = concert.artist;
     const venue = document.createElement("p");
@@ -71,9 +52,10 @@ if (typeof document !== "undefined") {
     venue.textContent = `${concert.venue}, ${concert.city}`;
     const priceText = document.createElement("p");
     priceText.className = "concert-price";
-    priceText.textContent = `Mulai ${rupiah.format(concert.price)}`;
+    priceText.textContent = `Mulai ${formatRupiah.format(concert.price)}`;
     body.append(meta, title, venue, priceText);
-    article.append(image, status, body);
+    link.append(image, status, body);
+    article.append(link);
     return article;
   }
 
@@ -88,7 +70,7 @@ if (typeof document !== "undefined") {
   function reset() {
     form?.reset();
     if (price) price.value = price.max;
-    if (output && price) output.value = `Sampai ${rupiah.format(Number(price.value))}`;
+    if (output && price) output.value = `Sampai ${formatRupiah.format(Number(price.value))}`;
     render();
     query?.focus();
   }
@@ -98,7 +80,7 @@ if (typeof document !== "undefined") {
     render();
   });
   form?.addEventListener("input", () => {
-    if (output && price) output.value = `Sampai ${rupiah.format(Number(price.value))}`;
+    if (output && price) output.value = `Sampai ${formatRupiah.format(Number(price.value))}`;
     render();
   });
   resetButtons.forEach((button) => button.addEventListener("click", reset));
