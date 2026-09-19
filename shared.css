@@ -1,5 +1,5 @@
-:root { color-scheme: light dark; --canvas: #f3f4f0; --surface: #e6e8e1; --ink: #17211f; --muted: #56615e; --line: #bdc5bd; --accent: #1358d8; --accent-ink: #f5f8ff; --radius: 8px; font-family: Arial, Helvetica, sans-serif; background: var(--canvas); color: var(--ink); }
-@media (prefers-color-scheme: dark) { :root { --canvas: #151a19; --surface: #202826; --ink: #edf1e9; --muted: #bcc7c0; --line: #4b5752; --accent: #769dff; --accent-ink: #101a35; } }
+:root { color-scheme: light dark; --canvas: #f3f4f0; --surface: #e6e8e1; --ink: #17211f; --muted: #56615e; --line: #bdc5bd; --accent: #1358d8; --accent-ink: #f5f8ff; --danger: #8f2f22; --radius: 8px; font-family: Arial, Helvetica, sans-serif; background: var(--canvas); color: var(--ink); }
+@media (prefers-color-scheme: dark) { :root { --canvas: #151a19; --surface: #202826; --ink: #edf1e9; --muted: #bcc7c0; --line: #4b5752; --accent: #769dff; --accent-ink: #101a35; --danger: #ff9585; } }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; background: var(--canvas); }
