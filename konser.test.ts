@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { filterConcerts } from "./konser.ts";
+import { filterConcerts } from "./src/lib/filters.ts";
 
 test("filters by query", () => {
   expect(filterConcerts({ query: "ruang", genres: [], city: "", maxPrice: 1_500_000 }).map(({ artist }) => artist)).toEqual(["Nusa Malam", "Ruang Senja"]);

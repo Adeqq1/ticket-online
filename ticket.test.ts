@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { eventDate, getConcertById } from "./concerts.ts";
-import { createTicketSnapshot, parseTicketSnapshot, ticketAllocation, timeRemaining } from "./ticket.ts";
+import { eventDate, getConcertById } from "./src/lib/concerts.ts";
+import { createTicketSnapshot, parseTicketSnapshot, ticketAllocation, timeRemaining } from "./src/lib/tickets.ts";
 
 test("creates minimal ticket snapshot with stable allocations", () => {
   const concert = getConcertById("nusa-malam")!;
