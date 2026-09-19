@@ -36,8 +36,6 @@ if (typeof document !== "undefined") {
     const checkout = document.querySelector<HTMLButtonElement>("#checkout");
     const mobileCart = document.querySelector<HTMLDivElement>("#mobile-cart");
     const mobileTotal = document.querySelector<HTMLSpanElement>("#mobile-total");
-    const dialog = document.querySelector<HTMLDialogElement>("#checkout-dialog");
-    const dialogSummary = document.querySelector<HTMLParagraphElement>("#dialog-summary");
 
     cart?.setAttribute("hidden", "");
     document.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach((button) => {
@@ -83,7 +81,6 @@ if (typeof document !== "undefined") {
       cart?.toggleAttribute("hidden", count === 0);
       if (mobileCart) mobileCart.hidden = count === 0;
       if (mobileTotal) mobileTotal.textContent = `${count} tiket, ${formatRupiah.format(total)}`;
-      if (dialogSummary) dialogSummary.textContent = `${count} tiket dengan total ${formatRupiah.format(total)}.`;
     }
     function render() { renderTiers(); renderCart(); }
     function activateTab(tab: HTMLButtonElement) {
@@ -91,8 +88,12 @@ if (typeof document !== "undefined") {
     }
     document.querySelectorAll<HTMLButtonElement>('[role="tab"]').forEach((tab, index, tabs) => { tab.addEventListener("click", () => activateTab(tab)); tab.addEventListener("keydown", (event) => { const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : index; if (next !== index || event.key === "Home" || event.key === "End") { event.preventDefault(); tabs[next]?.focus(); activateTab(tabs[next]!); } }); });
     document.addEventListener("click", (event) => { const target = event.target as HTMLElement; const zone = target.closest<HTMLButtonElement>("[data-zone]"); if (zone && zone.getAttribute("aria-disabled") !== "true") { state = { ...state, selectedZoneId: zone.dataset.zone ?? null }; updateTiers(); } const control = target.closest<HTMLButtonElement>("[data-tier]"); if (control) { state = changeQuantity(detailConcert, state, control.dataset.tier ?? "", Number(control.dataset.delta) as -1 | 1); updateTiers(); renderCart(); } });
-    [checkout, document.querySelector<HTMLButtonElement>("#mobile-checkout")].forEach((button) => button?.addEventListener("click", () => dialog?.showModal()));
-    document.querySelector<HTMLButtonElement>("#close-dialog")?.addEventListener("click", () => dialog?.close());
+    function goToCheckout() {
+      const params = new URLSearchParams();
+      Object.entries(state.quantities).forEach(([tierId, quantity]) => { if (quantity > 0) params.set(tierId, String(quantity)); });
+      location.assign(`/checkout/${detailConcert.id}?${params}`);
+    }
+    [checkout, document.querySelector<HTMLButtonElement>("#mobile-checkout")].forEach((button) => button?.addEventListener("click", goToCheckout));
     render();
   }
 }
