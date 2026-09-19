@@ -1,6 +1,16 @@
 import { expect, test } from "bun:test";
 import { eventDate, getConcertById } from "./src/lib/concerts.ts";
-import { createTicketSnapshot, parseTicketSnapshot, ticketAllocation, timeRemaining } from "./src/lib/tickets.ts";
+import { createTicketSnapshot, listTicketSnapshots, parseTicketSnapshot, saveTicketSnapshot, ticketAllocation, timeRemaining } from "./src/lib/tickets.ts";
+
+class FakeStorage implements Storage {
+  private values = new Map<string, string>();
+  get length() { return this.values.size; }
+  clear() { this.values.clear(); }
+  getItem(key: string) { return this.values.get(key) ?? null; }
+  key(index: number) { return [...this.values.keys()][index] ?? null; }
+  removeItem(key: string) { this.values.delete(key); }
+  setItem(key: string, value: string) { this.values.set(key, value); }
+}
 
 test("creates minimal ticket snapshot with stable allocations", () => {
   const concert = getConcertById("nusa-malam")!;
@@ -25,4 +35,30 @@ test("validates stored snapshots and calculates countdown boundaries", () => {
   expect(parseTicketSnapshot(JSON.stringify({ ...snapshot, lines: [{ ...snapshot.lines[0], quantity: 7 }] }))).toBeNull();
   expect(timeRemaining("2027-01-02T00:00:00Z", Date.parse("2027-01-01T00:00:00Z"))).toMatchObject({ days: 1, hours: 0, started: false });
   expect(timeRemaining("2027-01-01T00:00:00Z", Date.parse("2027-01-01T00:00:00Z")).started).toBe(true);
+});
+
+test("falls back to session storage when local storage cannot write", () => {
+  const concert = getConcertById("nusa-malam")!;
+  const snapshot = createTicketSnapshot("fallback-ticket", "TO-ABCDEFGHIJ", "Ayu Pertiwi", concert, [{ tier: concert.ticketTiers[0]!, quantity: 1 }]);
+  const local = new FakeStorage();
+  const session = new FakeStorage();
+  const blockedLocal = { ...local, setItem() { throw new Error("quota"); } } as unknown as Storage;
+  expect(saveTicketSnapshot(snapshot, blockedLocal, session)).toBe(true);
+  expect(session.getItem("ticket-online:ticket:fallback-ticket")).toBe(JSON.stringify(snapshot));
+});
+
+test("lists and migrates valid session tickets without overwriting local tickets", () => {
+  const concert = getConcertById("nusa-malam")!;
+  const sessionTicket = createTicketSnapshot("session-ticket", "TO-ABCDEFGHIJ", "Ayu Pertiwi", concert, [{ tier: concert.ticketTiers[0]!, quantity: 1 }]);
+  const local = new FakeStorage();
+  const session = new FakeStorage();
+  session.setItem("ticket-online:ticket:session-ticket", JSON.stringify(sessionTicket));
+  expect(listTicketSnapshots([local, session]).map((ticket) => ticket.id)).toEqual(["session-ticket"]);
+  expect(local.getItem("ticket-online:ticket:session-ticket")).toBe(JSON.stringify(sessionTicket));
+
+  const localTicket = createTicketSnapshot("local-ticket", "TO-ZYXWVUTSRQ", "Ayu Pertiwi", concert, [{ tier: concert.ticketTiers[0]!, quantity: 1 }]);
+  local.setItem("ticket-online:ticket:local-ticket", JSON.stringify(localTicket));
+  const newerSessionTicket = { ...localTicket, attendeeName: "Session copy" };
+  session.setItem("ticket-online:ticket:local-ticket", JSON.stringify(newerSessionTicket));
+  expect(listTicketSnapshots([local, session]).find((ticket) => ticket.id === "local-ticket")?.attendeeName).toBe("Ayu Pertiwi");
 });
