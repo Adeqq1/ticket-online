@@ -32,7 +32,9 @@
 .ticket-tier p { margin: 0 0 12px; font-size: 14px; }
 .tier-controls { min-width: 146px; text-align: right; }
 .stock { display: block; min-height: 20px; margin-bottom: 12px; color: var(--muted); font-size: 13px; font-weight: 700; }
-.low-stock { color: #a23c2b; }.sold-out { color: #8e3126; }
+.low-stock, .sold-out { color: var(--danger); }
+.zone.is-sold-out { color: var(--muted); opacity: .7; }
+.zone.is-sold-out small::after { content: " · Habis"; color: var(--danger); font-weight: 700; }
 .tier-controls > div { display: flex; justify-content: end; align-items: center; gap: 9px; }
 .tier-controls button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: var(--radius); background: transparent; color: var(--ink); font-size: 18px; }.tier-controls button:disabled { opacity: .45; cursor: not-allowed; }
 .tier-controls output { min-width: 20px; font-weight: 700; }

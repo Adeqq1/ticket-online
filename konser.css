@@ -25,6 +25,8 @@
 .results-count { color: var(--ink); font-weight: 700; text-align: right; }
 .concert-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .concert-card { position: relative; min-width: 0; overflow: hidden; border-radius: var(--radius); background: var(--surface); transition: transform 180ms ease; }
+.concert-card-link { display: block; height: 100%; }
+.concert-card:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
 .concert-card:hover { transform: translateY(-3px); }
 .concert-card img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; filter: saturate(.78) contrast(1.04); }
 .concert-card.is-sold-out img { filter: grayscale(1) contrast(.9); }
