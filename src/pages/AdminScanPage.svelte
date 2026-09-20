@@ -1,7 +1,17 @@
 <script lang="ts">
   import { demoTickets, scanTicket, type ScanStatus, type ScanTicket } from "../lib/scanner.ts";
+  import { listTicketSnapshots } from "../lib/tickets.ts";
 
-  let tickets = $state<ScanTicket[]>(demoTickets.map((ticket) => ({ ...ticket })));
+  const activeGate = "Gate A";
+  const checkoutTickets = listTicketSnapshots().map((ticket): ScanTicket => ({
+    id: ticket.reference,
+    attendee: ticket.attendeeName,
+    ticketType: ticket.lines.map((line) => `${line.quantity}x ${line.tierName}`).join(", "),
+    event: ticket.concert.artist,
+    gate: [...new Set(ticket.lines.map((line) => line.gate))].join(" / "),
+    isUsed: false,
+  }));
+  let tickets = $state<ScanTicket[]>([...checkoutTickets, ...demoTickets.map((ticket) => ({ ...ticket }))]);
   let code = $state("");
   let status = $state<ScanStatus>("idle");
   let resultTicket = $state<ScanTicket | null>(null);
@@ -13,17 +23,13 @@
     valid: { label: "Valid", title: "Gate Masuk Terbuka", detail: "Tiket terverifikasi. Persilakan pengunjung masuk ke area event." },
     used: { label: "Ditolak", title: "Tiket Sudah Digunakan", detail: "Tiket ini sudah tercatat masuk dan tidak bisa digunakan kembali." },
     "not-found": { label: "Ditolak", title: "Kode Tidak Ditemukan", detail: "Periksa kembali kode tiket atau minta pengunjung menunjukkan e-ticket yang benar." },
+    "wrong-gate": { label: "Gate salah", title: "Arahkan ke gate yang benar", detail: "Tiket ini tidak berlaku di gate aktif. Arahkan pengunjung ke gate yang tertera pada tiket." },
   };
 
   function handleScan(value = code) {
     const trimmed = value.trim();
-    if (!trimmed) {
-      status = "not-found";
-      resultTicket = null;
-      lastScan = "Input kosong";
-      return;
-    }
-    const result = scanTicket(tickets, trimmed);
+    if (!trimmed) return;
+    const result = scanTicket(tickets, trimmed, activeGate);
     code = trimmed.toUpperCase();
     status = result.status;
     resultTicket = result.ticket;
@@ -32,7 +38,7 @@
   }
 
   function resetDemo() {
-    tickets = demoTickets.map((ticket) => ({ ...ticket }));
+    tickets = [...checkoutTickets, ...demoTickets.map((ticket) => ({ ...ticket }))];
     code = "";
     status = "idle";
     resultTicket = null;
@@ -47,12 +53,13 @@
 </svelte:head>
 
 <div class="scan-shell">
+  <a class="skip-link" href="#scan-content">Lewati ke scanner</a>
   <header class="scan-topbar">
     <a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a>
-    <div class="scan-live"><span aria-hidden="true"></span> Sistem aktif <i>•</i> Gate A</div>
+    <div class="scan-live"><span class="scan-live-dot" aria-hidden="true"></span><span class="scan-live-state">Sistem aktif <i>•</i></span><strong>{activeGate}</strong></div>
   </header>
 
-  <main class="scan-content">
+  <div id="scan-content" class="scan-content" tabindex="-1">
     <section class="scan-heading" aria-labelledby="scan-title">
       <div>
         <p class="scan-kicker">OPERASIONAL EVENT <span>•</span> CHECK-IN DEMO</p>
@@ -68,15 +75,16 @@
           <div class="panel-topline"><span class="panel-index">01</span><h2>Masukkan kode tiket</h2><span class="keyboard-hint">Enter ↵</span></div>
           <form class="scan-form" onsubmit={(event) => { event.preventDefault(); handleScan(); }}>
             <label for="ticket-code">Kode reference tiket</label>
-            <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:value={code} placeholder="Contoh: TO-ALPHA-2027" autocomplete="off" spellcheck="false" /><button class="scan-submit" type="submit">Verifikasi <span aria-hidden="true">↗</span></button></div>
-            <p class="input-note">Kode demo tidak case-sensitive. Pastikan kode sesuai dengan e-ticket pengunjung.</p>
+            <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:value={code} placeholder="Contoh: TO-ALPHA-2027" autocomplete="off" spellcheck="false" required aria-describedby="ticket-code-note" /><button class="scan-submit" type="submit">Verifikasi <span aria-hidden="true">↗</span></button></div>
+            <p id="ticket-code-note" class="input-note">Kode demo tidak case-sensitive. Pastikan kode sesuai dengan e-ticket pengunjung.</p>
           </form>
-          <div class="preset-block"><div class="preset-heading"><span>Atau coba tiket demo</span><span>{tickets.filter((ticket) => !ticket.isUsed).length} tersedia</span></div><div class="preset-list">{#each tickets as ticket}<button class:already-used={ticket.isUsed} type="button" onclick={() => { code = ticket.id; handleScan(ticket.id); }}><span class="preset-status" aria-hidden="true"></span><span><b>{ticket.id}</b><small>{ticket.attendee} · {ticket.ticketType}</small></span><span class="preset-arrow" aria-hidden="true">↗</span></button>{/each}</div></div>
+          <div class="preset-block"><div class="preset-heading"><span>Atau coba tiket demo</span><span>{tickets.filter((ticket) => !ticket.isUsed).length} tersedia</span></div><div class="preset-list">{#each tickets as ticket}<button class:already-used={ticket.isUsed} type="button" onclick={() => { code = ticket.id; handleScan(ticket.id); }}><span class="preset-status" aria-hidden="true"></span><span><b>{ticket.id}</b><small>{ticket.attendee} · {ticket.ticketType} · {ticket.isUsed ? "Sudah digunakan" : "Tersedia"}</small></span><span class="preset-arrow" aria-hidden="true">↗</span></button>{/each}</div></div>
         </div>
         <div class="session-strip"><div><span class="strip-label">Scan sesi ini</span><strong>{String(scanCount).padStart(2, "0")}</strong></div><div><span class="strip-label">Scan terakhir</span><strong>{lastScan}</strong></div><button type="button" onclick={resetDemo}>Reset demo</button></div>
       </div>
 
-      <section class:result-valid={status === "valid"} class:result-denied={status === "used" || status === "not-found"} class="result-panel" aria-live="polite" aria-atomic="true">
+      <section class:result-valid={status === "valid"} class:result-denied={status === "used" || status === "not-found" || status === "wrong-gate"} class="result-panel" aria-live="polite" aria-atomic="true">
+        <span class="visually-hidden">Percobaan verifikasi {scanCount}</span>
         <div class="result-topline"><span class="panel-index">02</span><span class="result-label">HASIL VERIFIKASI</span><span class="result-signal" aria-hidden="true"></span></div>
         <div class="result-main">
           {#if status === "idle"}<div class="result-icon idle-icon" aria-hidden="true">⌁</div>
@@ -92,5 +100,5 @@
     </section>
 
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Simulasi frontend · Tidak terhubung ke sistem produksi</span></footer>
-  </main>
+   </div>
 </div>
