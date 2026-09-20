@@ -15,11 +15,11 @@
   const refundRules = [
     { question: "Apakah tiket bisa dibatalkan atau di-refund?", answer: "Untuk versi produksi, refund dan pembatalan mengikuti kebijakan masing-masing acara. Sebelum membayar, periksa ketentuan refund pada detail konser. Pada versi simulasi ini belum ada transaksi atau proses refund nyata." },
     { question: "Bagaimana jika acara dibatalkan penyelenggara?", answer: "Jika acara dibatalkan atau dijadwalkan ulang, penyelenggara akan menentukan opsi pengembalian dana atau penggunaan tiket. Informasi resmi akan dikirim melalui kontak pemesan yang terdaftar." },
-    { question: "Apakah tiket yang sudah dipindai masih bisa digunakan lagi?", answer: "Pada versi produksi, QR valid akan digunakan sekali untuk satu kali check-in. Pada simulasi ini tidak ada pemindaian atau check-in nyata, dan QR demo tidak dapat digunakan di venue." }
+    { question: "Apakah tiket yang sudah dipindai masih bisa digunakan lagi?", answer: "Pada versi produksi, QR valid akan digunakan sekali untuk satu kali check-in. Demo scanner di /admin/scan juga mengubah status tiket lokal menjadi sudah digunakan, tetapi tidak terhubung ke venue atau database produksi." }
   ];
 
   const wristbandSteps = [
-    { question: "Apa yang perlu disiapkan sebelum menuju meja penukaran?", answer: "Pada versi produksi, buka e-ticket valid dan siapkan QR di layar ponsel sebelum menuju meja penukaran wristband. Pada simulasi ini QR hanya visual demo dan tidak dapat digunakan untuk masuk event." },
+    { question: "Apa yang perlu disiapkan sebelum menuju meja penukaran?", answer: "Pada versi produksi, buka e-ticket valid dan siapkan QR di layar ponsel sebelum menuju meja penukaran wristband. Untuk mencoba alur petugas, buka demo scanner di /admin/scan." },
     { question: "Bagaimana proses penukaran wristband di venue?", answer: "Pada versi produksi, tunjukkan QR valid kepada petugas untuk diverifikasi sebelum menerima wristband sesuai kategori tiket. Pada simulasi ini tidak ada pemindaian, verifikasi, atau check-in venue yang nyata." },
     { question: "Bolehkah menggunakan screenshot QR e-ticket?", answer: "Ikuti aturan penyelenggara pada versi produksi karena screenshot mungkin tidak diterima. QR pada aplikasi ini adalah visual demo, tidak memiliki status check-in, dan tidak dapat digunakan di venue." }
   ];
