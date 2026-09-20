@@ -12,7 +12,7 @@
 
 - The root application uses Svelte 5 with Vite, not SvelteKit.
 - Keep browser state local to the page unless a concrete cross-route requirement justifies a store.
-- Keep pure filtering, pricing, validation, routing, and snapshot logic in `src/lib`.
+- Keep pure filtering, pricing, validation, routing, and snapshot logic in `frontend/src/lib`.
 - Preserve semantic HTML, focus handling, live regions, reduced motion, dark mode, and print behavior.
 - Avoid `innerHTML`; render application data through Svelte templates.
 
