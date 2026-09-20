@@ -1,8 +1,8 @@
 import type { Concert } from "./concerts.ts";
 
 export type Tab = "description" | "lineup" | "location" | "terms";
-export type DetailState = { activeTab: Tab; selectedZoneId: string | null; quantities: Record<string, number> };
-export const initialState: DetailState = { activeTab: "description", selectedZoneId: null, quantities: {} };
+export type DetailState = { selectedZoneId: string | null; quantities: Record<string, number> };
+export const initialState: DetailState = { selectedZoneId: null, quantities: {} };
 
 export function changeQuantity(concert: Concert, state: DetailState, tierId: string, delta: -1 | 1): DetailState {
   const tier = concert.ticketTiers.find((item) => item.id === tierId);
