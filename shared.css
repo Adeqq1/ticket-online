@@ -1,5 +1,5 @@
-:root { color-scheme: light dark; --canvas: #f3f4f0; --surface: #e6e8e1; --ink: #17211f; --muted: #56615e; --line: #bdc5bd; --accent: #1358d8; --accent-ink: #f5f8ff; --danger: #8f2f22; --radius: 8px; font-family: Arial, Helvetica, sans-serif; background: var(--canvas); color: var(--ink); }
-@media (prefers-color-scheme: dark) { :root { --canvas: #151a19; --surface: #202826; --ink: #edf1e9; --muted: #bcc7c0; --line: #4b5752; --accent: #769dff; --accent-ink: #101a35; --danger: #ff9585; } }
+:root { color-scheme: light dark; --canvas: #f3f4f0; --surface: #e6e8e1; --ink: #17211f; --muted: #56615e; --line: #bdc5bd; --control-line: #7d8a84; --accent: #1358d8; --accent-ink: #f5f8ff; --danger: #8f2f22; --inverse-surface: #17211f; --inverse-text: #f3f4f0; --radius: 8px; font-family: Arial, Helvetica, sans-serif; background: var(--canvas); color: var(--ink); }
+@media (prefers-color-scheme: dark) { :root { --canvas: #151a19; --surface: #202826; --ink: #edf1e9; --muted: #bcc7c0; --line: #4b5752; --control-line: #73827b; --accent: #769dff; --accent-ink: #101a35; --danger: #ff9585; } }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; background: var(--canvas); }
@@ -13,19 +13,24 @@ img { display: block; max-width: 100%; }
 .site-header { border-bottom: 1px solid var(--line); }
 .nav { min-height: 68px; display: flex; align-items: center; gap: 32px; }
 .wordmark { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.04em; white-space: nowrap; }
-.wordmark-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius); background: var(--ink); color: var(--canvas); font-size: 10px; letter-spacing: -0.06em; }
+.wordmark-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius); background: var(--inverse-surface); color: var(--inverse-text); font-size: 10px; letter-spacing: -0.06em; }
 .nav-links { display: flex; gap: 24px; margin-left: auto; font-size: 14px; color: var(--muted); }
 .nav-links a:hover, .footer-links a:hover, .text-button:hover { color: var(--accent); }
 .text-button { border: 0; padding: 0; background: transparent; color: var(--accent); font-weight: 700; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 20px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font-weight: 700; white-space: nowrap; transition: transform 180ms ease, background 180ms ease; }
-.button:hover { background: var(--ink); border-color: var(--ink); }
+.button:hover { background: var(--inverse-surface); border-color: var(--inverse-surface); color: var(--inverse-text); }
 .button:active { transform: translateY(1px) scale(.98); }
 .button-small { min-height: 40px; padding-inline: 14px; font-size: 14px; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-.site-footer { padding: 48px 0; background: var(--ink); color: var(--canvas); }
-.site-footer .wordmark-mark { background: var(--canvas); color: var(--ink); }
+.site-footer { padding: 48px 0; background: var(--inverse-surface); color: var(--inverse-text); }
+.site-footer .wordmark-mark { background: var(--inverse-text); color: var(--inverse-surface); }
 .footer-inner { display: grid; grid-template-columns: auto 1fr auto; gap: 28px; align-items: center; }
-.footer-inner p { margin: 0; color: color-mix(in srgb, var(--canvas) 75%, transparent); font-size: 14px; }
+.footer-inner p { margin: 0; color: color-mix(in srgb, var(--inverse-text) 75%, transparent); font-size: 14px; }
 .footer-links { display: flex; gap: 18px; font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
-@media (max-width: 767px) { .shell { width: min(100% - 32px, 1280px); } .nav { gap: 12px; } .nav-links { display: none; } .nav .button { margin-left: auto; } .footer-inner { grid-template-columns: 1fr; gap: 18px; } .footer-links { flex-wrap: wrap; } }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.mobile-nav { display: none; position: relative; margin-left: auto; }.mobile-nav summary { min-height: 44px; display: grid; place-items: center; padding: 0 14px; border: 1px solid var(--control-line); border-radius: var(--radius); font-size: 14px; font-weight: 700; cursor: pointer; list-style: none; }.mobile-nav summary::-webkit-details-marker { display: none; }.mobile-nav[open] summary { border-color: var(--accent); }.mobile-nav > div { position: absolute; z-index: 2; top: calc(100% + 8px); right: 0; display: grid; min-width: 190px; padding: 8px; border: 1px solid var(--control-line); border-radius: var(--radius); background: var(--canvas); box-shadow: 0 12px 28px color-mix(in srgb, var(--ink) 18%, transparent); }.mobile-nav a { min-height: 44px; display: flex; align-items: center; padding: 0 12px; border-radius: calc(var(--radius) - 2px); color: var(--muted); font-size: 14px; }.mobile-nav a:hover, .mobile-nav a[aria-current="page"] { background: var(--surface); color: var(--accent); }
+@media (max-width: 767px) { .shell { width: min(100% - 32px, 1280px); } .nav { gap: 10px; } .nav-links { display: none; } .mobile-nav { display: block; } .nav .button { margin-left: 0; } .footer-inner { grid-template-columns: 1fr; gap: 18px; } .footer-links { flex-wrap: wrap; } }
+@media (max-width: 430px) { .nav .wordmark > span:last-child { display: none; } }
+.toast { position: fixed; z-index: 4; right: 24px; bottom: 24px; display: flex; align-items: center; gap: 10px; max-width: min(420px, calc(100% - 32px)); padding: 14px 10px 14px 16px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--surface); color: var(--ink); box-shadow: 0 10px 28px color-mix(in srgb, var(--ink) 18%, transparent); }.toast-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 700; }.toast-success .toast-mark { background: var(--accent); }.toast-error { border-color: var(--danger); }.toast-error .toast-mark { background: var(--danger); }.toast button { min-width: 44px; min-height: 44px; margin-left: auto; border: 0; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; }.toast button:hover { color: var(--ink); }
+@media (max-width: 767px) { .toast { right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); left: 16px; max-width: none; } }

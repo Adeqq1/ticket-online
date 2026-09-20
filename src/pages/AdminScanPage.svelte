@@ -50,6 +50,7 @@
 <svelte:head>
   <title>Gate Control | Scanner Tiket</title>
   <meta name="description" content="Simulasi scanner ticket check-in untuk tim gate event." />
+  <meta name="robots" content="noindex" />
 </svelte:head>
 
 <div class="scan-shell">

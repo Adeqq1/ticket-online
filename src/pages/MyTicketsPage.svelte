@@ -9,6 +9,7 @@
 <svelte:head>
   <title>Tiket saya | Tiket Online</title>
   <meta name="description" content="Lihat kembali e-ticket konser yang tersimpan di dompet tiketmu." />
+  <meta name="robots" content="noindex" />
 </svelte:head>
 
 <section class="my-tickets shell">

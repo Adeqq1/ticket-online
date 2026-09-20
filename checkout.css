@@ -2,16 +2,21 @@
 @media (max-width: 767px) { .checkout { padding-block: 28px 56px; }.checkout-heading { margin: 24px 0 30px; }.checkout-steps { gap: 8px; margin-bottom: 32px; }.checkout-steps li { gap: 6px; font-size: 12px; }.checkout-steps li:not(:last-child)::after { margin-left: 0; }.checkout-steps span { width: 26px; height: 26px; }.checkout-layout { grid-template-columns: 1fr; gap: 32px; }.field-grid { grid-template-columns: 1fr; gap: 18px; }.step-actions { margin-top: 30px; }.checkout-panel { grid-row: 1; }.order-summary { position: static; grid-row: 2; }.checkout-success { padding: 24px; } }
 .gopay { background: #007c99; }
 .checkout-success > .button + .button { margin-left: 12px; }
+.reservation-banner { display: flex; align-items: center; gap: 12px; max-width: 720px; margin: 0 0 28px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 8%, transparent); }.reservation-banner b, .reservation-banner small { display: block; }.reservation-banner small { margin-top: 3px; color: var(--muted); }.reservation-icon { color: var(--accent); font-size: 24px; }.reservation-warning { border-color: var(--danger); }.reservation-warning .reservation-icon { color: var(--danger); }
+.terms-trigger { margin: 24px 0 0; color: var(--muted); font-size: 14px; }.terms-button { width: 100%; margin-top: 22px; padding: 12px 0; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--accent); font-weight: 700; text-align: left; }.dialog-heading h2 { margin: 0 0 22px; }.terms-dialog-list { display: grid; gap: 18px; max-height: min(50vh, 420px); overflow: auto; }.terms-dialog-list h3 { margin: 0 0 5px; font-size: 16px; }.terms-dialog-list p { margin: 0; }.dialog-actions { display: flex; justify-content: end; margin-top: 24px; }.expiry-dialog { max-width: 460px; }.expiry-dialog h2 { margin: 0 0 12px; }.expiry-dialog .button { margin-top: 12px; }
+@media (prefers-reduced-transparency: reduce) { dialog::backdrop { background: var(--ink); } }
+@media (max-width: 767px) { .terms-dialog { width: 100%; max-width: none; margin: auto 0 0; border-right: 0; border-bottom: 0; border-left: 0; border-radius: var(--radius) var(--radius) 0 0; }.terms-dialog-list { max-height: 48vh; }.expiry-dialog { width: min(100% - 32px, 460px); margin: auto; } }
 @media (max-width: 767px) { .checkout-success > .button + .button { margin-top: 12px; margin-left: 0; } }
 .payment-options { display: grid; gap: 12px; }
 .payment-card { display: grid; grid-template-columns: 74px 1fr 20px; align-items: center; gap: 16px; min-height: 78px; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; cursor: pointer; }
+.payment-card { border-color: var(--control-line); }
 .payment-card:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .payment-card:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
 .payment-card input { grid-column: 3; margin: 0; accent-color: var(--accent); }
 .payment-card > span:last-child { grid-column: 2; grid-row: 1; }
 .payment-card b, .payment-card small, .confirmation-block span { display: block; }
 .payment-card small, .confirmation-block span { margin-top: 4px; color: var(--muted); font-size: 13px; }
-.payment-logo { grid-column: 1; grid-row: 1; display: grid; place-items: center; min-height: 38px; border-radius: 4px; background: var(--ink); color: var(--canvas); font-size: 12px; font-weight: 700; }
+.payment-logo { grid-column: 1; grid-row: 1; display: grid; place-items: center; min-height: 38px; border-radius: 4px; background: var(--inverse-surface); color: var(--inverse-text); font-size: 12px; font-weight: 700; }
 .payment-logo.gopay { background: #007c99; color: #fff; }
 .form-error, .field-error { min-height: 18px; color: var(--danger); }
 .confirmation-block { display: flex; justify-content: space-between; gap: 20px; padding: 20px 0; border-bottom: 1px solid var(--line); }
@@ -21,3 +26,4 @@
 .voucher-form label { flex: 1; }
 .voucher-message { color: var(--danger); }
 .voucher-message.is-valid { color: var(--accent); }
+@media (max-width: 430px) { .checkout-steps li { display: grid; justify-items: start; align-content: start; gap: 6px; }.checkout-steps li:not(:last-child)::after { display: none; }.checkout-steps b { line-height: 1.2; }.checkout-steps span { width: 30px; height: 30px; } }
