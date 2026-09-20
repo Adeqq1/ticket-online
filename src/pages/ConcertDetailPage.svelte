@@ -16,10 +16,10 @@
   const total = $derived(concert ? cartTotal(concert, state.quantities) : 0);
   const selected = $derived(concert?.ticketTiers.filter((tier) => state.quantities[tier.id]) ?? []);
   function adjust(tierId: string, delta: -1 | 1) { if (concert) state = changeQuantity(concert, state, tierId, delta); }
-  function selectZone(zoneId: string) {
+  function selectZone(zoneId: string, event: MouseEvent | KeyboardEvent) {
     state.selectedZoneId = zoneId;
     const tier = concert?.ticketTiers.find((item) => item.zoneId === zoneId);
-    requestAnimationFrame(() => document.getElementById(`tier-${tier?.id}`)?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }));
+    requestAnimationFrame(() => { const element = document.getElementById(`tier-${tier?.id}`); element?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); if (event instanceof KeyboardEvent) element?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); });
   }
   function checkout() { if (concert && count) location.assign(`/checkout/${concert.id}?${quantityParams(state.quantities)}`); }
 </script>

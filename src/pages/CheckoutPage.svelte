@@ -3,10 +3,10 @@
   import { eventDate, formatRupiah, getConcertById } from "../lib/concerts.ts";
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, orderSubtotal, voucherDiscount, type Buyer } from "../lib/checkout.ts";
-  import { createTicketSnapshot, saveTicketSnapshot } from "../lib/tickets.ts";
+  import { createTicketSnapshot, loadTicketSnapshot, saveTicketSnapshot } from "../lib/tickets.ts";
   import Toast from "../components/Toast.svelte";
   import { concertTerms } from "../lib/terms.ts";
-  import { RESERVATION_DURATION_MS, createReservationExpiry, isReservationExpired, remainingReservationSeconds, reservationBasketKey, validReservationExpiry } from "../lib/reservation.ts";
+  import { RESERVATION_DURATION_MS, createReservationExpiry, isReservationExpired, remainingReservationSeconds, reservationBasketKey, reservationExpiryFromStorage, validReservationExpiry } from "../lib/reservation.ts";
   let { id }: { id: string } = $props();
   const concert = $derived(getConcertById(id));
   const lines = $derived(concert ? checkoutLines(concert, new URLSearchParams(location.search)) : []);
@@ -14,11 +14,12 @@
   let step = $state(1); let payment = $state(""); let voucherInput = $state(""); let voucher = $state(""); let completed = $state(false); let ticketId = $state(""); let reference = $state(""); let storageFailed = $state(false);
   let buyer = $state<Buyer>({ name: "", email: "", phone: "", identity: "" });
   let errors = $state<Record<keyof Buyer, string>>({ name: "", email: "", phone: "", identity: "" });
-  let paymentError = $state(""); let termsDialog = $state<HTMLDialogElement>(); let expiryDialog = $state<HTMLDialogElement>(); let toast = $state<{ message: string; tone: "success" | "info" | "error" } | null>(null); let expiresAt = $state(0); let reservationExpired = $state(false); let remainingSeconds = $state(RESERVATION_DURATION_MS / 1_000);
+  let paymentError = $state(""); let termsDialog = $state<HTMLDialogElement>(); let expiryDialog = $state<HTMLDialogElement>(); let toast = $state<{ id: number; message: string; tone: "success" | "info" | "error" } | null>(null); let toastId = 0; let expiresAt = $state<number | null>(null); let reservationExpired = $state(false); let remainingSeconds = $state(RESERVATION_DURATION_MS / 1_000);
   const discount = $derived(voucherDiscount(subtotal, voucher));
   const total = $derived(subtotal + ADMIN_FEE - discount);
   const quantityMap = $derived(Object.fromEntries(lines.map((line) => [line.tier.id, line.quantity])));
   const reservationKey = $derived(concert ? reservationBasketKey(concert.id, quantityMap) : "");
+  const completionKey = $derived(`${reservationKey}:completed`);
   async function goToStep(next: number) { step = next; await tick(); const name = next === 1 ? "buyer" : next === 2 ? "payment" : "confirmation"; const heading = document.querySelector<HTMLElement>(`#${name}-title`); heading?.focus(); heading?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }
   function validate(name: keyof Buyer) {
     const value = buyer[name].trim(); buyer[name] = value;
@@ -26,23 +27,26 @@
     errors[name] = valid ? "" : name === "name" ? "Masukkan nama lengkap maksimal 80 karakter." : name === "email" ? "Masukkan alamat email yang valid." : name === "phone" ? "Masukkan nomor HP yang valid." : "Nomor identitas harus terdiri dari 12-20 angka.";
     return valid;
   }
-  async function submitBuyer(event: SubmitEvent) { event.preventDefault(); const valid = (["name", "email", "phone", "identity"] as const).map(validate).every(Boolean); if (valid) await goToStep(2); else await tick().then(() => document.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()); }
-  async function submitPayment(event: SubmitEvent) { event.preventDefault(); paymentError = payment ? "" : "Pilih metode pembayaran terlebih dahulu."; if (!payment) { await tick(); document.querySelector<HTMLInputElement>('input[name="payment"]')?.focus(); return; } await goToStep(3); }
-  function showToast(message: string, tone: "success" | "info" | "error" = "info") { toast = { message, tone }; }
+  async function submitBuyer(event: SubmitEvent) { event.preventDefault(); if (checkExpiry()) return; const valid = (["name", "email", "phone", "identity"] as const).map(validate).every(Boolean); if (valid) await goToStep(2); else await tick().then(() => document.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()); }
+  async function submitPayment(event: SubmitEvent) { event.preventDefault(); if (checkExpiry()) return; paymentError = payment ? "" : "Pilih metode pembayaran terlebih dahulu."; if (!payment) { await tick(); document.querySelector<HTMLInputElement>('input[name="payment"]')?.focus(); return; } await goToStep(3); }
+  function showToast(message: string, tone: "success" | "info" | "error" = "info") { toast = { id: ++toastId, message, tone }; }
   function openTerms() { termsDialog?.showModal(); }
   function closeDialog(dialog: HTMLDialogElement) { dialog.close(); }
-  function restartSelection() { try { sessionStorage.removeItem(reservationKey); } catch { /* storage can be unavailable */ } }
+  function restartSelection() { try { sessionStorage.removeItem(reservationKey); sessionStorage.removeItem(completionKey); } catch { /* storage can be unavailable */ } }
+  function recoverExpiredCheckout() { restartSelection(); if (concert) location.assign(`/konser/${concert.id}?${location.search.slice(1)}`); }
   function checkExpiry() {
-    if (completed || !expiresAt || !isReservationExpired(expiresAt)) return false;
+    if (completed || expiresAt === null || !isReservationExpired(expiresAt)) return false;
     reservationExpired = true;
+    try { sessionStorage.removeItem(reservationKey); } catch { /* storage can be unavailable */ }
     if (!expiryDialog?.open) expiryDialog?.showModal();
     return true;
   }
-  function applyVoucher(event: SubmitEvent) { event.preventDefault(); if (reservationExpired) return; voucher = voucherInput; showToast(discount ? "Voucher diskon berhasil diterapkan." : "Kode voucher tidak valid.", discount ? "success" : "error"); }
+  function applyVoucher(event: SubmitEvent) { event.preventDefault(); if (reservationExpired || checkExpiry()) return; voucher = voucherInput; showToast(discount ? "Voucher diskon berhasil diterapkan." : "Kode voucher tidak valid.", discount ? "success" : "error"); }
   async function completeOrder() {
     if (!concert || reservationExpired || checkExpiry()) return;
     completed = true; ticketId = crypto.randomUUID(); reference = `TO-${crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
     storageFailed = !saveTicketSnapshot(createTicketSnapshot(ticketId, reference, buyer.name, concert, lines));
+    if (!storageFailed) try { sessionStorage.setItem(completionKey, ticketId); } catch { /* storage can be unavailable */ }
     try { sessionStorage.removeItem(reservationKey); } catch { /* storage can be unavailable */ }
     await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
   }
@@ -51,11 +55,14 @@
     const now = Date.now();
     let stored: string | null = null;
     try { stored = sessionStorage.getItem(reservationKey); } catch { /* storage can be unavailable */ }
-    const storedExpiry = Number(stored);
-    const hasExpiredReservation = stored !== null && Number.isFinite(storedExpiry) && storedExpiry <= now;
-    expiresAt = hasExpiredReservation || validReservationExpiry(stored, now) ? storedExpiry : createReservationExpiry(now);
-    if (!hasExpiredReservation) try { sessionStorage.setItem(reservationKey, String(expiresAt)); } catch { /* storage can be unavailable */ }
-    const update = () => { remainingSeconds = remainingReservationSeconds(expiresAt); if (remainingSeconds === 0) checkExpiry(); };
+    let completedTicketId: string | null = null;
+    try { completedTicketId = sessionStorage.getItem(completionKey); } catch { /* storage can be unavailable */ }
+    if (completedTicketId && loadTicketSnapshot(completedTicketId)) { location.replace(`/tiket/${completedTicketId}`); return; }
+    const storedExpiry = reservationExpiryFromStorage(stored, now);
+    const hasExpiredReservation = stored !== null && (!validReservationExpiry(stored, now) || isReservationExpired(storedExpiry, now));
+    expiresAt = hasExpiredReservation ? storedExpiry : stored === null ? createReservationExpiry(now) : storedExpiry;
+    try { sessionStorage.setItem(reservationKey, String(expiresAt)); } catch { /* storage can be unavailable */ }
+    const update = () => { remainingSeconds = remainingReservationSeconds(expiresAt ?? now); if (remainingSeconds === 0) checkExpiry(); };
     update();
     const timer = window.setInterval(update, 1_000);
     const visibility = () => update();
@@ -79,6 +86,6 @@
       </section><aside class="order-summary"><h2>Ringkasan pesanan</h2><p class="summary-event">{concert.artist}</p><p>{eventDate(concert.startsAt)}</p>{#each lines as line}<div class="summary-line"><span>{line.quantity}x {line.tier.name}</span><b>{formatRupiah.format(line.tier.price * line.quantity)}</b></div>{/each}<div class="summary-line"><span>Biaya admin</span><b>{formatRupiah.format(ADMIN_FEE)}</b></div>{#if discount}<div class="summary-line discount-row"><span>Diskon</span><b>-{formatRupiah.format(discount)}</b></div>{/if}<form class="voucher-form" onsubmit={applyVoucher}><label for="voucher">Kode promo<input bind:value={voucherInput} id="voucher" autocomplete="off" disabled={completed || reservationExpired} /></label><button class="button button-small" type="submit" disabled={completed || reservationExpired}>Gunakan</button></form>{#if voucher}<p class:is-valid={Boolean(discount)} class="voucher-message" aria-live="polite">{discount ? "Promo HEMAT10 diterapkan." : "Kode promo tidak valid."}</p>{/if}<div class="grand-total"><span>Total</span><strong>{formatRupiah.format(total)}</strong></div><button class="terms-button" type="button" onclick={openTerms}>Lihat S&amp;K Konser</button></aside></div>
    </section>
    <dialog class="terms-dialog" bind:this={termsDialog} aria-labelledby="terms-title"><div class="dialog-heading"><p class="checkout-kicker">Informasi penting</p><h2 id="terms-title">Syarat &amp; ketentuan konser</h2></div><div class="terms-dialog-list">{#each concertTerms as term}<section><h3>{term.title}</h3><p>{term.body}</p></section>{/each}</div><form method="dialog" class="dialog-actions"><button class="button" type="submit">Tutup</button></form></dialog>
-   <dialog class="expiry-dialog" bind:this={expiryDialog} aria-labelledby="expiry-title"><p class="checkout-kicker">Reservasi berakhir</p><h2 id="expiry-title">Waktu checkout habis.</h2><p>Waktu reservasi simulasi sudah selesai. Pilih tiket lagi untuk memulai sesi checkout baru.</p><a class="button" href={`/konser/${concert.id}?${location.search.slice(1)}`} onclick={restartSelection}>Pilih tiket lagi</a></dialog>
-   {#if toast}<Toast message={toast.message} tone={toast.tone} onDismiss={() => toast = null} />{/if}
+    <dialog class="expiry-dialog" bind:this={expiryDialog} aria-labelledby="expiry-title" oncancel={(event) => { event.preventDefault(); recoverExpiredCheckout(); }}><p class="checkout-kicker">Reservasi berakhir</p><h2 id="expiry-title">Waktu checkout habis.</h2><p>Waktu reservasi simulasi sudah selesai. Pilih tiket lagi untuk memulai sesi checkout baru.</p><button class="button" type="button" onclick={recoverExpiredCheckout}>Pilih tiket lagi</button></dialog>
+    {#if toast}<Toast id={toast.id} message={toast.message} tone={toast.tone} onDismiss={() => toast = null} />{/if}
 {/if}

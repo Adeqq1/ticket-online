@@ -26,3 +26,10 @@ export function validReservationExpiry(value: string | null, now = Date.now()) {
   const expiresAt = Number(value);
   return Number.isFinite(expiresAt) && expiresAt > now && expiresAt <= now + RESERVATION_DURATION_MS;
 }
+
+export function reservationExpiryFromStorage(value: string | null, now = Date.now()) {
+  if (value === null) return createReservationExpiry(now);
+  if (!value.trim()) return now;
+  const expiresAt = Number(value);
+  return validReservationExpiry(value, now) || (Number.isFinite(expiresAt) && expiresAt <= now) ? expiresAt : now;
+}

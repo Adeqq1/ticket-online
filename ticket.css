@@ -4,3 +4,6 @@
 @media print { @page { margin: 12mm; } body { background: #fff; color: #111; }.site-header, .site-footer, .skip-link, .ticket-actions, .ticket-caption, .toast, .countdown { display: none !important; }.ticket-page { padding: 0; }.ticket-page > header { margin-bottom: 16px; }.ticket-page h1 { font-size: 32px; }.boarding-pass { grid-template-columns: minmax(0, 1fr) 220px; break-inside: avoid; box-shadow: none; background: #1358d8 !important; color: #fff !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }.pass-main { min-height: 0; padding: 20px; }.pass-main h2 { margin-block: 28px 18px; font-size: 48px; }.pass-stub { min-height: 0; border-top: 0; border-left: 2px dashed #fff; padding: 20px; background: #1049ae !important; }.pass-stub::before { top: -12px; left: -13px; }.pass-stub::after { top: auto; right: auto; bottom: -12px; left: -13px; }.pass-stub::before, .pass-stub::after { background: #fff; }.ticket-reference { color: #fff !important; } }
 
 .pass-row b, .ticket-line, .ticket-reference { overflow-wrap: anywhere; }
+@media print {
+  :root { --canvas: #fff; --ink: #111; --muted: #444; --accent: #1358d8; --accent-ink: #fff; }
+}

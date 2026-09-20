@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Concert } from "../../lib/concerts.ts";
   import type { Tab } from "../../lib/cart.ts";
-  import { detailTerms } from "../../lib/terms.ts";
+  import { concertTerms } from "../../lib/terms.ts";
   let { concert }: { concert: Concert } = $props();
   let active = $state<Tab>("description");
   const tabs: Array<{ id: Tab; label: string }> = [{ id: "description", label: "Deskripsi" }, { id: "lineup", label: "Line-up" }, { id: "location", label: "Lokasi" }, { id: "terms", label: "Ketentuan" }];
@@ -17,4 +17,4 @@
 <div id="panel-description" role="tabpanel" aria-labelledby="tab-description" hidden={active !== "description"}><h2>Untuk malam yang panjang.</h2><p>{concert.description}</p></div>
 <div id="panel-lineup" role="tabpanel" aria-labelledby="tab-lineup" hidden={active !== "lineup"}><h2>Line-up artis</h2><ul class="lineup-list">{#each concert.lineup as artist}<li>{artist}</li>{/each}</ul></div>
 <div id="panel-location" role="tabpanel" aria-labelledby="tab-location" hidden={active !== "location"}><h2>Lokasi</h2><figure class="location-map"><div aria-hidden="true"><span></span><b>{concert.venue}</b></div><figcaption>{concert.address}</figcaption></figure></div>
-<div id="panel-terms" role="tabpanel" aria-labelledby="tab-terms" hidden={active !== "terms"}><h2>Syarat & ketentuan</h2><ul class="terms-list">{#each detailTerms as term}<li>{term}</li>{/each}</ul></div>
+<div id="panel-terms" role="tabpanel" aria-labelledby="tab-terms" hidden={active !== "terms"}><h2>Syarat & ketentuan</h2><ul class="terms-list">{#each concertTerms as term}<li><b>{term.title}</b><br />{term.body}</li>{/each}</ul></div>
