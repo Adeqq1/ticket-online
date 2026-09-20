@@ -9,12 +9,13 @@
   import MyTicketsPage from "./pages/MyTicketsPage.svelte";
   import GuidePage from "./pages/GuidePage.svelte";
   import UnknownRoutePage from "./pages/UnknownRoutePage.svelte";
+  import AdminScanPage from "./pages/AdminScanPage.svelte";
   import { matchRoute } from "./lib/route.ts";
   const route = matchRoute(location.pathname);
 </script>
 
-<SiteHeader page={route.name === "home" ? "home" : route.name === "concerts" ? "concerts" : route.name === "my-tickets" ? "my-tickets" : route.name === "guide" ? "guide" : "other"} />
-<main id="konten" tabindex="-1">
+{#if route.name !== "admin-scan"}<SiteHeader page={route.name === "home" ? "home" : route.name === "concerts" ? "concerts" : route.name === "my-tickets" ? "my-tickets" : route.name === "guide" ? "guide" : "other"} />{/if}
+<main id="konten" tabindex="-1" class:admin-main={route.name === "admin-scan"}>
   {#if route.name === "home"}<HomePage />
   {:else if route.name === "concerts"}<ConcertCatalogPage />
   {:else if route.name === "concert-detail"}<ConcertDetailPage id={route.id} />
@@ -22,6 +23,7 @@
   {:else if route.name === "ticket"}<TicketPage id={route.id} />
   {:else if route.name === "my-tickets"}<MyTicketsPage />
   {:else if route.name === "guide"}<GuidePage />
+  {:else if route.name === "admin-scan"}<AdminScanPage />
   {:else}<UnknownRoutePage />{/if}
 </main>
-<SiteFooter />
+{#if route.name !== "admin-scan"}<SiteFooter />{/if}
