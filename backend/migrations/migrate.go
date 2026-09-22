@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed *.sql
@@ -26,16 +27,22 @@ type migration struct {
 }
 
 func Run(ctx context.Context, db *sql.DB) error {
-	locked, err := acquireLock(ctx, db)
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
+	locked, err := acquireLock(ctx, conn)
 	if !locked {
 		return fmt.Errorf("could not acquire migration lock")
 	}
-	defer func() { _, _ = db.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", lockName) }()
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = conn.ExecContext(releaseCtx, "SELECT RELEASE_LOCK(?)", lockName)
+	}()
 
-	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version BIGINT UNSIGNED PRIMARY KEY,
 		name VARCHAR(255) NOT NULL,
 		checksum CHAR(64) NOT NULL,
@@ -49,14 +56,16 @@ func Run(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	for _, item := range items {
-		if err := apply(ctx, db, item); err != nil {
+		if err := apply(ctx, conn, item); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func acquireLock(ctx context.Context, db *sql.DB) (bool, error) {
+func acquireLock(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (bool, error) {
 	var locked bool
 	if err := db.QueryRowContext(ctx, "SELECT GET_LOCK(?, 30)", lockName).Scan(&locked); err != nil {
 		return false, fmt.Errorf("acquire migration lock: %w", err)
@@ -92,7 +101,7 @@ func load() ([]migration, error) {
 	return items, nil
 }
 
-func apply(ctx context.Context, db *sql.DB, item migration) error {
+func apply(ctx context.Context, db *sql.Conn, item migration) error {
 	checksum := sha256.Sum256(item.data)
 	checksumText := hex.EncodeToString(checksum[:])
 	var appliedChecksum string
@@ -108,13 +117,21 @@ func apply(ctx context.Context, db *sql.DB, item migration) error {
 		return fmt.Errorf("check migration %s: %w", item.name, err)
 	}
 
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration %s: %w", item.name, err)
+	}
+	defer tx.Rollback()
 	for _, statement := range statements(string(item.data)) {
-		if _, err := db.ExecContext(ctx, statement); err != nil {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("apply migration %s: %w", item.name, err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText); err != nil {
 		return fmt.Errorf("record migration %s: %w", item.name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration %s: %w", item.name, err)
 	}
 	return nil
 }

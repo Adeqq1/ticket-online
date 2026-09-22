@@ -1,11 +1,11 @@
-import { parseQuantities, type Concert, type TicketTier } from "./concerts.ts";
+import { parseCheckoutQuantities, type Concert, type TicketTier } from "./concerts.ts";
 
 export type CheckoutLine = { tier: TicketTier; quantity: number };
 export type Buyer = { name: string; email: string; phone: string; identity: string };
 export const ADMIN_FEE = 7_500;
 
 export function checkoutLines(concert: Concert, params: URLSearchParams): CheckoutLine[] {
-  const quantities = parseQuantities(concert, params);
+  const quantities = parseCheckoutQuantities(concert, params);
   return concert.ticketTiers.flatMap((tier) => {
     const quantity = quantities[tier.id];
     return quantity ? [{ tier, quantity }] : [];

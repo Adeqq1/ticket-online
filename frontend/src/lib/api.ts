@@ -5,7 +5,7 @@ export type ApiTicketTier = { id: string; name: string; zoneId: string; price: n
 export type ApiEvent = { id: string; artist: string; city: string; venue: string; address: string; startsAt: string; genre: string; status: string; image: string; description: string; lineup: string[]; price: number; zones: ApiZone[]; ticketTiers: ApiTicketTier[] };
 export type ApiErrorBody = { error?: { code?: string; message?: string } };
 export type ReservationItem = { tierId: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
-export type Reservation = { id: string; status: string; expiresAt: string; event: { id: string; artist: string }; items: ReservationItem[]; subtotal: number };
+export type Reservation = { id: string; status: string; expiresAt: string; event: { id: string; artist: string }; items: ReservationItem[]; subtotal: number; reference?: string };
 
 export class ApiError extends Error {
   code: string;
@@ -48,3 +48,5 @@ export function createReservation(eventId: string, items: Array<{ tierId: string
 }
 
 export function getReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}`, signal); }
+
+export function convertReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}/convert`, signal, { method: "POST" }); }

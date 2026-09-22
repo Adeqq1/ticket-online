@@ -39,19 +39,26 @@ func (r *Repository) ListEvents(ctx context.Context) ([]Event, error) {
 	defer rows.Close()
 
 	var events []Event
+	var records []eventRecord
 	for rows.Next() {
 		record, err := scanEvent(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate events: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close events: %w", err)
+	}
+	for _, record := range records {
 		event, err := r.buildEvent(ctx, record)
 		if err != nil {
 			return nil, err
 		}
 		events = append(events, event)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate events: %w", err)
 	}
 	return events, nil
 }

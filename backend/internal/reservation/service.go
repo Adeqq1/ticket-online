@@ -11,14 +11,15 @@ import (
 )
 
 var (
-	ErrInvalidRequest      = errors.New("invalid request")
-	ErrEventNotFound       = errors.New("event not found")
-	ErrTierNotFound        = errors.New("tier not found")
-	ErrInsufficientStock   = errors.New("insufficient stock")
-	ErrOrderLimitExceeded  = errors.New("order limit exceeded")
-	ErrIdempotencyConflict = errors.New("idempotency conflict")
-	ErrReservationNotFound = errors.New("reservation not found")
-	ErrReservationExpired  = errors.New("reservation expired")
+	ErrInvalidRequest       = errors.New("invalid request")
+	ErrEventNotFound        = errors.New("event not found")
+	ErrTierNotFound         = errors.New("tier not found")
+	ErrInsufficientStock    = errors.New("insufficient stock")
+	ErrOrderLimitExceeded   = errors.New("order limit exceeded")
+	ErrIdempotencyConflict  = errors.New("idempotency conflict")
+	ErrReservationNotFound  = errors.New("reservation not found")
+	ErrReservationExpired   = errors.New("reservation expired")
+	ErrReservationCancelled = errors.New("reservation cancelled")
 )
 
 type Request struct {

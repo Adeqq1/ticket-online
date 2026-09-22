@@ -43,6 +43,7 @@ func NewHandlerWithConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.D
 	mux.HandleFunc("POST /api/v1/reservations", reservationHandler.Create)
 	mux.HandleFunc("GET /api/v1/reservations/{reservationID}", reservationHandler.Get)
 	mux.HandleFunc("DELETE /api/v1/reservations/{reservationID}", reservationHandler.Cancel)
+	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/convert", reservationHandler.Convert)
 	mux.HandleFunc("/", staticHandler(staticDir))
 	return loggingMiddleware(logger, mux)
 }

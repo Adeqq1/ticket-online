@@ -1,5 +1,5 @@
 export const RESERVATION_DURATION_MS = 10 * 60 * 1_000;
-export type StoredReservation = { reservationId: string; idempotencyKey: string; eventId: string; basketKey: string };
+export type StoredReservation = { reservationId?: string; idempotencyKey: string; eventId: string; basketKey: string };
 
 export function reservationBasketKey(concertId: string, quantities: Record<string, number>) {
   const basket = Object.entries(quantities)
@@ -14,7 +14,7 @@ export function parseStoredReservation(value: string | null): StoredReservation 
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<StoredReservation>;
-    if ([parsed.reservationId, parsed.idempotencyKey, parsed.eventId, parsed.basketKey].every((item) => typeof item === "string" && item.length > 0)) return { reservationId: parsed.reservationId!, idempotencyKey: parsed.idempotencyKey!, eventId: parsed.eventId!, basketKey: parsed.basketKey! };
+    if ([parsed.idempotencyKey, parsed.eventId, parsed.basketKey].every((item) => typeof item === "string" && item.length > 0) && (parsed.reservationId === undefined || (typeof parsed.reservationId === "string" && parsed.reservationId.length > 0))) return { reservationId: parsed.reservationId, idempotencyKey: parsed.idempotencyKey!, eventId: parsed.eventId!, basketKey: parsed.basketKey! };
   } catch { /* invalid browser state */ }
   return null;
 }

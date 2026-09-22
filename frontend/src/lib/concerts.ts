@@ -51,3 +51,12 @@ export function parseQuantities(concert: Concert, params: URLSearchParams) {
     return quantity > 0 && quantity <= limit ? [[tier.id, quantity]] : [];
   }));
 }
+
+export function parseCheckoutQuantities(concert: Concert, params: URLSearchParams) {
+  return Object.fromEntries(concert.ticketTiers.flatMap((tier) => {
+    const value = params.get(tier.id);
+    if (!value || !/^\d+$/.test(value)) return [];
+    const quantity = Number(value);
+    return quantity > 0 && quantity <= tier.maxPerOrder ? [[tier.id, quantity]] : [];
+  }));
+}

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 type Repository struct {
@@ -23,6 +25,7 @@ type tier struct {
 }
 type reservationRecord struct {
 	id, eventID, status, requestHash string
+	reference                        string
 	eventArtist                      string
 	expiresAt                        time.Time
 	items                            []ResponseItem
@@ -107,6 +110,11 @@ func (r *Repository) Create(ctx context.Context, request Request, idempotencyKey
 	now := time.Now().UTC()
 	expiresAt := now.Add(r.ttl)
 	if _, err := tx.ExecContext(ctx, "INSERT INTO reservations (id, event_id, status, idempotency_key, request_hash, expires_at, created_at, updated_at) VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?)", reservationID, request.EventID, idempotencyKey, hash, expiresAt, now, now); err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			_ = tx.Rollback()
+			return r.replayByKey(ctx, idempotencyKey, hash)
+		}
 		return Reservation{}, fmt.Errorf("insert reservation: %w", err)
 	}
 	responseItems := make([]ResponseItem, 0, len(items))
@@ -141,6 +149,9 @@ func (r *Repository) Get(ctx context.Context, id string) (Reservation, error) {
 		return Reservation{}, err
 	}
 	if record.status == "ACTIVE" && !time.Now().UTC().Before(record.expiresAt) {
+		return Reservation{}, ErrReservationExpired
+	}
+	if record.status == "EXPIRED" {
 		return Reservation{}, ErrReservationExpired
 	}
 	return record.response(), nil
@@ -228,6 +239,78 @@ func (r *Repository) expireOne(ctx context.Context, id string) error {
 	return ErrReservationExpired
 }
 
+func (r *Repository) replayByKey(ctx context.Context, key, hash string) (Reservation, error) {
+	record, err := r.getByKey(ctx, key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Reservation{}, fmt.Errorf("idempotency race: reservation not found: %w", err)
+	}
+	if err != nil {
+		return Reservation{}, err
+	}
+	if record.requestHash != hash {
+		return Reservation{}, ErrIdempotencyConflict
+	}
+	if record.status == "EXPIRED" || (record.status == "ACTIVE" && !time.Now().UTC().Before(record.expiresAt)) {
+		return Reservation{}, ErrReservationExpired
+	}
+	return record.response(), nil
+}
+
+func (r *Repository) getByKey(ctx context.Context, key string) (reservationRecord, error) {
+	var id string
+	if err := r.db.QueryRowContext(ctx, "SELECT id FROM reservations WHERE idempotency_key = ?", key).Scan(&id); err != nil {
+		return reservationRecord{}, err
+	}
+	return r.get(ctx, r.db, id)
+}
+
+func (r *Repository) Convert(ctx context.Context, id string) (Reservation, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return Reservation{}, fmt.Errorf("begin conversion: %w", err)
+	}
+	defer tx.Rollback()
+	record, err := r.getForUpdate(ctx, tx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Reservation{}, ErrReservationNotFound
+	}
+	if err != nil {
+		return Reservation{}, err
+	}
+	switch record.status {
+	case "CONVERTED":
+		return record.response(), nil
+	case "CANCELLED":
+		return Reservation{}, ErrReservationCancelled
+	case "EXPIRED":
+		return Reservation{}, ErrReservationExpired
+	}
+	if !time.Now().UTC().Before(record.expiresAt) {
+		if err := r.restoreItems(ctx, tx, id); err != nil {
+			return Reservation{}, err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE reservations SET status = 'EXPIRED', updated_at = UTC_TIMESTAMP(6) WHERE id = ?", id); err != nil {
+			return Reservation{}, fmt.Errorf("expire during conversion: %w", err)
+		}
+		return Reservation{}, ErrReservationExpired
+	}
+	var reference string
+	var bytes [10]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return Reservation{}, fmt.Errorf("generate order reference: %w", err)
+	}
+	reference = "TO-" + hex.EncodeToString(bytes[:])
+	if _, err := tx.ExecContext(ctx, "UPDATE reservations SET status = 'CONVERTED', order_reference = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND status = 'ACTIVE'", reference, id); err != nil {
+		return Reservation{}, fmt.Errorf("convert reservation: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Reservation{}, fmt.Errorf("commit conversion: %w", err)
+	}
+	record.status = "CONVERTED"
+	record.reference = reference
+	return record.response(), nil
+}
+
 func (r *Repository) restoreItems(ctx context.Context, tx *sql.Tx, reservationID string) error {
 	rows, err := tx.QueryContext(ctx, "SELECT ticket_tier_id, quantity FROM reservation_items WHERE reservation_id = ? ORDER BY ticket_tier_id FOR UPDATE", reservationID)
 	if err != nil {
@@ -261,10 +344,12 @@ type queryer interface {
 
 func (r *Repository) get(ctx context.Context, db queryer, id string) (reservationRecord, error) {
 	var record reservationRecord
-	err := db.QueryRowContext(ctx, "SELECT r.id, r.event_id, r.status, r.expires_at, r.request_hash, e.artist FROM reservations r JOIN events e ON e.id = r.event_id WHERE r.id = ?", id).Scan(&record.id, &record.eventID, &record.status, &record.expiresAt, &record.requestHash, &record.eventArtist)
+	var reference sql.NullString
+	err := db.QueryRowContext(ctx, "SELECT r.id, r.event_id, r.status, r.expires_at, r.request_hash, r.order_reference, e.artist FROM reservations r JOIN events e ON e.id = r.event_id WHERE r.id = ?", id).Scan(&record.id, &record.eventID, &record.status, &record.expiresAt, &record.requestHash, &reference, &record.eventArtist)
 	if err != nil {
 		return record, err
 	}
+	record.reference = reference.String
 	rows, err := db.QueryContext(ctx, "SELECT ri.quantity, ri.unit_price, tt.slug, tt.name FROM reservation_items ri JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id WHERE ri.reservation_id = ? ORDER BY tt.id", id)
 	if err != nil {
 		return record, fmt.Errorf("get reservation items: %w", err)
@@ -281,12 +366,35 @@ func (r *Repository) get(ctx context.Context, db queryer, id string) (reservatio
 	}
 	return record, rows.Err()
 }
+func (r *Repository) getForUpdate(ctx context.Context, tx *sql.Tx, id string) (reservationRecord, error) {
+	var record reservationRecord
+	var reference sql.NullString
+	err := tx.QueryRowContext(ctx, "SELECT r.id, r.event_id, r.status, r.expires_at, r.request_hash, r.order_reference, e.artist FROM reservations r JOIN events e ON e.id = r.event_id WHERE r.id = ? FOR UPDATE", id).Scan(&record.id, &record.eventID, &record.status, &record.expiresAt, &record.requestHash, &reference, &record.eventArtist)
+	if err != nil {
+		return record, err
+	}
+	record.reference = reference.String
+	rows, err := tx.QueryContext(ctx, "SELECT ri.quantity, ri.unit_price, tt.slug, tt.name FROM reservation_items ri JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id WHERE ri.reservation_id = ? ORDER BY tt.id", id)
+	if err != nil {
+		return record, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var quantity, price uint64
+		var slug, name string
+		if err := rows.Scan(&quantity, &price, &slug, &name); err != nil {
+			return record, err
+		}
+		record.items = append(record.items, ResponseItem{TierID: slug, Name: name, Quantity: quantity, UnitPrice: price, LineTotal: quantity * price})
+	}
+	return record, rows.Err()
+}
 func (r *Repository) getTx(ctx context.Context, tx *sql.Tx, id string) (Reservation, error) {
 	record, err := r.get(ctx, tx, id)
 	if err != nil {
 		return Reservation{}, err
 	}
-	if record.status == "ACTIVE" && !time.Now().UTC().Before(record.expiresAt) {
+	if record.status == "EXPIRED" || (record.status == "ACTIVE" && !time.Now().UTC().Before(record.expiresAt)) {
 		return Reservation{}, ErrReservationExpired
 	}
 	return record.response(), nil
@@ -296,5 +404,5 @@ func (r reservationRecord) response() Reservation {
 	for _, item := range r.items {
 		subtotal += item.LineTotal
 	}
-	return Reservation{ID: r.id, Status: r.status, ExpiresAt: r.expiresAt.UTC().Format(time.RFC3339), Event: EventSummary{ID: r.eventID, Artist: r.eventArtist}, Items: r.items, Subtotal: subtotal}
+	return Reservation{ID: r.id, Status: r.status, ExpiresAt: r.expiresAt.UTC().Format(time.RFC3339), Event: EventSummary{ID: r.eventID, Artist: r.eventArtist}, Items: r.items, Subtotal: subtotal, Reference: r.reference}
 }
