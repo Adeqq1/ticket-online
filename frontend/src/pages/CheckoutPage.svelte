@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { eventDate, formatRupiah, getConcertById } from "../lib/concerts.ts";
+  import { getEvent, ApiError } from "../lib/api.ts";
+  import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, orderSubtotal, voucherDiscount, type Buyer } from "../lib/checkout.ts";
   import { createTicketSnapshot, loadTicketSnapshot, saveTicketSnapshot } from "../lib/tickets.ts";
@@ -8,7 +9,9 @@
   import { concertTerms } from "../lib/terms.ts";
   import { RESERVATION_DURATION_MS, createReservationExpiry, isReservationExpired, remainingReservationSeconds, reservationBasketKey, reservationExpiryFromStorage, validReservationExpiry } from "../lib/reservation.ts";
   let { id }: { id: string } = $props();
-  const concert = $derived(getConcertById(id));
+  let concert = $state<Concert | undefined>();
+  let loading = $state(true);
+  let loadError = $state("");
   const lines = $derived(concert ? checkoutLines(concert, new URLSearchParams(location.search)) : []);
   const subtotal = $derived(orderSubtotal(lines));
   let step = $state(1); let payment = $state(""); let voucherInput = $state(""); let voucher = $state(""); let completed = $state(false); let ticketId = $state(""); let reference = $state(""); let storageFailed = $state(false);
@@ -50,7 +53,7 @@
     try { sessionStorage.removeItem(reservationKey); } catch { /* storage can be unavailable */ }
     await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
   }
-  onMount(() => {
+  function setupReservation() {
     if (!concert || !lines.length) return;
     const now = Date.now();
     let stored: string | null = null;
@@ -68,12 +71,22 @@
     const visibility = () => update();
     document.addEventListener("visibilitychange", visibility);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
+  }
+  onMount(() => {
+    const controller = new AbortController();
+    let cleanupReservation: (() => void) | undefined;
+    getEvent(id, controller.signal).then((event) => { if (!controller.signal.aborted) { concert = event; loading = false; cleanupReservation = setupReservation(); } }).catch((value) => { if (!controller.signal.aborted) { loadError = value instanceof ApiError && value.code === "EVENT_NOT_FOUND" ? "not-found" : value instanceof ApiError ? value.message : "Checkout belum dapat dimuat."; loading = false; } });
+    return () => { controller.abort(); cleanupReservation?.(); };
   });
 </script>
 
   <svelte:head><title>{!concert ? "Checkout tidak ditemukan | Tiket Online" : !lines.length ? "Keranjang kosong | Tiket Online" : `Checkout ${concert.artist} | Tiket Online`}</title><meta name="description" content={concert ? `Checkout tiket konser ${concert.artist} di Tiket Online.` : "Checkout tiket konser di Tiket Online."} /><meta name="robots" content="noindex" /></svelte:head>
-{#if !concert}
+{#if loading}
+  <p class="shell" role="status" aria-live="polite">Memuat checkout...</p>
+{:else if !concert || loadError === "not-found"}
   <NotFoundPanel className="checkout-missing" title="Konser tidak ditemukan." message="URL checkout ini tidak tepat." />
+{:else if loadError}
+  <section class="shell empty-state" role="alert"><p>{loadError}</p><button class="text-button" type="button" onclick={() => location.reload()}>Coba lagi</button></section>
 {:else if !lines.length}
   <NotFoundPanel className="checkout-missing" kicker="Keranjang kosong" title="Pilih tiket terlebih dahulu." message="Belum ada tiket valid yang dapat dilanjutkan ke checkout ini." href={`/konser/${concert.id}`} link="Pilih tiket" />
 {:else}

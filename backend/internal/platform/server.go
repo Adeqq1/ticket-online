@@ -10,11 +10,17 @@ import (
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
+	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 )
 
 func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
+	return NewHandlerWithTTL(db, logger, 10*time.Minute)
+}
+
+func NewHandlerWithTTL(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration) http.Handler {
 	mux := http.NewServeMux()
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
+	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -27,6 +33,8 @@ func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
 	})
 	mux.HandleFunc("GET /api/v1/events", catalogHandler.List)
 	mux.HandleFunc("GET /api/v1/events/{eventID}", catalogHandler.Detail)
+	mux.HandleFunc("POST /api/v1/reservations", reservationHandler.Create)
+	mux.HandleFunc("GET /api/v1/reservations/{reservationID}", reservationHandler.Get)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		Error(w, http.StatusNotFound, "NOT_FOUND", "Route not found")
 	})

@@ -29,7 +29,7 @@ func main() {
 	}
 	defer db.Close()
 
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandler(db, logger))
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithTTL(db, logger, cfg.ReservationTTL))
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {
