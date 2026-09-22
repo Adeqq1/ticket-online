@@ -10,7 +10,7 @@ export function filterEvents(query: string, source: Concert[] = featuredConcerts
   );
 }
 
-export function filterConcerts(filters: ConcertFilters, source = concerts): Concert[] {
+export function filterConcerts(filters: ConcertFilters, source: Concert[] = concerts): Concert[] {
   const query = filters.query.trim().toLocaleLowerCase("id-ID");
   return source.filter((concert) => {
     const matchesQuery = !query || [concert.artist, concert.city, concert.venue].some((value) => value.toLocaleLowerCase("id-ID").includes(query));
