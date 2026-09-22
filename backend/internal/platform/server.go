@@ -35,6 +35,7 @@ func NewHandlerWithTTL(db *sql.DB, logger *slog.Logger, reservationTTL time.Dura
 	mux.HandleFunc("GET /api/v1/events/{eventID}", catalogHandler.Detail)
 	mux.HandleFunc("POST /api/v1/reservations", reservationHandler.Create)
 	mux.HandleFunc("GET /api/v1/reservations/{reservationID}", reservationHandler.Get)
+	mux.HandleFunc("DELETE /api/v1/reservations/{reservationID}", reservationHandler.Cancel)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		Error(w, http.StatusNotFound, "NOT_FOUND", "Route not found")
 	})

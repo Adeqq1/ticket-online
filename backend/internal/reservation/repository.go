@@ -130,6 +130,9 @@ func (r *Repository) Create(ctx context.Context, request Request, idempotencyKey
 }
 
 func (r *Repository) Get(ctx context.Context, id string) (Reservation, error) {
+	if err := r.expireOne(ctx, id); err != nil && !errors.Is(err, ErrReservationNotExpired) && !errors.Is(err, ErrReservationExpired) {
+		return Reservation{}, err
+	}
 	record, err := r.get(ctx, r.db, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Reservation{}, ErrReservationNotFound
@@ -141,6 +144,114 @@ func (r *Repository) Get(ctx context.Context, id string) (Reservation, error) {
 		return Reservation{}, ErrReservationExpired
 	}
 	return record.response(), nil
+}
+
+var ErrReservationNotExpired = errors.New("reservation is not expired")
+
+func (r *Repository) Cancel(ctx context.Context, id string) (Reservation, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return Reservation{}, fmt.Errorf("begin cancellation: %w", err)
+	}
+	defer tx.Rollback()
+	var lockedStatus string
+	if err := tx.QueryRowContext(ctx, "SELECT status FROM reservations WHERE id = ? FOR UPDATE", id).Scan(&lockedStatus); errors.Is(err, sql.ErrNoRows) {
+		return Reservation{}, ErrReservationNotFound
+	} else if err != nil {
+		return Reservation{}, fmt.Errorf("lock reservation for cancellation: %w", err)
+	}
+	record, err := r.get(ctx, tx, id)
+	if err != nil {
+		return Reservation{}, err
+	}
+	if record.status == "EXPIRED" {
+		return Reservation{}, ErrReservationExpired
+	}
+	if record.status == "CONVERTED" {
+		return Reservation{}, ErrReservationConverted
+	}
+	if record.status == "CANCELLED" {
+		return record.response(), nil
+	}
+	if !time.Now().UTC().Before(record.expiresAt) {
+		if err := r.restoreItems(ctx, tx, id); err != nil {
+			return Reservation{}, err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE reservations SET status = 'EXPIRED', updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND status = 'ACTIVE'", id); err != nil {
+			return Reservation{}, fmt.Errorf("expire during cancellation: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return Reservation{}, fmt.Errorf("commit expiration during cancellation: %w", err)
+		}
+		return Reservation{}, ErrReservationExpired
+	}
+	if err := r.restoreItems(ctx, tx, id); err != nil {
+		return Reservation{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE reservations SET status = 'CANCELLED', updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND status = 'ACTIVE'", id); err != nil {
+		return Reservation{}, fmt.Errorf("cancel reservation: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Reservation{}, fmt.Errorf("commit cancellation: %w", err)
+	}
+	record.status = "CANCELLED"
+	return record.response(), nil
+}
+
+var ErrReservationConverted = errors.New("reservation converted")
+
+func (r *Repository) expireOne(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return fmt.Errorf("begin expiration: %w", err)
+	}
+	defer tx.Rollback()
+	var status string
+	var expiresAt time.Time
+	if err := tx.QueryRowContext(ctx, "SELECT status, expires_at FROM reservations WHERE id = ? FOR UPDATE", id).Scan(&status, &expiresAt); errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("read expiration: %w", err)
+	}
+	if status != "ACTIVE" || time.Now().UTC().Before(expiresAt) {
+		return ErrReservationNotExpired
+	}
+	if err := r.restoreItems(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE reservations SET status = 'EXPIRED', updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND status = 'ACTIVE'", id); err != nil {
+		return fmt.Errorf("expire reservation: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit expiration: %w", err)
+	}
+	return ErrReservationExpired
+}
+
+func (r *Repository) restoreItems(ctx context.Context, tx *sql.Tx, reservationID string) error {
+	rows, err := tx.QueryContext(ctx, "SELECT ticket_tier_id, quantity FROM reservation_items WHERE reservation_id = ? ORDER BY ticket_tier_id FOR UPDATE", reservationID)
+	if err != nil {
+		return fmt.Errorf("read reservation items for restore: %w", err)
+	}
+	defer rows.Close()
+	type item struct{ tierID, quantity uint64 }
+	var items []item
+	for rows.Next() {
+		var value item
+		if err := rows.Scan(&value.tierID, &value.quantity); err != nil {
+			return err
+		}
+		items = append(items, value)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, value := range items {
+		if _, err := tx.ExecContext(ctx, "UPDATE ticket_tiers SET available_quantity = LEAST(capacity, available_quantity + ?), updated_at = UTC_TIMESTAMP(6) WHERE id = ?", value.quantity, value.tierID); err != nil {
+			return fmt.Errorf("restore ticket stock: %w", err)
+		}
+	}
+	return nil
 }
 
 type queryer interface {

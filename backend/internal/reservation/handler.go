@@ -75,6 +75,15 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, value)
 }
+
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	value, err := h.repository.Cancel(r.Context(), r.PathValue("reservationID"))
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
 func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrEventNotFound):
@@ -91,6 +100,8 @@ func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusNotFound, "RESERVATION_NOT_FOUND", "Reservasi tidak ditemukan")
 	case errors.Is(err, ErrReservationExpired):
 		writeError(w, http.StatusGone, "RESERVATION_EXPIRED", "Reservasi sudah kedaluwarsa")
+	case errors.Is(err, ErrReservationConverted):
+		writeError(w, http.StatusConflict, "RESERVATION_CONVERTED", "Reservasi sudah dikonversi")
 	default:
 		h.logger.ErrorContext(r.Context(), "reservation database error", "request_id", r.Header.Get("X-Request-ID"), "error", err)
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan pada server")

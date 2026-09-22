@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
+	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 )
 
 func main() {
@@ -29,9 +30,11 @@ func main() {
 	}
 	defer db.Close()
 
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithTTL(db, logger, cfg.ReservationTTL))
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithTTL(db, logger, cfg.ReservationTTL))
+	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
+	go worker.Run(serverCtx)
 	go func() {
 		logger.Info("http server listening", "addr", cfg.HTTPAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
