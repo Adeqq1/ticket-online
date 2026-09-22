@@ -2,14 +2,19 @@ package platform
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
 )
 
 func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
+	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -20,6 +25,8 @@ func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
 		}
 		JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	mux.HandleFunc("GET /api/v1/events", catalogHandler.List)
+	mux.HandleFunc("GET /api/v1/events/{eventID}", catalogHandler.Detail)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		Error(w, http.StatusNotFound, "NOT_FOUND", "Route not found")
 	})
@@ -39,8 +46,18 @@ func NewHTTPServer(addr string, handler http.Handler) *http.Server {
 
 func loggingMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			var bytes [16]byte
+			if _, err := rand.Read(bytes[:]); err == nil {
+				requestID = hex.EncodeToString(bytes[:])
+			} else {
+				requestID = "unknown"
+			}
+		}
+		w.Header().Set("X-Request-ID", requestID)
 		started := time.Now()
 		next.ServeHTTP(w, r)
-		logger.InfoContext(context.Background(), "http request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(started).String())
+		logger.InfoContext(context.Background(), "http request", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "duration", time.Since(started).String())
 	})
 }
