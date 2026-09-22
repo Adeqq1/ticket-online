@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { RESERVATION_DURATION_MS, createReservationExpiry, isReservationExpired, remainingReservationSeconds, reservationBasketKey, reservationExpiryFromStorage, validReservationExpiry } from "./src/lib/reservation.ts";
+import { RESERVATION_DURATION_MS, createReservationExpiry, isReservationExpired, parseStoredReservation, remainingReservationSeconds, reservationBasketKey, reservationExpiryFromStorage, serializeStoredReservation, validReservationExpiry } from "./src/lib/reservation.ts";
 
 test("creates and evaluates an absolute reservation deadline", () => {
   const now = Date.parse("2027-01-01T00:00:00Z");
@@ -23,4 +23,12 @@ test("uses a stable basket key and rejects invalid persisted deadlines", () => {
   expect(reservationExpiryFromStorage("-1", now)).toBe(-1);
   expect(reservationExpiryFromStorage("broken", now)).toBe(now);
   expect(reservationExpiryFromStorage(String(now + RESERVATION_DURATION_MS + 1), now)).toBe(now);
+});
+
+test("accepts only opaque persisted reservation metadata", () => {
+  const value = { reservationId: "reservation-1", idempotencyKey: "key-12345678901234", eventId: "nusa-malam", basketKey: "festival=2" };
+  expect(parseStoredReservation(serializeStoredReservation(value))).toEqual(value);
+  expect(parseStoredReservation(JSON.stringify({ ...value, expiresAt: Date.now() + 1_000 }))).toEqual(value);
+  expect(parseStoredReservation(JSON.stringify({ ...value, reservationId: "" }))).toBeNull();
+  expect(parseStoredReservation("not-json")).toBeNull();
 });
