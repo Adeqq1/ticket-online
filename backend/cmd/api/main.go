@@ -11,6 +11,7 @@ import (
 
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
+	"github.com/Adeqq1/ticket-online/backend/migrations"
 )
 
 func main() {
@@ -29,10 +30,17 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	migrationCtx, cancelMigration := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := migrations.Run(migrationCtx, db); err != nil {
+		cancelMigration()
+		logger.Error("migration failed", "error", err)
+		os.Exit(1)
+	}
+	cancelMigration()
 
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithTTL(db, logger, cfg.ReservationTTL))
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir))
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
 	go worker.Run(serverCtx)
 	go func() {

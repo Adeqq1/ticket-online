@@ -7,6 +7,9 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
@@ -14,10 +17,14 @@ import (
 )
 
 func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
-	return NewHandlerWithTTL(db, logger, 10*time.Minute)
+	return NewHandlerWithConfig(db, logger, 10*time.Minute, "")
 }
 
 func NewHandlerWithTTL(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration) http.Handler {
+	return NewHandlerWithConfig(db, logger, reservationTTL, "")
+}
+
+func NewHandlerWithConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string) http.Handler {
 	mux := http.NewServeMux()
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
@@ -36,10 +43,28 @@ func NewHandlerWithTTL(db *sql.DB, logger *slog.Logger, reservationTTL time.Dura
 	mux.HandleFunc("POST /api/v1/reservations", reservationHandler.Create)
 	mux.HandleFunc("GET /api/v1/reservations/{reservationID}", reservationHandler.Get)
 	mux.HandleFunc("DELETE /api/v1/reservations/{reservationID}", reservationHandler.Cancel)
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		Error(w, http.StatusNotFound, "NOT_FOUND", "Route not found")
-	})
+	mux.HandleFunc("/", staticHandler(staticDir))
 	return loggingMiddleware(logger, mux)
+}
+
+func staticHandler(staticDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if staticDir == "" || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api" {
+			Error(w, http.StatusNotFound, "NOT_FOUND", "Route not found")
+			return
+		}
+		requested := filepath.Join(staticDir, filepath.Clean("/"+r.URL.Path))
+		if info, err := os.Stat(requested); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, requested)
+			return
+		}
+		index := filepath.Join(staticDir, "index.html")
+		if _, err := os.Stat(index); err != nil {
+			Error(w, http.StatusNotFound, "NOT_FOUND", "Route not found")
+			return
+		}
+		http.ServeFile(w, r, index)
+	}
 }
 
 func NewHTTPServer(addr string, handler http.Handler) *http.Server {
