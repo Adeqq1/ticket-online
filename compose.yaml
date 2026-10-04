@@ -23,6 +23,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       MYSQL_DSN: ticket:ticket@tcp(db:3306)/ticket_online?parseTime=true&loc=UTC
+      APP_ENV: ${APP_ENV:-production}
       HTTP_ADDR: :8080
       STATIC_DIR: /app/public
     ports:

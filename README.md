@@ -13,7 +13,7 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 - `backend/migrations/`: migration dan seed yang di-embed ke binary Go.
 - `compose.yaml`: MySQL, API production, dan Vite development server.
 
-Catalog event, reservation, dan order menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer` wajib dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Payment serta e-ticket tetap simulasi browser sesuai scope issue.
+Catalog event, reservation, dan order menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer` wajib dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi tersedia di backend development; penerbitan tiket masih berupa demo browser.
 
 ## Requirements
 
@@ -61,11 +61,14 @@ Environment variable backend:
 |---|---|---|
 | `HTTP_ADDR` | `:8080` | Alamat HTTP API |
 | `MYSQL_DSN` | wajib | DSN MySQL aplikasi |
+| `APP_ENV` | `production` | Aktifkan endpoint pembayaran simulasi hanya dengan `development` |
 | `STATIC_DIR` | kosong | Direktori frontend production |
 | `RESERVATION_TTL` | `10m` | Lama reservation |
 | `EXPIRY_INTERVAL` | `15s` | Interval expiry worker |
 
 `go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali.
+
+Untuk memakai endpoint pembayaran simulasi di Docker Compose, jalankan `APP_ENV=development docker compose up --build`. Saat berjalan terpisah, gunakan `APP_ENV=development go run ./cmd/api`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah berhasil, pembayaran tidak dapat diubah.
 
 ## Menjalankan Frontend Terpisah
 
@@ -126,4 +129,4 @@ docker compose up --build
 - Final backend image berjalan sebagai non-root user.
 - Gunakan password, DSN, dan secret berbeda untuk production melalui secret manager atau environment deployment.
 - Jangan commit `.env`, password production, generated binary, atau database volume.
-- Payment, penerbitan tiket, QR code, email, login, dan refund belum menjadi fitur production.
+- Payment gateway, penerbitan e-ticket backend, QR code, email, login, dan refund belum menjadi fitur production.
