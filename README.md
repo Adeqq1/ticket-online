@@ -13,7 +13,7 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 - `backend/migrations/`: migration dan seed yang di-embed ke binary Go.
 - `compose.yaml`: MySQL, API production, dan Vite development server.
 
-Catalog event dan reservation menggunakan database. Payment serta e-ticket tetap simulasi browser sesuai scope issue.
+Catalog event, reservation, dan schema order menggunakan database. Pembuatan order belum tersedia melalui API; payment serta e-ticket tetap simulasi browser sesuai scope issue.
 
 ## Requirements
 

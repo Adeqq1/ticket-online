@@ -7,7 +7,7 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || items[0].version != 1 || items[1].version != 2 || items[2].version != 3 {
+	if len(items) != 4 || items[0].version != 1 || items[1].version != 2 || items[2].version != 3 || items[3].version != 4 {
 		t.Fatalf("unexpected migrations: %+v", items)
 	}
 	if len(statements(string(items[0].data))) < 6 {
