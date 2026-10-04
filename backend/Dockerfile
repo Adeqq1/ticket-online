@@ -10,12 +10,13 @@ WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/ticket-api ./cmd/api && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/ticket-migrate ./cmd/migrate
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/ticket-api ./cmd/api && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/ticket-migrate ./cmd/migrate && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/ticket-staff ./cmd/staff
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=backend-build /out/ticket-api /app/ticket-api
 COPY --from=backend-build /out/ticket-migrate /app/ticket-migrate
+COPY --from=backend-build /out/ticket-staff /app/ticket-staff
 COPY --from=frontend-build /src/frontend/dist /app/public
 USER nonroot:nonroot
 ENV HTTP_ADDR=:8080 STATIC_DIR=/app/public

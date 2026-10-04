@@ -13,7 +13,13 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 - `backend/migrations/`: migration dan seed yang di-embed ke binary Go.
 - `compose.yaml`: MySQL, API production, dan Vite development server.
 
-Catalog event dan reservation menggunakan database. Payment serta e-ticket tetap simulasi browser sesuai scope issue.
+Catalog event, reservation, order, pembayaran, dan e-ticket menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer`, nama untuk setiap tiket pada `attendees`, dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi hanya tersedia di backend development. Pembayaran berhasil menerbitkan snapshot e-ticket untuk setiap tiket dalam transaksi yang sama.
+
+Frontend saat ini masih menggunakan endpoint `/convert` dan membuat tiket demo di browser. Alur order, pembayaran, dan e-ticket database di atas perlu diuji lewat API sampai integrasi frontend selesai.
+
+Order `PENDING` memakai deadline reservasi, tersedia sebagai `expiresAt` pada respons checkout/detail order. Worker mengubah order yang lewat deadline menjadi `EXPIRED` dan mengembalikan stok tepat sekali; pembayaran terlambat ditolak meskipun worker belum berjalan. Deadline ini berbeda dari masa berlaku token akses.
+
+Checkout juga memerlukan header `Idempotency-Key` yang sama dengan key reservasi. Respons menyertakan `accessToken` privat order serta `accessExpiresAt`. Simpan token dengan aman; token dipakai sebagai `Authorization: Bearer <accessToken>` pada API order dan tiket, serta pembayaran simulasi. Token kedaluwarsa pukul 00.00 WIB setelah tanggal konser. Server memakai `ORDER_ACCESS_SECRET` yang tetap untuk menandatangani token.
 
 ## Requirements
 
@@ -24,6 +30,13 @@ Catalog event dan reservation menggunakan database. Payment serta e-ticket tetap
 ## Menjalankan Seluruh Stack
 
 ```bash
+docker compose up --build
+```
+
+Compose memerlukan `ORDER_ACCESS_SECRET`. Buat sekali dan simpan nilainya sebagai secret deployment:
+
+```bash
+export ORDER_ACCESS_SECRET="$(openssl rand -base64 32)"
 docker compose up --build
 ```
 
@@ -61,11 +74,36 @@ Environment variable backend:
 |---|---|---|
 | `HTTP_ADDR` | `:8080` | Alamat HTTP API |
 | `MYSQL_DSN` | wajib | DSN MySQL aplikasi |
+| `ORDER_ACCESS_SECRET` | wajib | Base64 dari 32 byte acak; harus tetap sama setelah restart |
+| `APP_ENV` | `production` | Aktifkan endpoint pembayaran simulasi hanya dengan `development` |
 | `STATIC_DIR` | kosong | Direktori frontend production |
 | `RESERVATION_TTL` | `10m` | Lama reservation |
 | `EXPIRY_INTERVAL` | `15s` | Interval expiry worker |
 
-`go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali.
+`go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali. Backend terpisah juga memerlukan `ORDER_ACCESS_SECRET` yang sama setiap kali proses API dijalankan.
+
+Untuk memakai endpoint pembayaran simulasi di Docker Compose, jalankan `APP_ENV=development docker compose up --build`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah berhasil, pembayaran tidak dapat diubah dan retry mengembalikan e-ticket yang sama. Baca detail order lewat `GET /api/v1/orders/{orderID}`, daftar tiket lewat `GET /api/v1/orders/{orderID}/tickets`, atau satu tiket lewat `GET /api/v1/tickets/{ticketID}`. Ketiga endpoint tersebut dan pembayaran simulasi memerlukan token privat order dari checkout.
+
+## Akun Petugas
+
+Buat admin pertama dengan command di image backend setelah database berjalan. Password dibaca satu baris dari stdin; isi lewat secret manager atau file secret agar password tidak masuk argumen proses:
+
+```bash
+docker compose run --rm --no-deps --entrypoint /app/ticket-staff api bootstrap-admin --name 'Admin Event' --email admin@example.com < /run/secrets/admin-password
+```
+
+Admin login melalui `POST /api/v1/staff/login`, lalu mengelola akun STAFF lewat `/api/v1/admin/staff`. Sesi berlaku 8 jam dan dikirim pada header `Authorization: Bearer <accessToken>`. Gunakan `GET /api/v1/staff/me` untuk profil serta penugasan. Logout dengan `POST /api/v1/staff/logout`. Admin membuat petugas beserta pasangan `eventId` dan `gate`, dapat mengganti penugasan, menonaktifkan akun, dan reset password. Penugasan petugas menentukan akses scan pada task berikutnya.
+
+Di production, layani API melalui HTTPS agar password dan token petugas terlindungi saat transit.
+
+Contoh body checkout (jumlah nama harus sama dengan jumlah tiket reservasi pada setiap tier):
+
+```json
+{
+  "buyer": {"name": "Nama Pembeli", "email": "buyer@example.com", "phone": "081234567890", "identity": "123456789012"},
+  "attendees": [{"tierId": "festival", "names": ["Nama Peserta Satu", "Nama Peserta Dua"]}]
+}
+```
 
 ## Menjalankan Frontend Terpisah
 
@@ -89,8 +127,16 @@ Backend:
 cd backend
 go test ./...
 go vet ./...
-go build ./cmd/api ./cmd/migrate
+go build ./cmd/api ./cmd/migrate ./cmd/staff
 ```
+
+Tes integrasi checkout, pembayaran, expiry, dan sesi petugas memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variabel tersebut, tes integrasi dilewati. Gunakan database tes yang dapat dibuang, lalu jalankan dari `backend/`:
+
+```bash
+MYSQL_TEST_DSN="$MYSQL_DSN" go test -v ./...
+```
+
+CI menjalankan perintah yang sama terhadap service MySQL job, dengan secret order sementara yang dibuat per job.
 
 Frontend:
 
@@ -124,4 +170,4 @@ docker compose up --build
 - Final backend image berjalan sebagai non-root user.
 - Gunakan password, DSN, dan secret berbeda untuk production melalui secret manager atau environment deployment.
 - Jangan commit `.env`, password production, generated binary, atau database volume.
-- Payment, order permanen, penerbitan tiket, QR code, email, login, dan refund belum menjadi fitur production.
+- Payment gateway, penerbitan e-ticket backend, QR code, email, login, dan refund belum menjadi fitur production.

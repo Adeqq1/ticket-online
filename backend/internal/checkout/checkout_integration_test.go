@@ -1,0 +1,104 @@
+package checkout
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/migrations"
+	_ "github.com/go-sql-driver/mysql"
+)
+
+func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
+	dsn := os.Getenv("MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set MYSQL_TEST_DSN to a disposable MySQL database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrations.Run(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	reservationID, err := randomID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tierID, price uint64
+	if err := db.QueryRowContext(ctx, "SELECT id, price FROM ticket_tiers WHERE event_id = 'nusa-malam' AND slug = 'festival'").Scan(&tierID, &price); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	idempotencyKey := "checkout-test-" + reservationID
+	if _, err := db.ExecContext(ctx, `INSERT INTO reservations
+		(id, event_id, status, idempotency_key, request_hash, expires_at, created_at, updated_at)
+		VALUES (?, 'nusa-malam', 'ACTIVE', ?, REPEAT('a', 64), ?, ?, ?)`, reservationID, idempotencyKey, now.Add(time.Minute), now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO reservation_items (reservation_id, ticket_tier_id, quantity, unit_price) VALUES (?, ?, 2, ?)", reservationID, tierID, price); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		var orderID string
+		if err := db.QueryRowContext(context.Background(), "SELECT id FROM orders WHERE reservation_id = ?", reservationID).Scan(&orderID); err == nil {
+			_, _ = db.Exec("DELETE FROM etickets WHERE order_id = ?", orderID)
+			_, _ = db.Exec("DELETE FROM order_attendees WHERE order_id = ?", orderID)
+			_, _ = db.Exec("DELETE FROM order_buyers WHERE order_id = ?", orderID)
+			_, _ = db.Exec("DELETE FROM order_items WHERE order_id = ?", orderID)
+			_, _ = db.Exec("DELETE FROM orders WHERE id = ?", orderID)
+		}
+		_, _ = db.Exec("DELETE FROM reservation_items WHERE reservation_id = ?", reservationID)
+		_, _ = db.Exec("DELETE FROM reservations WHERE id = ?", reservationID)
+	})
+
+	request := Request{
+		Buyer:       Buyer{Name: "Pembeli Tes", Email: "test@example.com", Phone: "081234567890", Identity: "123456789012"},
+		VoucherCode: "HEMAT10",
+		Attendees:   []Attendees{{TierID: "festival", Names: []string{"Peserta Satu", "Peserta Dua"}}},
+	}
+	repository := NewRepository(db)
+	first, replay, err := repository.Create(ctx, reservationID, idempotencyKey, request)
+	if err != nil || replay {
+		t.Fatalf("first checkout = (%+v, %v, %v)", first, replay, err)
+	}
+	if first.Subtotal != price*2 || first.AdminFee != adminFee || first.Discount != first.Subtotal/10 || first.Total != first.Subtotal+adminFee-first.Discount {
+		t.Fatalf("server totals are incorrect: %+v", first)
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, first.ExpiresAt)
+	if err != nil || deadline.Sub(now.Add(time.Minute)) > time.Microsecond || now.Add(time.Minute).Sub(deadline) > time.Microsecond {
+		t.Fatalf("order deadline = %q, %v; want reservation deadline", first.ExpiresAt, err)
+	}
+	second, replay, err := repository.Create(ctx, reservationID, idempotencyKey, request)
+	if err != nil || !replay || second.ID != first.ID || second.Reference != first.Reference || second.ExpiresAt != first.ExpiresAt {
+		t.Fatalf("retry = (%+v, %v, %v), want the original order", second, replay, err)
+	}
+	request.Buyer.Name = "Nama Berbeda"
+	if _, _, err := repository.Create(ctx, reservationID, idempotencyKey, request); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("changed retry error = %v, want idempotency conflict", err)
+	}
+	var orders, buyers, items, attendees int
+	if err := db.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM orders WHERE reservation_id = ?), (SELECT COUNT(*) FROM order_buyers WHERE order_id = ?), (SELECT COUNT(*) FROM order_items WHERE order_id = ?), (SELECT COUNT(*) FROM order_attendees WHERE order_id = ?)", reservationID, first.ID, first.ID, first.ID).Scan(&orders, &buyers, &items, &attendees); err != nil {
+		t.Fatal(err)
+	}
+	if orders != 1 || buyers != 1 || items != 1 || attendees != 2 {
+		t.Fatalf("persisted rows: orders=%d buyers=%d items=%d attendees=%d", orders, buyers, items, attendees)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, "SELECT status FROM reservations WHERE id = ?", reservationID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "CONVERTED" {
+		t.Fatalf("reservation status = %q, want CONVERTED", status)
+	}
+}

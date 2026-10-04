@@ -18,5 +18,8 @@ jobs:
       - name: Build frontend development image
         run: docker build -f frontend/Dockerfile -t ticket-online-frontend:ci frontend
 
+      - name: Generate ephemeral CI order secret
+        run: echo "ORDER_ACCESS_SECRET=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
       - name: Validate Compose configuration
         run: docker compose config

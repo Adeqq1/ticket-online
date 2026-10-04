@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"log/slog"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 )
 
 type Worker struct {
@@ -31,6 +33,9 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) runBatch(ctx context.Context) {
+	if err := payment.NewRepository(w.repository.db).ExpirePendingOrders(ctx); err != nil {
+		w.logger.ErrorContext(ctx, "expire unpaid orders", "error", err)
+	}
 	rows, err := w.repository.db.QueryContext(ctx, "SELECT id FROM reservations WHERE status = 'ACTIVE' AND expires_at <= UTC_TIMESTAMP(6) ORDER BY expires_at, id LIMIT 100")
 	if err != nil {
 		w.logger.ErrorContext(ctx, "find expired reservations", "error", err)
