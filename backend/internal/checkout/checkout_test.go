@@ -54,3 +54,26 @@ func TestRequestHashBindsBuyerAndVoucherToReservation(t *testing.T) {
 		t.Fatalf("unexpected checkout hashes: %q %q %q", first, second, changed)
 	}
 }
+
+func TestRequestHashBindsAttendeeNames(t *testing.T) {
+	request := Request{Buyer: Buyer{Name: "Buyer", Email: "buyer@example.com", Phone: "081234567890", Identity: "123456789012"}, Attendees: []Attendees{{TierID: "festival", Names: []string{"Peserta Satu"}}}}
+	first, err := requestHash("reservation-a", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Attendees[0].Names[0] = "Peserta Dua"
+	changed, err := requestHash("reservation-a", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == changed {
+		t.Fatal("checkout hash did not change when attendee changed")
+	}
+}
+
+func TestValidateRejectsInvalidAttendeeName(t *testing.T) {
+	request := Request{Buyer: Buyer{Name: "Buyer", Email: "buyer@example.com", Phone: "081234567890", Identity: "123456789012"}, Attendees: []Attendees{{TierID: "festival", Names: []string{" "}}}}
+	if _, err := Validate(request); err != ErrInvalidRequest {
+		t.Fatalf("Validate() error = %v, want ErrInvalidRequest", err)
+	}
+}

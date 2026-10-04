@@ -66,6 +66,20 @@ func TestSimulatedPaymentRouteOnlyExistsInDevelopment(t *testing.T) {
 	}
 }
 
+func TestTicketReadRoutesAreRegisteredInProduction(t *testing.T) {
+	handler := NewHandler(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, path := range []string{
+		"/api/v1/orders/invalid/tickets",
+		"/api/v1/tickets/invalid",
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("%s returned %d, want 400 (registered ticket route)", path, recorder.Code)
+		}
+	}
+}
+
 func TestStaticHandlerFallsBackToIndexForBrowserRoutes(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("spa"), 0o644); err != nil {

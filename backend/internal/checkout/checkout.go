@@ -35,9 +35,15 @@ type Buyer struct {
 	Identity string `json:"identity"`
 }
 
+type Attendees struct {
+	TierID string   `json:"tierId"`
+	Names  []string `json:"names"`
+}
+
 type Request struct {
-	Buyer       Buyer  `json:"buyer"`
-	VoucherCode string `json:"voucherCode,omitempty"`
+	Buyer       Buyer       `json:"buyer"`
+	VoucherCode string      `json:"voucherCode,omitempty"`
+	Attendees   []Attendees `json:"attendees,omitempty"`
 }
 
 type Item struct {
@@ -70,6 +76,15 @@ func Validate(request Request) (Request, error) {
 	request.Buyer.Email = strings.TrimSpace(request.Buyer.Email)
 	request.Buyer.Phone = strings.TrimSpace(request.Buyer.Phone)
 	request.Buyer.Identity = strings.TrimSpace(request.Buyer.Identity)
+	for i := range request.Attendees {
+		request.Attendees[i].TierID = strings.ToLower(strings.TrimSpace(request.Attendees[i].TierID))
+		for j := range request.Attendees[i].Names {
+			request.Attendees[i].Names[j] = strings.TrimSpace(request.Attendees[i].Names[j])
+			if utf8.RuneCountInString(request.Attendees[i].Names[j]) < 2 || utf8.RuneCountInString(request.Attendees[i].Names[j]) > 80 {
+				return Request{}, ErrInvalidRequest
+			}
+		}
+	}
 	if utf8.RuneCountInString(request.Buyer.Name) < 2 || utf8.RuneCountInString(request.Buyer.Name) > 80 || len(request.Buyer.Email) > 254 {
 		return Request{}, ErrInvalidRequest
 	}
@@ -100,10 +115,11 @@ func digits(value string) bool {
 
 func requestHash(reservationID string, request Request) (string, error) {
 	data, err := json.Marshal(struct {
-		ReservationID string `json:"reservationId"`
-		Buyer         Buyer  `json:"buyer"`
-		VoucherCode   string `json:"voucherCode"`
-	}{reservationID, request.Buyer, request.VoucherCode})
+		ReservationID string      `json:"reservationId"`
+		Buyer         Buyer       `json:"buyer"`
+		VoucherCode   string      `json:"voucherCode"`
+		Attendees     []Attendees `json:"attendees,omitempty"`
+	}{reservationID, request.Buyer, request.VoucherCode, request.Attendees})
 	if err != nil {
 		return "", fmt.Errorf("marshal checkout hash: %w", err)
 	}
@@ -174,6 +190,15 @@ func (r *Repository) Create(ctx context.Context, reservationID string, request R
 		return Order{}, false, fmt.Errorf("read reservation items: %w", err)
 	}
 	order := Order{ReservationID: reservationID, Status: "PENDING", AdminFee: adminFee}
+	attendeeNames := make(map[string][]string, len(request.Attendees))
+	for _, attendee := range request.Attendees {
+		if attendee.TierID == "" || len(attendee.Names) == 0 || attendeeNames[attendee.TierID] != nil {
+			rows.Close()
+			return Order{}, false, ErrInvalidRequest
+		}
+		attendeeNames[attendee.TierID] = attendee.Names
+	}
+	seenAttendees := make(map[string]bool, len(attendeeNames))
 	for rows.Next() {
 		var item Item
 		if err := rows.Scan(&item.ticketTierID, &item.TierID, &item.Name, &item.Quantity, &item.UnitPrice); err != nil {
@@ -185,6 +210,12 @@ func (r *Repository) Create(ctx context.Context, reservationID string, request R
 			return Order{}, false, ErrInvalidRequest
 		}
 		item.LineTotal = item.Quantity * item.UnitPrice
+		names := attendeeNames[item.TierID]
+		if uint64(len(names)) != item.Quantity {
+			rows.Close()
+			return Order{}, false, ErrInvalidRequest
+		}
+		seenAttendees[item.TierID] = true
 		if math.MaxUint64-order.Subtotal < item.LineTotal {
 			rows.Close()
 			return Order{}, false, ErrInvalidRequest
@@ -200,6 +231,9 @@ func (r *Repository) Create(ctx context.Context, reservationID string, request R
 		return Order{}, false, fmt.Errorf("close reservation items: %w", err)
 	}
 	if len(order.Items) == 0 || math.MaxUint64-order.Subtotal < order.AdminFee {
+		return Order{}, false, ErrInvalidRequest
+	}
+	if len(seenAttendees) != len(attendeeNames) {
 		return Order{}, false, ErrInvalidRequest
 	}
 	if request.VoucherCode == "HEMAT10" {
@@ -224,6 +258,11 @@ func (r *Repository) Create(ctx context.Context, reservationID string, request R
 		if _, err := tx.ExecContext(ctx, `INSERT INTO order_items
 			(order_id, ticket_tier_id, tier_name, quantity, unit_price) VALUES (?, ?, ?, ?, ?)`, order.ID, item.ticketTierID, item.Name, item.Quantity, item.UnitPrice); err != nil {
 			return Order{}, false, fmt.Errorf("insert order item: %w", err)
+		}
+		for i, name := range attendeeNames[item.TierID] {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO order_attendees (order_id, ticket_tier_id, ticket_number, name) VALUES (?, ?, ?, ?)`, order.ID, item.ticketTierID, i+1, name); err != nil {
+				return Order{}, false, fmt.Errorf("insert order attendee: %w", err)
+			}
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO order_buyers (order_id, name, email, phone, identity) VALUES (?, ?, ?, ?, ?)`, order.ID, request.Buyer.Name, request.Buyer.Email, request.Buyer.Phone, request.Buyer.Identity); err != nil {

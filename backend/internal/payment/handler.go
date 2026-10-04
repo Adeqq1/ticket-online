@@ -53,6 +53,42 @@ func (h *Handler) Simulate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, payment)
 }
 
+func (h *Handler) TicketsForOrder(w http.ResponseWriter, r *http.Request) {
+	orderID := strings.ToLower(r.PathValue("orderID"))
+	if !validID(orderID) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "ID order tidak valid")
+		return
+	}
+	tickets, err := h.repository.TicketsForOrder(r.Context(), orderID)
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tickets": tickets})
+}
+
+func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
+	ticketID := strings.ToLower(r.PathValue("ticketID"))
+	if !validID(ticketID) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "ID e-ticket tidak valid")
+		return
+	}
+	ticket, err := h.repository.Ticket(r.Context(), ticketID)
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ticket)
+}
+
+func validID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
+}
+
 func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrInvalidRequest):
@@ -63,6 +99,11 @@ func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusConflict, "ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
 	case errors.Is(err, ErrPaymentConflict):
 		writeError(w, http.StatusConflict, "PAYMENT_CONFLICT", "Pembayaran berhasil dan tidak dapat diubah")
+	case errors.Is(err, ErrTicketNotFound):
+		writeError(w, http.StatusNotFound, "TICKET_NOT_FOUND", "E-ticket tidak ditemukan")
+	case errors.Is(err, ErrIncompleteTickets):
+		h.logger.ErrorContext(r.Context(), "incomplete e-ticket set", "request_id", r.Header.Get("X-Request-ID"), "error", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan pada server")
 	default:
 		h.logger.ErrorContext(r.Context(), "payment database error", "request_id", r.Header.Get("X-Request-ID"), "error", err)
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan pada server")

@@ -51,6 +51,8 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 	t.Cleanup(func() {
 		var orderID string
 		if err := db.QueryRowContext(context.Background(), "SELECT id FROM orders WHERE reservation_id = ?", reservationID).Scan(&orderID); err == nil {
+			_, _ = db.Exec("DELETE FROM etickets WHERE order_id = ?", orderID)
+			_, _ = db.Exec("DELETE FROM order_attendees WHERE order_id = ?", orderID)
 			_, _ = db.Exec("DELETE FROM order_buyers WHERE order_id = ?", orderID)
 			_, _ = db.Exec("DELETE FROM order_items WHERE order_id = ?", orderID)
 			_, _ = db.Exec("DELETE FROM orders WHERE id = ?", orderID)
@@ -62,6 +64,7 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 	request := Request{
 		Buyer:       Buyer{Name: "Pembeli Tes", Email: "test@example.com", Phone: "081234567890", Identity: "123456789012"},
 		VoucherCode: "HEMAT10",
+		Attendees:   []Attendees{{TierID: "festival", Names: []string{"Peserta Satu", "Peserta Dua"}}},
 	}
 	repository := NewRepository(db)
 	first, replay, err := repository.Create(ctx, reservationID, request)
@@ -79,12 +82,12 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 	if _, _, err := repository.Create(ctx, reservationID, request); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("changed retry error = %v, want idempotency conflict", err)
 	}
-	var orders, buyers, items int
-	if err := db.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM orders WHERE reservation_id = ?), (SELECT COUNT(*) FROM order_buyers WHERE order_id = ?), (SELECT COUNT(*) FROM order_items WHERE order_id = ?)", reservationID, first.ID, first.ID).Scan(&orders, &buyers, &items); err != nil {
+	var orders, buyers, items, attendees int
+	if err := db.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM orders WHERE reservation_id = ?), (SELECT COUNT(*) FROM order_buyers WHERE order_id = ?), (SELECT COUNT(*) FROM order_items WHERE order_id = ?), (SELECT COUNT(*) FROM order_attendees WHERE order_id = ?)", reservationID, first.ID, first.ID, first.ID).Scan(&orders, &buyers, &items, &attendees); err != nil {
 		t.Fatal(err)
 	}
-	if orders != 1 || buyers != 1 || items != 1 {
-		t.Fatalf("persisted rows: orders=%d buyers=%d items=%d", orders, buyers, items)
+	if orders != 1 || buyers != 1 || items != 1 || attendees != 2 {
+		t.Fatalf("persisted rows: orders=%d buyers=%d items=%d attendees=%d", orders, buyers, items, attendees)
 	}
 	var status string
 	if err := db.QueryRowContext(ctx, "SELECT status FROM reservations WHERE id = ?", reservationID).Scan(&status); err != nil {

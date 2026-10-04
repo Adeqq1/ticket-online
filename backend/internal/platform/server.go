@@ -49,6 +49,8 @@ func NewHandlerWithConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.D
 	mux.HandleFunc("DELETE /api/v1/reservations/{reservationID}", reservationHandler.Cancel)
 	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/convert", reservationHandler.Convert)
 	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/checkout", checkoutHandler.Create)
+	mux.HandleFunc("GET /api/v1/orders/{orderID}/tickets", paymentHandler.TicketsForOrder)
+	mux.HandleFunc("GET /api/v1/tickets/{ticketID}", paymentHandler.GetTicket)
 	if development {
 		mux.HandleFunc("POST /api/v1/orders/{orderID}/simulate-payment", paymentHandler.Simulate)
 	}

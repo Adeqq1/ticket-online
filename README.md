@@ -13,7 +13,7 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 - `backend/migrations/`: migration dan seed yang di-embed ke binary Go.
 - `compose.yaml`: MySQL, API production, dan Vite development server.
 
-Catalog event, reservation, dan order menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer` wajib dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi tersedia di backend development; penerbitan tiket masih berupa demo browser.
+Catalog event, reservation, order, pembayaran, dan e-ticket menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer`, nama untuk setiap tiket pada `attendees`, dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi hanya tersedia di backend development. Pembayaran berhasil menerbitkan snapshot e-ticket untuk setiap tiket dalam transaksi yang sama.
 
 ## Requirements
 
@@ -68,7 +68,16 @@ Environment variable backend:
 
 `go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali.
 
-Untuk memakai endpoint pembayaran simulasi di Docker Compose, jalankan `APP_ENV=development docker compose up --build`. Saat berjalan terpisah, gunakan `APP_ENV=development go run ./cmd/api`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah berhasil, pembayaran tidak dapat diubah.
+Untuk memakai endpoint pembayaran simulasi di Docker Compose, jalankan `APP_ENV=development docker compose up --build`. Saat berjalan terpisah, gunakan `APP_ENV=development go run ./cmd/api`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah berhasil, pembayaran tidak dapat diubah dan retry mengembalikan e-ticket yang sama. Baca daftar tiket order lewat `GET /api/v1/orders/{orderID}/tickets`, atau satu tiket lewat `GET /api/v1/tickets/{ticketID}`.
+
+Contoh body checkout (jumlah nama harus sama dengan jumlah tiket reservasi pada setiap tier):
+
+```json
+{
+  "buyer": {"name": "Nama Pembeli", "email": "buyer@example.com", "phone": "081234567890", "identity": "123456789012"},
+  "attendees": [{"tierId": "festival", "names": ["Nama Peserta Satu", "Nama Peserta Dua"]}]
+}
+```
 
 ## Menjalankan Frontend Terpisah
 
@@ -95,7 +104,7 @@ go vet ./...
 go build ./cmd/api ./cmd/migrate
 ```
 
-Checkout integration test memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variable tersebut, hanya test integrasi checkout yang dilewati.
+Checkout dan payment integration test memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variable tersebut, test integrasi tersebut dilewati.
 
 Frontend:
 
