@@ -17,6 +17,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
+	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
 
 func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte) http.Handler {
@@ -26,6 +27,7 @@ func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL t
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
 	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access)
 	paymentHandler := payment.NewHandlerWithAccess(payment.NewRepository(db), logger, access)
+	staffauth.NewHandler(staffauth.New(db), logger).Register(mux)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})

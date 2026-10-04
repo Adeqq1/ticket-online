@@ -80,6 +80,18 @@ Environment variable backend:
 
 Untuk memakai endpoint pembayaran simulasi di Docker Compose, jalankan `APP_ENV=development docker compose up --build`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah berhasil, pembayaran tidak dapat diubah dan retry mengembalikan e-ticket yang sama. Baca detail order lewat `GET /api/v1/orders/{orderID}`, daftar tiket lewat `GET /api/v1/orders/{orderID}/tickets`, atau satu tiket lewat `GET /api/v1/tickets/{ticketID}`. Ketiga endpoint tersebut dan pembayaran simulasi memerlukan token privat order dari checkout.
 
+## Akun Petugas
+
+Buat admin pertama dengan command di image backend setelah database berjalan. Password dibaca satu baris dari stdin; isi lewat secret manager atau file secret agar password tidak masuk argumen proses:
+
+```bash
+docker compose run --rm --no-deps --entrypoint /app/ticket-staff api bootstrap-admin --name 'Admin Event' --email admin@example.com < /run/secrets/admin-password
+```
+
+Admin login melalui `POST /api/v1/staff/login`, lalu mengelola akun STAFF lewat `/api/v1/admin/staff`. Sesi berlaku 8 jam dan dikirim pada header `Authorization: Bearer <accessToken>`. Gunakan `GET /api/v1/staff/me` untuk profil serta penugasan. Logout dengan `POST /api/v1/staff/logout`. Admin membuat petugas beserta pasangan `eventId` dan `gate`, dapat mengganti penugasan, menonaktifkan akun, dan reset password. Penugasan petugas menentukan akses scan pada task berikutnya.
+
+Di production, layani API melalui HTTPS agar password dan token petugas terlindungi saat transit.
+
 Contoh body checkout (jumlah nama harus sama dengan jumlah tiket reservasi pada setiap tier):
 
 ```json
@@ -111,7 +123,7 @@ Backend:
 cd backend
 go test ./...
 go vet ./...
-go build ./cmd/api ./cmd/migrate
+go build ./cmd/api ./cmd/migrate ./cmd/staff
 ```
 
 Checkout dan payment integration test memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variable tersebut, test integrasi tersebut dilewati.
