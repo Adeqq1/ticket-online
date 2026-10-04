@@ -40,7 +40,7 @@ func main() {
 
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir))
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development"))
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
 	go worker.Run(serverCtx)
 	go func() {

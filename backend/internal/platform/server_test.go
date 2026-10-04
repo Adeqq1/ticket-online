@@ -41,11 +41,28 @@ func TestReadyWhenDatabaseUnavailable(t *testing.T) {
 }
 
 func TestStaticHandlerKeepsUnknownAPIRoutesJSON(t *testing.T) {
-	handler := NewHandlerWithConfig(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), 10, t.TempDir())
+	handler := NewHandlerWithConfig(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), 10, t.TempDir(), false)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/unknown", nil))
 	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), "NOT_FOUND") || strings.Contains(recorder.Header().Get("Content-Type"), "text/html") {
 		t.Fatalf("unexpected API response: %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestSimulatedPaymentRouteOnlyExistsInDevelopment(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	path := "/api/v1/orders/0123456789abcdef0123456789abcdef/simulate-payment"
+	production := NewHandlerWithConfig(testDB(t), logger, 10, "", false)
+	productionResponse := httptest.NewRecorder()
+	production.ServeHTTP(productionResponse, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"method":"INVALID","result":"FAILED"}`)))
+	if productionResponse.Code != http.StatusNotFound {
+		t.Fatalf("production route status = %d, want 404", productionResponse.Code)
+	}
+	development := NewHandlerWithConfig(testDB(t), logger, 10, "", true)
+	developmentResponse := httptest.NewRecorder()
+	development.ServeHTTP(developmentResponse, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"method":"INVALID","result":"FAILED"}`)))
+	if developmentResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("development route status = %d, want validation response 422", developmentResponse.Code)
 	}
 }
 
@@ -54,7 +71,7 @@ func TestStaticHandlerFallsBackToIndexForBrowserRoutes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("spa"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewHandlerWithConfig(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), 10, directory)
+	handler := NewHandlerWithConfig(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), 10, directory, false)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/checkout/nusa-malam", nil))
 	if recorder.Code != http.StatusOK || recorder.Body.String() != "spa" {

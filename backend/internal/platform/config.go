@@ -7,6 +7,7 @@ import (
 )
 
 type Config struct {
+	AppEnv         string
 	HTTPAddr       string
 	MySQLDSN       string
 	StaticDir      string
@@ -16,11 +17,15 @@ type Config struct {
 
 func LoadConfig() (Config, error) {
 	cfg := Config{
+		AppEnv:         envOr("APP_ENV", "production"),
 		HTTPAddr:       envOr("HTTP_ADDR", ":8080"),
 		MySQLDSN:       os.Getenv("MYSQL_DSN"),
 		StaticDir:      os.Getenv("STATIC_DIR"),
 		ReservationTTL: 10 * time.Minute,
 		ExpiryInterval: 15 * time.Second,
+	}
+	if cfg.AppEnv != "development" && cfg.AppEnv != "production" {
+		return Config{}, fmt.Errorf("invalid APP_ENV")
 	}
 	if cfg.MySQLDSN == "" {
 		return Config{}, fmt.Errorf("MYSQL_DSN is required")
