@@ -14,24 +14,18 @@ import (
 
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
+	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 )
 
-func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
-	return NewHandlerWithConfig(db, logger, 10*time.Minute, "", false)
-}
-
-func NewHandlerWithTTL(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration) http.Handler {
-	return NewHandlerWithConfig(db, logger, reservationTTL, "", false)
-}
-
-func NewHandlerWithConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool) http.Handler {
+func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte) http.Handler {
 	mux := http.NewServeMux()
+	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
-	checkoutHandler := checkout.NewHandler(checkout.NewRepository(db), logger)
-	paymentHandler := payment.NewHandler(payment.NewRepository(db), logger)
+	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access)
+	paymentHandler := payment.NewHandlerWithAccess(payment.NewRepository(db), logger, access)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -49,6 +43,7 @@ func NewHandlerWithConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.D
 	mux.HandleFunc("DELETE /api/v1/reservations/{reservationID}", reservationHandler.Cancel)
 	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/convert", reservationHandler.Convert)
 	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/checkout", checkoutHandler.Create)
+	mux.HandleFunc("GET /api/v1/orders/{orderID}", checkoutHandler.Get)
 	mux.HandleFunc("GET /api/v1/orders/{orderID}/tickets", paymentHandler.TicketsForOrder)
 	mux.HandleFunc("GET /api/v1/tickets/{ticketID}", paymentHandler.GetTicket)
 	if development {

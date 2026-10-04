@@ -40,9 +40,10 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
+	idempotencyKey := "checkout-test-" + reservationID
 	if _, err := db.ExecContext(ctx, `INSERT INTO reservations
 		(id, event_id, status, idempotency_key, request_hash, expires_at, created_at, updated_at)
-		VALUES (?, 'nusa-malam', 'ACTIVE', ?, REPEAT('a', 64), ?, ?, ?)`, reservationID, "checkout-test-"+reservationID, now.Add(time.Minute), now, now); err != nil {
+		VALUES (?, 'nusa-malam', 'ACTIVE', ?, REPEAT('a', 64), ?, ?, ?)`, reservationID, idempotencyKey, now.Add(time.Minute), now, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO reservation_items (reservation_id, ticket_tier_id, quantity, unit_price) VALUES (?, ?, 2, ?)", reservationID, tierID, price); err != nil {
@@ -67,19 +68,19 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 		Attendees:   []Attendees{{TierID: "festival", Names: []string{"Peserta Satu", "Peserta Dua"}}},
 	}
 	repository := NewRepository(db)
-	first, replay, err := repository.Create(ctx, reservationID, request)
+	first, replay, err := repository.Create(ctx, reservationID, idempotencyKey, request)
 	if err != nil || replay {
 		t.Fatalf("first checkout = (%+v, %v, %v)", first, replay, err)
 	}
 	if first.Subtotal != price*2 || first.AdminFee != adminFee || first.Discount != first.Subtotal/10 || first.Total != first.Subtotal+adminFee-first.Discount {
 		t.Fatalf("server totals are incorrect: %+v", first)
 	}
-	second, replay, err := repository.Create(ctx, reservationID, request)
+	second, replay, err := repository.Create(ctx, reservationID, idempotencyKey, request)
 	if err != nil || !replay || second.ID != first.ID || second.Reference != first.Reference {
 		t.Fatalf("retry = (%+v, %v, %v), want the original order", second, replay, err)
 	}
 	request.Buyer.Name = "Nama Berbeda"
-	if _, _, err := repository.Create(ctx, reservationID, request); !errors.Is(err, ErrIdempotencyConflict) {
+	if _, _, err := repository.Create(ctx, reservationID, idempotencyKey, request); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("changed retry error = %v, want idempotency conflict", err)
 	}
 	var orders, buyers, items, attendees int

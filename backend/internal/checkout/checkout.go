@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -19,13 +20,15 @@ import (
 const adminFee uint64 = 7500
 
 var (
-	ErrInvalidRequest       = errors.New("invalid checkout request")
-	ErrInvalidVoucher       = errors.New("invalid voucher")
-	ErrReservationNotFound  = errors.New("reservation not found")
-	ErrReservationExpired   = errors.New("reservation expired")
-	ErrReservationCancelled = errors.New("reservation cancelled")
-	ErrReservationConverted = errors.New("reservation already converted")
-	ErrIdempotencyConflict  = errors.New("checkout request conflicts with existing order")
+	ErrInvalidRequest          = errors.New("invalid checkout request")
+	ErrInvalidVoucher          = errors.New("invalid voucher")
+	ErrReservationNotFound     = errors.New("reservation not found")
+	ErrReservationExpired      = errors.New("reservation expired")
+	ErrReservationCancelled    = errors.New("reservation cancelled")
+	ErrReservationConverted    = errors.New("reservation already converted")
+	ErrIdempotencyConflict     = errors.New("checkout request conflicts with existing order")
+	ErrReservationAccessDenied = errors.New("reservation access denied")
+	ErrOrderNotFound           = errors.New("order not found")
 )
 
 type Buyer struct {
@@ -56,15 +59,41 @@ type Item struct {
 }
 
 type Order struct {
-	ID            string `json:"id"`
-	Reference     string `json:"reference"`
-	ReservationID string `json:"reservationId"`
-	Status        string `json:"status"`
-	Subtotal      uint64 `json:"subtotal"`
-	AdminFee      uint64 `json:"adminFee"`
-	Discount      uint64 `json:"discount"`
-	Total         uint64 `json:"total"`
-	Items         []Item `json:"items"`
+	ID              string `json:"id"`
+	Reference       string `json:"reference"`
+	ReservationID   string `json:"reservationId"`
+	Status          string `json:"status"`
+	Subtotal        uint64 `json:"subtotal"`
+	AdminFee        uint64 `json:"adminFee"`
+	Discount        uint64 `json:"discount"`
+	Total           uint64 `json:"total"`
+	Items           []Item `json:"items"`
+	AccessToken     string `json:"accessToken,omitempty"`
+	AccessExpiresAt string `json:"accessExpiresAt,omitempty"`
+}
+
+type Attendee struct {
+	TierID       string `json:"tierId"`
+	TicketNumber uint64 `json:"ticketNumber"`
+	Name         string `json:"name"`
+}
+
+type PaymentSummary struct {
+	ID     string `json:"id"`
+	Method string `json:"method"`
+	Amount uint64 `json:"amount"`
+	Status string `json:"status"`
+	PaidAt string `json:"paidAt,omitempty"`
+}
+
+type Detail struct {
+	Order
+	Buyer         Buyer           `json:"buyer"`
+	Attendees     []Attendee      `json:"attendees"`
+	Payment       *PaymentSummary `json:"payment"`
+	CreatedAt     string          `json:"createdAt"`
+	UpdatedAt     string          `json:"updatedAt"`
+	EventStartsAt string          `json:"eventStartsAt"`
 }
 
 type Repository struct{ db *sql.DB }
@@ -127,7 +156,7 @@ func requestHash(reservationID string, request Request) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func (r *Repository) Create(ctx context.Context, reservationID string, request Request) (Order, bool, error) {
+func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey string, request Request) (Order, bool, error) {
 	request, err := Validate(request)
 	if err != nil {
 		return Order{}, false, err
@@ -142,14 +171,17 @@ func (r *Repository) Create(ctx context.Context, reservationID string, request R
 	}
 	defer tx.Rollback()
 
-	var status string
+	var status, storedKey string
 	var expiresAt time.Time
-	err = tx.QueryRowContext(ctx, "SELECT status, expires_at FROM reservations WHERE id = ? FOR UPDATE", reservationID).Scan(&status, &expiresAt)
+	err = tx.QueryRowContext(ctx, "SELECT status, idempotency_key, expires_at FROM reservations WHERE id = ? FOR UPDATE", reservationID).Scan(&status, &storedKey, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Order{}, false, ErrReservationNotFound
 	}
 	if err != nil {
 		return Order{}, false, fmt.Errorf("lock reservation: %w", err)
+	}
+	if subtle.ConstantTimeCompare([]byte(storedKey), []byte(idempotencyKey)) != 1 {
+		return Order{}, false, ErrReservationAccessDenied
 	}
 
 	var existing Order
@@ -292,6 +324,69 @@ func loadItems(ctx context.Context, tx *sql.Tx, order *Order) error {
 		order.Items = append(order.Items, item)
 	}
 	return rows.Err()
+}
+
+func (r *Repository) Get(ctx context.Context, orderID string) (Detail, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Detail{}, fmt.Errorf("begin order read: %w", err)
+	}
+	defer tx.Rollback()
+	detail := Detail{Attendees: []Attendee{}}
+	var createdAt, updatedAt, startsAt time.Time
+	err = tx.QueryRowContext(ctx, `SELECT o.id, o.reference, o.reservation_id, o.status, o.subtotal, o.admin_fee, o.discount, o.total,
+		o.created_at, o.updated_at, e.starts_at, b.name, b.email, b.phone, b.identity
+		FROM orders o JOIN reservations r ON r.id = o.reservation_id JOIN events e ON e.id = r.event_id
+		JOIN order_buyers b ON b.order_id = o.id WHERE o.id = ?`, orderID).Scan(
+		&detail.ID, &detail.Reference, &detail.ReservationID, &detail.Status, &detail.Subtotal, &detail.AdminFee, &detail.Discount, &detail.Total,
+		&createdAt, &updatedAt, &startsAt, &detail.Buyer.Name, &detail.Buyer.Email, &detail.Buyer.Phone, &detail.Buyer.Identity)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Detail{}, ErrOrderNotFound
+	}
+	if err != nil {
+		return Detail{}, fmt.Errorf("read order: %w", err)
+	}
+	detail.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+	detail.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	detail.EventStartsAt = startsAt.UTC().Format(time.RFC3339Nano)
+	if err := loadItems(ctx, tx, &detail.Order); err != nil {
+		return Detail{}, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT tt.slug, a.ticket_number, a.name FROM order_attendees a
+		JOIN ticket_tiers tt ON tt.id = a.ticket_tier_id WHERE a.order_id = ? ORDER BY a.ticket_tier_id, a.ticket_number`, orderID)
+	if err != nil {
+		return Detail{}, fmt.Errorf("read order attendees: %w", err)
+	}
+	for rows.Next() {
+		var attendee Attendee
+		if err := rows.Scan(&attendee.TierID, &attendee.TicketNumber, &attendee.Name); err != nil {
+			rows.Close()
+			return Detail{}, fmt.Errorf("scan order attendee: %w", err)
+		}
+		detail.Attendees = append(detail.Attendees, attendee)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Detail{}, fmt.Errorf("iterate order attendees: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return Detail{}, fmt.Errorf("close order attendees: %w", err)
+	}
+	var payment PaymentSummary
+	var paidAt sql.NullTime
+	err = tx.QueryRowContext(ctx, "SELECT id, method, amount, status, paid_at FROM payments WHERE order_id = ?", orderID).Scan(&payment.ID, &payment.Method, &payment.Amount, &payment.Status, &paidAt)
+	if err == nil {
+		if paidAt.Valid {
+			payment.PaidAt = paidAt.Time.UTC().Format(time.RFC3339Nano)
+		}
+		detail.Payment = &payment
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Detail{}, fmt.Errorf("read order payment: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Detail{}, fmt.Errorf("commit order read: %w", err)
+	}
+	return detail, nil
 }
 
 func randomID() (string, error) {

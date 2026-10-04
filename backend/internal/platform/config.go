@@ -4,15 +4,18 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 )
 
 type Config struct {
-	AppEnv         string
-	HTTPAddr       string
-	MySQLDSN       string
-	StaticDir      string
-	ReservationTTL time.Duration
-	ExpiryInterval time.Duration
+	AppEnv            string
+	HTTPAddr          string
+	MySQLDSN          string
+	StaticDir         string
+	ReservationTTL    time.Duration
+	ExpiryInterval    time.Duration
+	OrderAccessSecret []byte
 }
 
 func LoadConfig() (Config, error) {
@@ -24,13 +27,17 @@ func LoadConfig() (Config, error) {
 		ReservationTTL: 10 * time.Minute,
 		ExpiryInterval: 15 * time.Second,
 	}
+	var err error
 	if cfg.AppEnv != "development" && cfg.AppEnv != "production" {
 		return Config{}, fmt.Errorf("invalid APP_ENV")
 	}
 	if cfg.MySQLDSN == "" {
 		return Config{}, fmt.Errorf("MYSQL_DSN is required")
 	}
-	var err error
+	cfg.OrderAccessSecret, err = orderaccess.ParseSecret(os.Getenv("ORDER_ACCESS_SECRET"))
+	if err != nil {
+		return Config{}, err
+	}
 	if value := os.Getenv("RESERVATION_TTL"); value != "" {
 		cfg.ReservationTTL, err = time.ParseDuration(value)
 		if err != nil || cfg.ReservationTTL <= 0 {

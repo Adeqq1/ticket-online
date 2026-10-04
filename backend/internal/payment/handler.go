@@ -8,25 +8,32 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 )
 
 type Handler struct {
 	repository *Repository
 	logger     *slog.Logger
+	access     *orderaccess.Access
 }
 
 func NewHandler(repository *Repository, logger *slog.Logger) *Handler {
 	return &Handler{repository: repository, logger: logger}
 }
 
+func NewHandlerWithAccess(repository *Repository, logger *slog.Logger, access *orderaccess.Access) *Handler {
+	return &Handler{repository: repository, logger: logger, access: access}
+}
+
 func (h *Handler) Simulate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	orderID := strings.ToLower(r.PathValue("orderID"))
-	if len(orderID) != 32 {
+	if !validID(orderID) {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "ID order tidak valid")
 		return
 	}
-	if _, err := hex.DecodeString(orderID); err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "ID order tidak valid")
+	if err := h.authorizeOrder(w, r, orderID); err != nil {
 		return
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
@@ -54,9 +61,13 @@ func (h *Handler) Simulate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) TicketsForOrder(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	orderID := strings.ToLower(r.PathValue("orderID"))
 	if !validID(orderID) {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "ID order tidak valid")
+		return
+	}
+	if err := h.authorizeOrder(w, r, orderID); err != nil {
 		return
 	}
 	tickets, err := h.repository.TicketsForOrder(r.Context(), orderID)
@@ -68,9 +79,19 @@ func (h *Handler) TicketsForOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	ticketID := strings.ToLower(r.PathValue("ticketID"))
 	if !validID(ticketID) {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "ID e-ticket tidak valid")
+		return
+	}
+	token, ok := orderaccess.Bearer(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "ACCESS_TOKEN_REQUIRED", "Token akses diperlukan")
+		return
+	}
+	if _, err := h.access.AuthorizeTicket(r.Context(), ticketID, token); err != nil {
+		h.respondAccessError(w, r, err)
 		return
 	}
 	ticket, err := h.repository.Ticket(r.Context(), ticketID)
@@ -79,6 +100,33 @@ func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ticket)
+}
+
+func (h *Handler) authorizeOrder(w http.ResponseWriter, r *http.Request, orderID string) error {
+	token, ok := orderaccess.Bearer(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "ACCESS_TOKEN_REQUIRED", "Token akses diperlukan")
+		return orderaccess.ErrUnauthorized
+	}
+	if _, err := h.access.AuthorizeOrder(r.Context(), orderID, token); err != nil {
+		h.respondAccessError(w, r, err)
+		return err
+	}
+	return nil
+}
+
+func (h *Handler) respondAccessError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, orderaccess.ErrUnauthorized):
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Data tidak ditemukan")
+	case errors.Is(err, orderaccess.ErrExpired):
+		writeError(w, http.StatusGone, "ACCESS_TOKEN_EXPIRED", "Token akses sudah kedaluwarsa")
+	case errors.Is(err, orderaccess.ErrNotFound), errors.Is(err, ErrOrderNotFound), errors.Is(err, ErrTicketNotFound):
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Data tidak ditemukan")
+	default:
+		h.logger.ErrorContext(r.Context(), "ticket access database error", "request_id", r.Header.Get("X-Request-ID"), "error", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan pada server")
+	}
 }
 
 func validID(id string) bool {
