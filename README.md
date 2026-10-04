@@ -94,6 +94,8 @@ docker compose run --rm --no-deps --entrypoint /app/ticket-staff api bootstrap-a
 
 Admin login melalui `POST /api/v1/staff/login`, lalu mengelola akun STAFF lewat `/api/v1/admin/staff`. Sesi berlaku 8 jam dan dikirim pada header `Authorization: Bearer <accessToken>`. Gunakan `GET /api/v1/staff/me` untuk profil serta penugasan. Logout dengan `POST /api/v1/staff/logout`. Admin membuat petugas beserta pasangan `eventId` dan `gate`, dapat mengganti penugasan, menonaktifkan akun, dan reset password. Penugasan petugas menentukan akses scan pada task berikutnya.
 
+Check-in dilakukan lewat `POST /api/v1/staff/check-ins` dengan token sesi STAFF, `eventId`, `gate`, dan kode e-ticket individual (`ET-` diikuti ID tiket 32 digit heksadesimal). Server hanya menerima tiket dari order yang sudah dibayar dan gate yang sesuai dengan snapshot e-ticket. Check-in sukses langsung menandai tiket terpakai; request berikutnya untuk tiket yang sama mengembalikan `409 TICKET_ALREADY_USED`. Gate yang salah mengembalikan `409 WRONG_GATE` beserta `expectedGate`. Satu petugas hanya dapat check-in pada gate yang ditugaskan admin.
+
 Di production, layani API melalui HTTPS agar password dan token petugas terlindungi saat transit.
 
 Contoh body checkout (jumlah nama harus sama dengan jumlah tiket reservasi pada setiap tier):
