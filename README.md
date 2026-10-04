@@ -13,7 +13,7 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 - `backend/migrations/`: migration dan seed yang di-embed ke binary Go.
 - `compose.yaml`: MySQL, API production, dan Vite development server.
 
-Catalog event, reservation, dan schema order menggunakan database. Pembuatan order belum tersedia melalui API; payment serta e-ticket tetap simulasi browser sesuai scope issue.
+Catalog event, reservation, dan order menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer` wajib dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Payment serta e-ticket tetap simulasi browser sesuai scope issue.
 
 ## Requirements
 
@@ -92,6 +92,8 @@ go vet ./...
 go build ./cmd/api ./cmd/migrate
 ```
 
+Checkout integration test memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variable tersebut, hanya test integrasi checkout yang dilewati.
+
 Frontend:
 
 ```bash
@@ -124,4 +126,4 @@ docker compose up --build
 - Final backend image berjalan sebagai non-root user.
 - Gunakan password, DSN, dan secret berbeda untuk production melalui secret manager atau environment deployment.
 - Jangan commit `.env`, password production, generated binary, atau database volume.
-- Payment, order permanen, penerbitan tiket, QR code, email, login, dan refund belum menjadi fitur production.
+- Payment, penerbitan tiket, QR code, email, login, dan refund belum menjadi fitur production.

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
+	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 )
 
@@ -28,6 +29,7 @@ func NewHandlerWithConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.D
 	mux := http.NewServeMux()
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
+	checkoutHandler := checkout.NewHandler(checkout.NewRepository(db), logger)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -44,6 +46,7 @@ func NewHandlerWithConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.D
 	mux.HandleFunc("GET /api/v1/reservations/{reservationID}", reservationHandler.Get)
 	mux.HandleFunc("DELETE /api/v1/reservations/{reservationID}", reservationHandler.Cancel)
 	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/convert", reservationHandler.Convert)
+	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/checkout", checkoutHandler.Create)
 	mux.HandleFunc("/", staticHandler(staticDir))
 	return loggingMiddleware(logger, mux)
 }
