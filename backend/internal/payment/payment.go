@@ -84,7 +84,8 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 
 	var orderStatus string
 	var amount uint64
-	err = tx.QueryRowContext(ctx, "SELECT status, total FROM orders WHERE id = ? FOR UPDATE", orderID).Scan(&orderStatus, &amount)
+	var expiresAt time.Time
+	err = tx.QueryRowContext(ctx, "SELECT status, total, expires_at FROM orders WHERE id = ? FOR UPDATE", orderID).Scan(&orderStatus, &amount, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Payment{}, false, ErrOrderNotFound
 	}
@@ -92,6 +93,15 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 		return Payment{}, false, fmt.Errorf("lock order for payment: %w", err)
 	}
 	if orderStatus != "PENDING" && orderStatus != "PAID" {
+		return Payment{}, false, ErrOrderNotPayable
+	}
+	if orderStatus == "PENDING" && !time.Now().UTC().Before(expiresAt) {
+		if err := expireLockedOrder(ctx, tx, orderID); err != nil {
+			return Payment{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Payment{}, false, fmt.Errorf("commit order expiration during payment: %w", err)
+		}
 		return Payment{}, false, ErrOrderNotPayable
 	}
 

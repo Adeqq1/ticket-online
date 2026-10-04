@@ -43,11 +43,14 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Generate ephemeral CI order secret
+        run: echo "ORDER_ACCESS_SECRET=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
       - name: Run migrations
         run: go run ./cmd/migrate
 
       - name: Run tests
-        run: go test ./...
+        run: MYSQL_TEST_DSN="$MYSQL_DSN" go test -v ./...
 
       - name: Run vet
         run: go vet ./...

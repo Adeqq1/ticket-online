@@ -15,6 +15,10 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 
 Catalog event, reservation, order, pembayaran, dan e-ticket menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer`, nama untuk setiap tiket pada `attendees`, dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi hanya tersedia di backend development. Pembayaran berhasil menerbitkan snapshot e-ticket untuk setiap tiket dalam transaksi yang sama.
 
+Frontend saat ini masih menggunakan endpoint `/convert` dan membuat tiket demo di browser. Alur order, pembayaran, dan e-ticket database di atas perlu diuji lewat API sampai integrasi frontend selesai.
+
+Order `PENDING` memakai deadline reservasi, tersedia sebagai `expiresAt` pada respons checkout/detail order. Worker mengubah order yang lewat deadline menjadi `EXPIRED` dan mengembalikan stok tepat sekali; pembayaran terlambat ditolak meskipun worker belum berjalan. Deadline ini berbeda dari masa berlaku token akses.
+
 Checkout juga memerlukan header `Idempotency-Key` yang sama dengan key reservasi. Respons menyertakan `accessToken` privat order serta `accessExpiresAt`. Simpan token dengan aman; token dipakai sebagai `Authorization: Bearer <accessToken>` pada API order dan tiket, serta pembayaran simulasi. Token kedaluwarsa pukul 00.00 WIB setelah tanggal konser. Server memakai `ORDER_ACCESS_SECRET` yang tetap untuk menandatangani token.
 
 ## Requirements
@@ -126,7 +130,13 @@ go vet ./...
 go build ./cmd/api ./cmd/migrate ./cmd/staff
 ```
 
-Checkout dan payment integration test memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variable tersebut, test integrasi tersebut dilewati.
+Tes integrasi checkout, pembayaran, expiry, dan sesi petugas memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variabel tersebut, tes integrasi dilewati. Gunakan database tes yang dapat dibuang, lalu jalankan dari `backend/`:
+
+```bash
+MYSQL_TEST_DSN="$MYSQL_DSN" go test -v ./...
+```
+
+CI menjalankan perintah yang sama terhadap service MySQL job, dengan secret order sementara yang dibuat per job.
 
 Frontend:
 

@@ -161,6 +161,10 @@ func (h *Handler) ReplaceAssignments(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &request) {
 		return
 	}
+	if request.Assignments == nil {
+		staffError(w, http.StatusUnprocessableEntity, "INVALID_REQUEST", "Penugasan harus berupa array")
+		return
+	}
 	if err := h.service.ReplaceAssignments(r.Context(), staffID, request.Assignments); err != nil {
 		h.respondError(w, r, err)
 		return

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,6 +117,65 @@ func TestStaffSessionPermissionsAndRevocation(t *testing.T) {
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("admin access to staff list = %d: %s", response.Code, response.Body.String())
+	}
+
+	assignmentPath := "/api/v1/admin/staff/" + staff.ID + "/assignments"
+	for _, body := range []string{"{}", "null", `{"assignments":null}`} {
+		request := httptest.NewRequest(http.MethodPut, assignmentPath, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+adminSession.AccessToken)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "INVALID_REQUEST") {
+			t.Fatalf("incomplete assignments %s returned %d: %s", body, response.Code, response.Body.String())
+		}
+		if err := service.AuthorizeGate(ctx, principal, "nusa-malam", gate); err != nil {
+			t.Fatalf("incomplete assignments removed gate access: %v", err)
+		}
+	}
+	for _, body := range []string{`{"assignments":[]}`, `{"assignments":[{"eventId":"nusa-malam","gate":"` + gate + `"}]}`} {
+		request := httptest.NewRequest(http.MethodPut, assignmentPath, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+adminSession.AccessToken)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("explicit assignments returned %d: %s", response.Code, response.Body.String())
+		}
+		err := service.AuthorizeGate(ctx, principal, "nusa-malam", gate)
+		if body == `{"assignments":[]}` && !errors.Is(err, ErrForbidden) || body != `{"assignments":[]}` && err != nil {
+			t.Fatalf("assignment replacement did not persist: %v", err)
+		}
+	}
+	for _, name := range []string{"A", "李", strings.Repeat("李", 81), "李明", strings.Repeat("李", 80)} {
+		body, _ := json.Marshal(map[string]string{"name": name})
+		request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/staff/"+staff.ID, bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+adminSession.AccessToken)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		want := http.StatusUnprocessableEntity
+		if name == "李明" || name == strings.Repeat("李", 80) {
+			want = http.StatusNoContent
+		}
+		if response.Code != want {
+			t.Fatalf("update name %q returned %d, want %d: %s", name, response.Code, want, response.Body.String())
+		}
+		body, _ = json.Marshal(map[string]string{"name": name, "email": "name-" + suffix + "@example.com", "password": "staff password for test"})
+		request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/staff", bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+adminSession.AccessToken)
+		response = httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if want == http.StatusNoContent {
+			want = http.StatusCreated
+			var created Staff
+			if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, "DELETE FROM staff_users WHERE id = ?", created.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if response.Code != want {
+			t.Fatalf("create name %q returned %d, want %d: %s", name, response.Code, want, response.Body.String())
+		}
 	}
 
 	if err := service.ResetPassword(ctx, staff.ID, "new staff password for test"); err != nil {

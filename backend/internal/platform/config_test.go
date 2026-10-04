@@ -23,3 +23,14 @@ func TestLoadConfigAppEnv(t *testing.T) {
 		t.Fatal("expected invalid APP_ENV to fail")
 	}
 }
+
+func TestLoadConfigRejectsMissingOrInvalidOrderSecret(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "ticket:ticket@tcp(localhost:3306)/ticket_online?parseTime=true")
+	t.Setenv("APP_ENV", "production")
+	for _, secret := range []string{"", "invalid", base64.StdEncoding.EncodeToString(make([]byte, 31))} {
+		t.Setenv("ORDER_ACCESS_SECRET", secret)
+		if _, err := LoadConfig(); err == nil {
+			t.Fatal("missing or invalid order secret was accepted")
+		}
+	}
+}

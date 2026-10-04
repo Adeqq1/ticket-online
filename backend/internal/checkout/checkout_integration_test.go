@@ -75,8 +75,12 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 	if first.Subtotal != price*2 || first.AdminFee != adminFee || first.Discount != first.Subtotal/10 || first.Total != first.Subtotal+adminFee-first.Discount {
 		t.Fatalf("server totals are incorrect: %+v", first)
 	}
+	deadline, err := time.Parse(time.RFC3339Nano, first.ExpiresAt)
+	if err != nil || deadline.Sub(now.Add(time.Minute)) > time.Microsecond || now.Add(time.Minute).Sub(deadline) > time.Microsecond {
+		t.Fatalf("order deadline = %q, %v; want reservation deadline", first.ExpiresAt, err)
+	}
 	second, replay, err := repository.Create(ctx, reservationID, idempotencyKey, request)
-	if err != nil || !replay || second.ID != first.ID || second.Reference != first.Reference {
+	if err != nil || !replay || second.ID != first.ID || second.Reference != first.Reference || second.ExpiresAt != first.ExpiresAt {
 		t.Fatalf("retry = (%+v, %v, %v), want the original order", second, replay, err)
 	}
 	request.Buyer.Name = "Nama Berbeda"

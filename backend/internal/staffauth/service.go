@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-sql-driver/mysql"
 )
@@ -68,7 +69,7 @@ func ValidateIdentity(name, email string) (string, string, error) {
 	name = strings.TrimSpace(name)
 	email = NormalizeEmail(email)
 	address, err := mail.ParseAddress(email)
-	if len(name) < 2 || len(name) > 80 || len(email) > 254 || err != nil || address.Address != email || !strings.Contains(strings.SplitN(email, "@", 2)[1], ".") {
+	if utf8.RuneCountInString(name) < 2 || utf8.RuneCountInString(name) > 80 || len(email) > 254 || err != nil || address.Address != email || !strings.Contains(strings.SplitN(email, "@", 2)[1], ".") {
 		return "", "", ErrInvalidInput
 	}
 	return name, email, nil
@@ -340,7 +341,7 @@ func (s *Service) UpdateStaff(ctx context.Context, staffID string, name *string,
 	}
 	if name != nil {
 		*name = strings.TrimSpace(*name)
-		if len(*name) < 2 || len(*name) > 80 {
+		if utf8.RuneCountInString(*name) < 2 || utf8.RuneCountInString(*name) > 80 {
 			return ErrInvalidInput
 		}
 	}
@@ -382,6 +383,9 @@ func (s *Service) UpdateStaff(ctx context.Context, staffID string, name *string,
 }
 
 func (s *Service) ReplaceAssignments(ctx context.Context, staffID string, assignments []Assignment) error {
+	if assignments == nil {
+		return ErrInvalidInput
+	}
 	assignments = normalizeAssignments(assignments)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -599,6 +603,10 @@ func (l *loginLimiter) Failure(remote, email string, now time.Time, result error
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.prune(now)
+	if _, exists := l.windows[key]; !exists && len(l.windows) >= 10000 {
+		return ErrRateLimited
+	}
 	window := l.windows[key]
 	if !now.Before(window.until) {
 		window = limitWindow{until: now.Add(15 * time.Minute)}
@@ -606,9 +614,6 @@ func (l *loginLimiter) Failure(remote, email string, now time.Time, result error
 	window.count++
 	l.windows[key] = window
 	if window.count >= 5 {
-		return ErrRateLimited
-	}
-	if _, exists := l.windows[key]; !exists && len(l.windows) >= 10000 {
 		return ErrRateLimited
 	}
 	return result

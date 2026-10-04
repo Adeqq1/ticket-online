@@ -63,6 +63,7 @@ type Order struct {
 	Reference       string `json:"reference"`
 	ReservationID   string `json:"reservationId"`
 	Status          string `json:"status"`
+	ExpiresAt       string `json:"expiresAt"`
 	Subtotal        uint64 `json:"subtotal"`
 	AdminFee        uint64 `json:"adminFee"`
 	Discount        uint64 `json:"discount"`
@@ -186,9 +187,11 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 
 	var existing Order
 	var existingHash sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT id, reference, reservation_id, status, subtotal, admin_fee, discount, total, request_hash
-		FROM orders WHERE reservation_id = ?`, reservationID).Scan(&existing.ID, &existing.Reference, &existing.ReservationID, &existing.Status, &existing.Subtotal, &existing.AdminFee, &existing.Discount, &existing.Total, &existingHash)
+	var orderExpiresAt time.Time
+	err = tx.QueryRowContext(ctx, `SELECT id, reference, reservation_id, status, subtotal, admin_fee, discount, total, request_hash, expires_at
+		FROM orders WHERE reservation_id = ?`, reservationID).Scan(&existing.ID, &existing.Reference, &existing.ReservationID, &existing.Status, &existing.Subtotal, &existing.AdminFee, &existing.Discount, &existing.Total, &existingHash, &orderExpiresAt)
 	if err == nil {
+		existing.ExpiresAt = orderExpiresAt.UTC().Format(time.RFC3339Nano)
 		if !existingHash.Valid || existingHash.String != hash {
 			return Order{}, false, ErrIdempotencyConflict
 		}
@@ -221,7 +224,7 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 	if err != nil {
 		return Order{}, false, fmt.Errorf("read reservation items: %w", err)
 	}
-	order := Order{ReservationID: reservationID, Status: "PENDING", AdminFee: adminFee}
+	order := Order{ReservationID: reservationID, Status: "PENDING", AdminFee: adminFee, ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano)}
 	attendeeNames := make(map[string][]string, len(request.Attendees))
 	for _, attendee := range request.Attendees {
 		if attendee.TierID == "" || len(attendee.Names) == 0 || attendeeNames[attendee.TierID] != nil {
@@ -282,8 +285,8 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 	}
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO orders
-		(id, reference, reservation_id, status, subtotal, admin_fee, discount, created_at, updated_at, request_hash)
-		VALUES (?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?)`, order.ID, order.Reference, reservationID, order.Subtotal, order.AdminFee, order.Discount, now, now, hash); err != nil {
+		(id, reference, reservation_id, status, subtotal, admin_fee, discount, created_at, updated_at, request_hash, expires_at)
+		VALUES (?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?)`, order.ID, order.Reference, reservationID, order.Subtotal, order.AdminFee, order.Discount, now, now, hash, expiresAt); err != nil {
 		return Order{}, false, fmt.Errorf("insert order: %w", err)
 	}
 	for _, item := range order.Items {
@@ -333,13 +336,13 @@ func (r *Repository) Get(ctx context.Context, orderID string) (Detail, error) {
 	}
 	defer tx.Rollback()
 	detail := Detail{Attendees: []Attendee{}}
-	var createdAt, updatedAt, startsAt time.Time
+	var createdAt, updatedAt, startsAt, expiresAt time.Time
 	err = tx.QueryRowContext(ctx, `SELECT o.id, o.reference, o.reservation_id, o.status, o.subtotal, o.admin_fee, o.discount, o.total,
-		o.created_at, o.updated_at, e.starts_at, b.name, b.email, b.phone, b.identity
+		o.created_at, o.updated_at, e.starts_at, b.name, b.email, b.phone, b.identity, o.expires_at
 		FROM orders o JOIN reservations r ON r.id = o.reservation_id JOIN events e ON e.id = r.event_id
 		JOIN order_buyers b ON b.order_id = o.id WHERE o.id = ?`, orderID).Scan(
 		&detail.ID, &detail.Reference, &detail.ReservationID, &detail.Status, &detail.Subtotal, &detail.AdminFee, &detail.Discount, &detail.Total,
-		&createdAt, &updatedAt, &startsAt, &detail.Buyer.Name, &detail.Buyer.Email, &detail.Buyer.Phone, &detail.Buyer.Identity)
+		&createdAt, &updatedAt, &startsAt, &detail.Buyer.Name, &detail.Buyer.Email, &detail.Buyer.Phone, &detail.Buyer.Identity, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Detail{}, ErrOrderNotFound
 	}
@@ -347,6 +350,7 @@ func (r *Repository) Get(ctx context.Context, orderID string) (Detail, error) {
 		return Detail{}, fmt.Errorf("read order: %w", err)
 	}
 	detail.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+	detail.ExpiresAt = expiresAt.UTC().Format(time.RFC3339Nano)
 	detail.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 	detail.EventStartsAt = startsAt.UTC().Format(time.RFC3339Nano)
 	if err := loadItems(ctx, tx, &detail.Order); err != nil {
