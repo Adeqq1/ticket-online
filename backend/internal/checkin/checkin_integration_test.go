@@ -183,6 +183,13 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 	if response := call(otherSession.AccessToken, code(ticketIDs[0]), eventID, gateA); response.Code != http.StatusForbidden {
 		t.Fatalf("unassigned gate status=%d body=%s", response.Code, response.Body.String())
 	}
+	if err := staff.ReplaceAssignments(ctx, otherStaff.ID, []staffauth.Assignment{{EventID: eventID, Gate: gateA}}); err != nil {
+		t.Fatal(err)
+	}
+	otherSession, err = staff.Login(ctx, otherStaff.Email, "other staff password", "192.0.2.21:4001")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if response := call(validSession.AccessToken, code(strings.Repeat("f", 32)), eventID, gateA); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown ticket status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -210,13 +217,17 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 	start := make(chan struct{})
 	statuses := make(chan int, 8)
 	var wg sync.WaitGroup
-	for range cap(statuses) {
+	for index := range cap(statuses) {
 		wg.Add(1)
-		go func() {
+		go func(index int) {
 			defer wg.Done()
 			<-start
-			statuses <- call(validSession.AccessToken, code(ticketIDs[2]), eventID, gateA).Code
-		}()
+			token := validSession.AccessToken
+			if index%2 == 1 {
+				token = otherSession.AccessToken
+			}
+			statuses <- call(token, code(ticketIDs[2]), eventID, gateA).Code
+		}(index)
 	}
 	close(start)
 	wg.Wait()

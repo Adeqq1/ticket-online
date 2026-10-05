@@ -25,10 +25,10 @@
   let resetPassword = $state("");
   let selected = $derived(staff.find((item) => item.id === selectedId && item.role === "STAFF"));
 
-  async function loadStaff() {
+  async function loadStaff(): Promise<boolean> {
     loadingStaff = true; staffError = "";
-    try { staff = await listStaff(accessToken); }
-    catch (cause) { if (cause instanceof ApiError && cause.status === 401) onUnauthorized(); else staffError = "Daftar petugas tidak dapat dimuat."; }
+    try { staff = await listStaff(accessToken); return true; }
+    catch (cause) { if (cause instanceof ApiError && cause.status === 401) onUnauthorized(); else staffError = "Daftar petugas tidak dapat dimuat."; return false; }
     finally { loadingStaff = false; }
   }
 
@@ -45,6 +45,12 @@
     selectedId = person.id; editName = person.name; editActive = person.active;
     editAssignments = person.assignments.map((assignment) => ({ ...assignment }));
     resetPassword = ""; error = ""; notice = "";
+  }
+
+  function refreshSelected(person: Staff) {
+    editName = person.name;
+    editActive = person.active;
+    editAssignments = person.assignments.map((assignment) => ({ ...assignment }));
   }
 
   function showError(cause: unknown) {
@@ -77,7 +83,14 @@
   async function saveAssignments(event: SubmitEvent) {
     event.preventDefault(); if (saving || !selected) return;
     saving = true; error = ""; notice = "";
-    try { await replaceStaffAssignments(accessToken, selected.id, editAssignments); notice = "Penugasan berhasil diperbarui."; await loadStaff(); selectStaff(staff.find((item) => item.id === selectedId) ?? selected); }
+    try {
+      const staffId = selected.id;
+      await replaceStaffAssignments(accessToken, staffId, editAssignments);
+      const loaded = await loadStaff();
+      const refreshed = loaded && staff.find((item) => item.id === staffId);
+      if (refreshed) refreshSelected(refreshed);
+      notice = loaded ? "Penugasan berhasil diperbarui." : "Penugasan tersimpan, tetapi daftar belum dapat dimuat ulang.";
+    }
     catch (cause) { showError(cause); }
     finally { saving = false; }
   }

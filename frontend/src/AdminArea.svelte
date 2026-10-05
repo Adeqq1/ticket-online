@@ -19,6 +19,11 @@
     location.replace("/admin/login");
   }
 
+  function profileUpdated(current: Staff) {
+    staff = current;
+    if (page !== "login" && !roleMatchesPage(page, current)) location.replace(staffHome(current.role));
+  }
+
   async function validate() {
     if (request) return;
     const session = readStaffSession();
@@ -60,10 +65,10 @@
     </main>
   </div>
 {/if}
-{#if staff && !error}
-  <div inert={checking} aria-hidden={checking}>
+{#if staff}
+  <div inert={checking || Boolean(error)} aria-hidden={checking || Boolean(error)}>
     {#if page === "staff"}<AdminStaffPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} />
-    {:else if page === "scan"}<AdminScanPage />{/if}
+    {:else if page === "scan"}<AdminScanPage accessToken={readStaffSession()?.accessToken ?? ""} {staff} onUnauthorized={login} onProfile={profileUpdated} />{/if}
   </div>
 {/if}
 {#if !staff && !checking && !error && page === "login"}<AdminLoginPage />{/if}

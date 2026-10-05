@@ -8,6 +8,11 @@
   let selectedEvent = $derived(events.find((event) => event.id === eventId));
   let gates = $derived([...new Set(selectedEvent?.ticketTiers.map((tier) => tier.gate.trim()).filter(Boolean) ?? [])]);
 
+  function changeEvent(event: Event) {
+    eventId = (event.currentTarget as HTMLSelectElement).value;
+    gate = "";
+  }
+
   function addAssignment() {
     if (!eventId || !gates.includes(gate) || value.some((item) => item.eventId === eventId && item.gate === gate)) return;
     value = [...value, { eventId, gate }];
@@ -19,14 +24,14 @@
   {#if events.length}
     <div class="staff-assignment-controls">
       <label>Event
-        <select bind:value={eventId} required>
-          <option value="" disabled>Pilih event</option>
+        <select value={eventId} onchange={changeEvent}>
+          <option value="">Pilih event</option>
           {#each events as event (event.id)}<option value={event.id}>{event.artist} · {event.city}</option>{/each}
         </select>
       </label>
       <label>Gate
-        <select bind:value={gate} required disabled={!gates.length}>
-          <option value="" disabled>Pilih gate</option>
+        <select bind:value={gate} disabled={!gates.length}>
+          <option value="">Pilih gate</option>
           {#each gates as name (name)}<option value={name}>{name}</option>{/each}
         </select>
       </label>
