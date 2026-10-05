@@ -157,6 +157,20 @@ test("rejects incomplete successful check-in responses as unknown", async () => 
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test.each([123, {}, null, undefined])("rejects malformed successful ticket code %p as unknown", async (code) => {
+  const originalFetch = globalThis.fetch;
+  const payload = { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` };
+  const result = { status: "CHECKED_IN", checkedInAt: "2026-10-05T12:00:00Z", ticket: { id: "a".repeat(32), code, attendeeName: "Peserta", tierName: "Festival", eventId: payload.eventId, gate: payload.gate } };
+  let calls = 0;
+  globalThis.fetch = (async () => { calls += 1; return new Response(JSON.stringify(result), { status: 201 }); }) as unknown as typeof fetch;
+  try {
+    const error = await checkInTicket("staff-token", payload).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+    expect(calls).toBe(1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("requires the backend's 204 confirmation for staff logout", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(null, { status: 200 })) as unknown as typeof fetch;

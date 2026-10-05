@@ -42,15 +42,10 @@
   onMount(() => { void loadStaff(); void loadEvents(); });
 
   function selectStaff(person: Staff) {
+    if (saving) return;
     selectedId = person.id; editName = person.name; editActive = person.active;
     editAssignments = person.assignments.map((assignment) => ({ ...assignment }));
     resetPassword = ""; error = ""; notice = "";
-  }
-
-  function refreshSelected(person: Staff) {
-    editName = person.name;
-    editActive = person.active;
-    editAssignments = person.assignments.map((assignment) => ({ ...assignment }));
   }
 
   function showError(cause: unknown) {
@@ -88,7 +83,7 @@
       await replaceStaffAssignments(accessToken, staffId, editAssignments);
       const loaded = await loadStaff();
       const refreshed = loaded && staff.find((item) => item.id === staffId);
-      if (refreshed) refreshSelected(refreshed);
+      if (refreshed && selectedId === staffId) editAssignments = refreshed.assignments.map((item) => ({ ...item }));
       notice = loaded ? "Penugasan berhasil diperbarui." : "Penugasan tersimpan, tetapi daftar belum dapat dimuat ulang.";
     }
     catch (cause) { showError(cause); }
@@ -121,12 +116,12 @@
 
     <div class="staff-admin-grid">
       <section class="staff-admin-panel" aria-labelledby="staff-list-title">
-        <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="staff-list-title">Akun petugas</h2></div><button class="staff-text-button" type="button" onclick={loadStaff} disabled={loadingStaff}>{loadingStaff ? "Memuat…" : "Muat ulang"}</button></div>
+        <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="staff-list-title">Akun petugas</h2></div><button class="staff-text-button" type="button" onclick={() => { if (!saving) void loadStaff(); }} disabled={loadingStaff || saving}>{loadingStaff ? "Memuat…" : "Muat ulang"}</button></div>
         {#if loadingStaff}<p class="staff-muted" aria-live="polite">Memuat daftar petugas…</p>
         {:else if staffError}<p class="staff-form-message staff-form-error" role="alert">{staffError}</p>
         {:else if staff.length === 0}<p class="staff-muted">Belum ada akun petugas.</p>
         {:else}<ul class="staff-list">{#each staff as person (person.id)}
-          <li class:staff-selected={selectedId === person.id}><div class="staff-list-identity"><strong>{person.name}</strong><span>{person.email}</span><span>{person.assignments.length ? person.assignments.map((assignment) => `${assignment.eventId} · ${assignment.gate}`).join(", ") : "Tanpa penugasan"}</span></div><span class:staff-state-inactive={!person.active} class="staff-state">{person.role}{person.active ? " · Aktif" : " · Nonaktif"}</span>{#if person.role === "STAFF"}<button class="staff-text-button" type="button" onclick={() => selectStaff(person)}>{selectedId === person.id ? "Dipilih" : "Kelola"}</button>{/if}</li>
+          <li class:staff-selected={selectedId === person.id}><div class="staff-list-identity"><strong>{person.name}</strong><span>{person.email}</span><span>{person.assignments.length ? person.assignments.map((assignment) => `${assignment.eventId} · ${assignment.gate}`).join(", ") : "Tanpa penugasan"}</span></div><span class:staff-state-inactive={!person.active} class="staff-state">{person.role}{person.active ? " · Aktif" : " · Nonaktif"}</span>{#if person.role === "STAFF"}<button class="staff-text-button" type="button" disabled={saving} onclick={() => selectStaff(person)}>{selectedId === person.id ? "Dipilih" : "Kelola"}</button>{/if}</li>
         {/each}</ul>{/if}
       </section>
 
@@ -143,7 +138,7 @@
     </div>
 
     {#if selected}<section class="staff-admin-panel staff-edit-panel" aria-labelledby="staff-edit-title">
-      <div class="staff-panel-heading"><div><span class="panel-index">03</span><h2 id="staff-edit-title">{selected.name}</h2></div><button class="staff-text-button" type="button" onclick={() => { selectedId = ""; notice = ""; error = ""; }}>Tutup</button></div>
+      <div class="staff-panel-heading"><div><span class="panel-index">03</span><h2 id="staff-edit-title">{selected.name}</h2></div><button class="staff-text-button" type="button" disabled={saving} onclick={() => { if (saving) return; selectedId = ""; notice = ""; error = ""; }}>Tutup</button></div>
       <div class="staff-edit-grid">
         <form class="staff-form" onsubmit={saveDetails} aria-busy={saving}>
           <h3>Profil dan akses</h3>

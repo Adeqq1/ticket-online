@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import type { Staff } from "../lib/api.ts";
   import { submitScan, type ScannerState } from "../lib/scanner.ts";
 
@@ -12,6 +13,7 @@
   } = $props();
   let assignmentKey = $state("");
   let code = $state("");
+  let codeInput: HTMLInputElement | undefined;
   let scan = $state<ScannerState>({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan" });
   let assignment = $derived(staff.assignments.find((item) => `${item.eventId}:${item.gate}` === assignmentKey));
 
@@ -36,6 +38,11 @@
     event.preventDefault();
     if (scan.busy || !assignment) return;
     await submitScan(scan, accessToken, assignment, code, onProfile, onUnauthorized);
+    if (scan.status !== "unknown") {
+      code = "";
+      await tick();
+      codeInput?.focus();
+    }
   }
 </script>
 
@@ -67,7 +74,7 @@
           <div class="panel-topline"><span class="panel-index">01</span><h2>Masukkan kode tiket</h2><span class="keyboard-hint">Enter ↵</span></div>
           <form class="scan-form" onsubmit={handleScan} aria-busy={scan.busy}>
             <label for="ticket-code">Kode e-ticket</label>
-            <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:value={code} placeholder="Contoh: ET-…" autocomplete="off" spellcheck="false" required disabled={scan.busy || !assignment} aria-describedby="ticket-code-note" /><button class="scan-submit" type="submit" disabled={scan.busy || !assignment}>{scan.busy ? "Memeriksa…" : "Verifikasi"} <span aria-hidden="true">↗</span></button></div>
+            <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:this={codeInput} bind:value={code} placeholder="Contoh: ET-…" autocomplete="off" spellcheck="false" required disabled={scan.busy || !assignment} aria-describedby="ticket-code-note" /><button class="scan-submit" type="submit" disabled={scan.busy || !assignment}>{scan.busy ? "Memeriksa…" : "Verifikasi"} <span aria-hidden="true">↗</span></button></div>
             <p id="ticket-code-note" class="input-note">Masukkan kode ET- dari e-ticket. Scanner keyboard dapat langsung mengetik kode di sini.</p>
           </form>
           {#if !staff.assignments.length}<p class="staff-muted" role="status">Check-in dinonaktifkan karena akun ini belum memiliki penugasan event dan gate.</p>{/if}
@@ -80,7 +87,8 @@
         <div class="result-topline"><span class="panel-index">02</span><span class="result-label">HASIL CHECK-IN</span><span class="result-signal" aria-hidden="true"></span></div>
         <div class="result-main">
           {#if scan.status === "idle"}<div class="result-icon idle-icon" aria-hidden="true">⌁</div>{:else if scan.status === "valid"}<div class="result-icon" aria-hidden="true">✓</div>{:else}<div class="result-icon" aria-hidden="true">×</div>{/if}
-          <p class="result-status">{copy[scan.status].label}</p><h2>{copy[scan.status].title}</h2><p class="result-detail">{scan.resultDetail || copy[scan.status].detail}</p>
+          <p class="result-status">{copy[scan.status].label}</p><h2>{copy[scan.status].title}</h2><p class="result-detail">{scan.status === "unknown" ? copy.unknown.detail : scan.resultDetail || copy[scan.status].detail}</p>
+          {#if scan.status === "unknown" && scan.resultDetail}<p class="result-detail">{scan.resultDetail}</p>{/if}
           {#if scan.expectedGate}<p class="result-detail">Gate tiket: <strong>{scan.expectedGate}</strong></p>{/if}
           {#if scan.checkedInAt}<p class="result-detail">Waktu tercatat: <time datetime={scan.checkedInAt}>{new Date(scan.checkedInAt).toLocaleString("id-ID")}</time></p>{/if}
         </div>

@@ -95,7 +95,7 @@ printf '%s\n' "$STAFF_BOOTSTRAP_PASSWORD" | docker compose run --rm -T --no-deps
 unset STAFF_BOOTSTRAP_PASSWORD
 ```
 
-Jika command mengembalikan `invalid staff input`, periksa nama, format email, dan panjang password. Admin berikutnya dibuat dari halaman `/admin/staff`; bootstrap hanya untuk admin pertama dan gagal jika admin sudah ada. Buka `http://localhost:5173/admin/login` (atau `/admin/login` pada host Anda). Admin masuk ke `/admin/staff`, sedangkan akun STAFF masuk ke `/admin/scan`.
+Jika command mengembalikan `invalid staff input`, periksa nama, format email, dan panjang password. Akun petugas STAFF dibuat dari halaman `/admin/staff`; bootstrap hanya untuk admin pertama dan gagal jika admin sudah ada. Buka `http://localhost:5173/admin/login` (atau `/admin/login` pada host Anda). Admin masuk ke `/admin/staff`, sedangkan akun STAFF masuk ke `/admin/scan`.
 
 Di `/admin/staff`, admin dapat membuat petugas, mengubah nama dan status aktif, mengganti password, serta menetapkan event dan gate. Pilihan gate bersumber dari tier tiket event. Menonaktifkan akun atau mengganti password mencabut semua sesi petugas terkait. Sesi berlangsung 8 jam dan profil/penugasan dibaca lewat `GET /api/v1/staff/me`. Tombol Keluar memanggil `POST /api/v1/staff/logout` dan menghapus token petugas tab ini. Jika jaringan gagal, token lokal tetap dibersihkan dan halaman menyatakan bahwa pencabutan sesi di server belum dapat dipastikan.
 

@@ -112,4 +112,20 @@ describe("scanner operations", () => {
       expect(current.status).toBe("valid");
     } finally { globalThis.fetch = originalFetch; }
   });
+
+  test.each([123, {}, null, undefined])("keeps malformed successful ticket code %p unknown without retrying", async (code) => {
+    const originalFetch = globalThis.fetch;
+    let posts = 0;
+    globalThis.fetch = (async (input) => {
+      if (String(input).endsWith("/me")) return jsonResponse({ staff: profile() });
+      posts += 1;
+      return jsonResponse({ ...result, ticket: { ...ticket, code } }, 201);
+    }) as typeof fetch;
+    const current = state();
+    try {
+      await submitScan(current, "token", assignment, ticket.code, () => {}, () => {});
+      expect(current).toMatchObject({ status: "unknown", busy: false, resultTicket: null, scanCount: 1 });
+      expect(posts).toBe(1);
+    } finally { globalThis.fetch = originalFetch; }
+  });
 });

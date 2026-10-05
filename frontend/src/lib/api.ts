@@ -164,7 +164,7 @@ function isCheckInResult(value: unknown, request: CheckInRequest): value is Chec
   if (result.status !== "CHECKED_IN" || typeof result.checkedInAt !== "string" || !Number.isFinite(Date.parse(result.checkedInAt)) || !ticket || typeof ticket !== "object") return false;
   const candidate = ticket as Partial<CheckInTicket>;
   const ticketID = request.code.trim().toLowerCase().match(/^et-([0-9a-f]{32})$/)?.[1];
-  return Boolean(ticketID && candidate.id === ticketID && candidate.code?.toUpperCase() === request.code.trim().toUpperCase() &&
+  return Boolean(ticketID && candidate.id === ticketID && typeof candidate.code === "string" && candidate.code.toUpperCase() === request.code.trim().toUpperCase() &&
     candidate.eventId === request.eventId && candidate.gate === request.gate &&
     typeof candidate.attendeeName === "string" && candidate.attendeeName.trim() &&
     typeof candidate.tierName === "string" && candidate.tierName.trim());
