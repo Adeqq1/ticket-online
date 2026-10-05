@@ -1,13 +1,12 @@
 openapi: 3.1.0
 info:
-  title: Ticket Online Buyer API
+  title: Ticket Online API
   version: 1.0.0
   description: >-
-    Kontrak API katalog, reservasi, checkout, pembayaran simulasi, dan e-ticket
-    pembeli. Pembeli tidak memerlukan login; simpan ID order dan accessToken di
-    browser yang sama untuk memuat ulang detail serta tiket. Tiket Saya tidak
-    memiliki endpoint daftar lintas-order; ambil tiket melalui API tiap order.
-    Respons error memakai bentuk {error: {code, message}}.
+    Kontrak API katalog, reservasi, checkout, pembayaran simulasi, e-ticket,
+    autentikasi petugas, pengelolaan akun STAFF, dan check-in. Token sesi
+    petugas terpisah dari token akses order. Respons error memakai bentuk
+    {error: {code, message}}; beberapa respons check-in menyertakan detail tambahan.
 servers:
   - url: /
     description: Origin aplikasi
@@ -17,6 +16,12 @@ tags:
   - name: Checkout
   - name: Pembayaran
   - name: E-ticket
+  - name: Petugas
+    description: Sesi petugas berlaku delapan jam. Token disimpan terpisah dari token akses order.
+  - name: Admin Petugas
+    description: Operasi ini memerlukan sesi dengan role ADMIN; hanya akun STAFF yang dapat dikelola.
+  - name: Check-in
+    description: Check-in hanya dapat dilakukan STAFF pada event dan gate yang ditugaskan.
 paths:
   /api/v1/events:
     get:
@@ -565,6 +570,242 @@ paths:
           $ref: '#/components/responses/AccessTokenExpired'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/staff/login:
+    post:
+      operationId: loginStaff
+      tags: [Petugas]
+      summary: Login petugas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StaffLoginRequest'}
+      responses:
+        '200':
+          description: Sesi petugas delapan jam.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StaffSession'}
+        '400': {$ref: '#/components/responses/InvalidJSON'}
+        '401':
+          description: Email atau password salah, atau akun dinonaktifkan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {error: {code: UNAUTHORIZED, message: Email atau password tidak valid}}
+        '422': {$ref: '#/components/responses/InvalidStaffRequest'}
+        '429':
+          description: Batas percobaan login tercapai.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {error: {code: RATE_LIMITED, message: Terlalu banyak percobaan login}}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/staff/me:
+    get:
+      operationId: getStaffProfile
+      tags: [Petugas]
+      summary: Profil dan penugasan sesi aktif
+      security: [{StaffSessionToken: []}]
+      responses:
+        '200':
+          description: Profil beserta penugasan aktif.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [staff]
+                properties:
+                  staff: {$ref: '#/components/schemas/Staff'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/staff/logout:
+    post:
+      operationId: logoutStaff
+      tags: [Petugas]
+      summary: Mencabut sesi petugas
+      security: [{StaffSessionToken: []}]
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/staff:
+    get:
+      operationId: listStaff
+      tags: [Admin Petugas]
+      summary: Daftar akun petugas
+      description: Memuat akun ADMIN dan STAFF; hanya akun STAFF yang dapat dikelola.
+      security: [{StaffSessionToken: []}]
+      responses:
+        '200':
+          description: Daftar akun beserta penugasan.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [staff]
+                properties:
+                  staff:
+                    type: array
+                    items: {$ref: '#/components/schemas/Staff'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    post:
+      operationId: createStaff
+      tags: [Admin Petugas]
+      summary: Membuat akun STAFF
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateStaffRequest'}
+      responses:
+        '201':
+          description: Akun STAFF dibuat.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Staff'}
+        '400': {$ref: '#/components/responses/InvalidJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409':
+          description: Email duplikat atau admin sudah tersedia.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                duplicateEmail: {value: {error: {code: DUPLICATE_EMAIL, message: Email sudah digunakan}}}
+                adminExists: {value: {error: {code: ADMIN_EXISTS, message: Administrator sudah tersedia}}}
+        '422': {$ref: '#/components/responses/InvalidStaffRequest'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/staff/{staffID}:
+    parameters:
+      - $ref: '#/components/parameters/StaffID'
+    patch:
+      operationId: updateStaff
+      tags: [Admin Petugas]
+      summary: Mengubah nama atau status aktif STAFF
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateStaffRequest'}
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/StaffNotFound'}
+        '422': {$ref: '#/components/responses/InvalidStaffRequest'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/staff/{staffID}/assignments:
+    parameters:
+      - $ref: '#/components/parameters/StaffID'
+    put:
+      operationId: replaceStaffAssignments
+      tags: [Admin Petugas]
+      summary: Mengganti seluruh penugasan STAFF
+      description: assignments wajib berupa array; [] menghapus seluruh penugasan. Tiap gate harus tersedia pada tier event terkait.
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [assignments]
+              properties:
+                assignments:
+                  type: array
+                  items: {$ref: '#/components/schemas/StaffAssignment'}
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/StaffNotFound'}
+        '422': {$ref: '#/components/responses/InvalidStaffRequest'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/staff/{staffID}/password:
+    parameters:
+      - $ref: '#/components/parameters/StaffID'
+    put:
+      operationId: resetStaffPassword
+      tags: [Admin Petugas]
+      summary: Reset password STAFF
+      description: Password baru harus 12–128 byte; semua sesi petugas tersebut dicabut.
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: {type: string, minLength: 12, maxLength: 128}
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/StaffNotFound'}
+        '422': {$ref: '#/components/responses/InvalidStaffRequest'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/staff/check-ins:
+    post:
+      operationId: checkInTicket
+      tags: [Check-in]
+      summary: Check-in satu e-ticket
+      description: Hanya STAFF yang ditugaskan pada pasangan event dan gate ini dapat check-in. Tiket harus milik order PAID dan gate harus cocok dengan snapshot.
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CheckInRequest'}
+      responses:
+        '201':
+          description: Check-in berhasil dicatat.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CheckInResult'}
+        '400': {$ref: '#/components/responses/InvalidCheckInRequest'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403':
+          description: Petugas tidak memiliki penugasan untuk event atau gate yang diminta.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {error: {code: FORBIDDEN, message: Akses petugas ke event atau gate ini ditolak}}
+        '404':
+          description: Tiket tidak ditemukan atau tidak berasal dari event yang diminta.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {error: {code: TICKET_NOT_FOUND, message: Tiket tidak ditemukan}}
+        '409':
+          description: Gate salah, tiket sudah digunakan, atau order belum dibayar.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/WrongGateError'}
+                  - {$ref: '#/components/schemas/AlreadyUsedError'}
+                  - {$ref: '#/components/schemas/Error'}
+              examples:
+                wrongGate:
+                  value: {error: {code: WRONG_GATE, message: Tiket berlaku di gate lain, expectedGate: Gate B}}
+                alreadyUsed:
+                  value: {error: {code: TICKET_ALREADY_USED, message: Tiket sudah digunakan}, status: ALREADY_USED, ticket: {id: 0123456789abcdef0123456789abcdef, code: ET-0123456789ABCDEF0123456789ABCDEF, attendeeName: Peserta Satu, tierName: Festival, eventId: nusa-malam, gate: Gate B}, checkedInAt: '2027-08-24T12:30:00Z'}
+                unpaid:
+                  value: {error: {code: ORDER_NOT_PAID, message: Order tiket belum dibayar}}
+        '500': {$ref: '#/components/responses/InternalError'}
 components:
   securitySchemes:
     OrderAccessToken:
@@ -572,6 +813,11 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: Token opaque order dari respons checkout; terikat pada order dan berlaku sampai tengah malam WIB setelah tanggal konser.
+    StaffSessionToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Token sesi petugas opaque dari login; terpisah dari token akses order dan berlaku delapan jam.
   parameters:
     EventID:
       name: eventID
@@ -597,6 +843,12 @@ components:
       required: true
       description: ID e-ticket 32 karakter heksadesimal.
       schema: {type: string, pattern: '^[0-9a-fA-F]{32}$'}
+    StaffID:
+      name: staffID
+      in: path
+      required: true
+      description: ID petugas 32 karakter heksadesimal.
+      schema: {type: string, pattern: '^[0-9a-fA-F]{32}$'}
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -604,6 +856,44 @@ components:
       description: Key yang sama wajib dipakai ulang untuk retry operasi reservasi dan checkout. Setelah trim, panjangnya harus 16–100 byte.
       schema: {type: string}
   responses:
+    NoContent:
+      description: Operasi berhasil; respons tidak memiliki body.
+    InvalidJSON:
+      description: JSON tidak valid.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: INVALID_JSON, message: JSON request tidak valid}}
+    InvalidStaffRequest:
+      description: Data login atau petugas tidak memenuhi validasi.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: INVALID_REQUEST, message: Data petugas tidak valid}}
+    InvalidCheckInRequest:
+      description: JSON atau field check-in tidak valid.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: INVALID_REQUEST, message: Data check-in tidak valid}}
+    StaffUnauthorized:
+      description: Bearer token petugas tidak ada, tidak valid, kedaluwarsa, atau dicabut.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: UNAUTHORIZED, message: Sesi petugas tidak valid atau sudah berakhir}}
+    AdminForbidden:
+      description: Sesi valid, tetapi role bukan ADMIN.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: FORBIDDEN, message: Akses administrator diperlukan}}
+    StaffNotFound:
+      description: Akun STAFF tidak ditemukan.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {error: {code: NOT_FOUND, message: Petugas tidak ditemukan}}
     InternalError:
       description: Kesalahan internal atau database.
       content:
@@ -674,6 +964,106 @@ components:
           properties:
             code: {type: string}
             message: {type: string}
+    StaffAssignment:
+      type: object
+      additionalProperties: false
+      required: [eventId, gate]
+      properties:
+        eventId: {type: string, minLength: 1, maxLength: 64}
+        gate: {type: string, minLength: 1, maxLength: 100}
+    Staff:
+      type: object
+      required: [id, name, email, role, active, assignments]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        name: {type: string}
+        email: {type: string, format: email}
+        role: {type: string, enum: [ADMIN, STAFF]}
+        active: {type: boolean}
+        assignments:
+          type: array
+          items: {$ref: '#/components/schemas/StaffAssignment'}
+    StaffLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: {type: string, maxLength: 254}
+        password: {type: string, maxLength: 128}
+    StaffSession:
+      type: object
+      required: [accessToken, expiresAt, staff]
+      properties:
+        accessToken: {type: string, description: Simpan terpisah dari token akses order.}
+        expiresAt: {type: string, format: date-time}
+        staff: {$ref: '#/components/schemas/Staff'}
+    CreateStaffRequest:
+      type: object
+      additionalProperties: false
+      required: [name, email, password, assignments]
+      properties:
+        name: {type: string, minLength: 2, maxLength: 80}
+        email: {type: string, format: email, maxLength: 254}
+        password: {type: string, minLength: 12, maxLength: 128}
+        assignments:
+          type: array
+          items: {$ref: '#/components/schemas/StaffAssignment'}
+    UpdateStaffRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 2, maxLength: 80}
+        active: {type: boolean}
+    CheckInRequest:
+      type: object
+      additionalProperties: false
+      required: [eventId, gate, code]
+      properties:
+        eventId: {type: string, minLength: 1, maxLength: 64}
+        gate: {type: string, minLength: 1, maxLength: 100}
+        code: {type: string, pattern: '^ET-[0-9a-fA-F]{32}$'}
+    CheckInTicket:
+      type: object
+      required: [id, code, attendeeName, tierName, eventId, gate]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        code: {type: string, pattern: '^ET-[0-9A-F]{32}$'}
+        attendeeName: {type: string}
+        tierName: {type: string}
+        eventId: {type: string}
+        gate: {type: string}
+    CheckInResult:
+      type: object
+      required: [status, ticket, checkedInAt]
+      properties:
+        status: {type: string, const: CHECKED_IN}
+        ticket: {$ref: '#/components/schemas/CheckInTicket'}
+        checkedInAt: {type: string, format: date-time}
+    WrongGateError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, expectedGate]
+          properties:
+            code: {type: string, const: WRONG_GATE}
+            message: {type: string}
+            expectedGate: {type: string}
+    AlreadyUsedError:
+      type: object
+      required: [error, status, ticket, checkedInAt]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string, const: TICKET_ALREADY_USED}
+            message: {type: string}
+        status: {type: string, const: ALREADY_USED}
+        ticket: {$ref: '#/components/schemas/CheckInTicket'}
+        checkedInAt: {type: string, format: date-time}
     Event:
       type: object
       required: [id, artist, city, venue, address, startsAt, genre, status, image, description, lineup, price, zones, ticketTiers]
