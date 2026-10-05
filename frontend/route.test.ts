@@ -8,6 +8,10 @@ test("matches application paths without accepting extra segments", () => {
   expect(matchRoute("/tiket-saya/")).toEqual({ name: "my-tickets" });
   expect(matchRoute("/panduan")).toEqual({ name: "guide" });
   expect(matchRoute("/panduan/")).toEqual({ name: "guide" });
+  expect(matchRoute("/admin/login")).toEqual({ name: "admin-login" });
+  expect(matchRoute("/admin/staff")).toEqual({ name: "admin-staff" });
+  expect(matchRoute("/admin/login/")).toEqual({ name: "admin-login" });
+  expect(matchRoute("/admin/staff/extra")).toEqual({ name: "not-found" });
   expect(matchRoute("/admin/scan")).toEqual({ name: "admin-scan" });
   expect(matchRoute("/admin/scan/")).toEqual({ name: "admin-scan" });
   expect(matchRoute("/konser/nusa-malam")).toEqual({ name: "concert-detail", id: "nusa-malam" });
