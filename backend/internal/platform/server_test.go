@@ -101,6 +101,15 @@ func TestPrivateOrderRoutesRequireToken(t *testing.T) {
 	}
 }
 
+func TestCheckInRouteIsAvailableInProductionAndRequiresStaffSession(t *testing.T) {
+	handler := testHandler(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), "", false)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/staff/check-ins", strings.NewReader(`{}`)))
+	if response.Code != http.StatusUnauthorized || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("check-in route returned %d with Cache-Control %q: %s", response.Code, response.Header().Get("Cache-Control"), response.Body.String())
+	}
+}
+
 func TestStaticHandlerFallsBackToIndexForBrowserRoutes(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("spa"), 0o644); err != nil {

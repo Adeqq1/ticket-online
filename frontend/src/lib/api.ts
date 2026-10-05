@@ -1,4 +1,5 @@
 import { eventDate, type Concert, type Genre, type StageZone, type TicketStatus, type TicketTier } from "./concerts.ts";
+import type { Buyer } from "./checkout.ts";
 
 export type ApiZone = { id: string; name: string; description: string };
 export type ApiTicketTier = { id: string; name: string; zoneId: string; price: number; availableQuantity: number; maxPerOrder: number; benefit: string; gate: string; seating: "assigned" | "free-standing" };
@@ -6,6 +7,19 @@ export type ApiEvent = { id: string; artist: string; city: string; venue: string
 export type ApiErrorBody = { error?: { code?: string; message?: string } };
 export type ReservationItem = { tierId: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
 export type Reservation = { id: string; status: string; expiresAt: string; event: { id: string; artist: string }; items: ReservationItem[]; subtotal: number; reference?: string };
+export type OrderItem = ReservationItem;
+export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED";
+export type PaymentMethod = "QRIS" | "VIRTUAL_ACCOUNT" | "GOPAY";
+export type PaymentStatus = "FAILED" | "SUCCEEDED";
+export type OrderAttendeeInput = { tierId: string; names: string[] };
+export type CreateOrderRequest = { buyer: Buyer; attendees: OrderAttendeeInput[]; voucherCode?: string };
+export type OrderBase = { id: string; reference: string; reservationId: string; status: OrderStatus; expiresAt: string; subtotal: number; adminFee: number; discount: number; total: number; items: OrderItem[] };
+export type OrderResponse = OrderBase & { accessToken: string; accessExpiresAt: string };
+export type OrderDetail = OrderBase & { buyer: Buyer; attendees: Array<{ tierId: string; ticketNumber: number; name: string }>; payment: PaymentSummary | null; createdAt: string; updatedAt: string; eventStartsAt: string; accessExpiresAt: string };
+export type PaymentSummary = { id: string; method: PaymentMethod; amount: number; status: PaymentStatus; paidAt?: string };
+export type SimulatePaymentRequest = { method: PaymentMethod; result: PaymentStatus };
+export type ApiTicket = { id: string; code: string; attendeeName: string; orderReference: string; eventId: string; eventArtist: string; eventCity: string; eventVenue: string; eventAddress: string; eventStartsAt: string; tierName: string; gate: string; issuedAt: string };
+export type PaymentResult = { id: string; orderId: string; orderStatus: "PENDING" | "PAID"; method: PaymentMethod; amount: number; status: PaymentStatus; paidAt?: string; tickets: ApiTicket[] };
 
 export class ApiError extends Error {
   code: string;
@@ -50,3 +64,25 @@ export function createReservation(eventId: string, items: Array<{ tierId: string
 export function getReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}`, signal); }
 
 export function convertReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}/convert`, signal, { method: "POST" }); }
+
+export function createOrder(reservationId: string, payload: CreateOrderRequest, idempotencyKey: string, signal?: AbortSignal) {
+  return request<OrderResponse>(`/api/v1/reservations/${encodeURIComponent(reservationId)}/checkout`, signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) });
+}
+
+function privateHeaders(accessToken: string): HeadersInit { return { Authorization: `Bearer ${accessToken}` }; }
+
+export function getOrder(orderId: string, accessToken: string, signal?: AbortSignal) {
+  return request<OrderDetail>(`/api/v1/orders/${encodeURIComponent(orderId)}`, signal, { headers: privateHeaders(accessToken) });
+}
+
+export function simulatePayment(orderId: string, payload: SimulatePaymentRequest, accessToken: string, signal?: AbortSignal) {
+  return request<PaymentResult>(`/api/v1/orders/${encodeURIComponent(orderId)}/simulate-payment`, signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export async function listOrderTickets(orderId: string, accessToken: string, signal?: AbortSignal) {
+  return (await request<{ tickets: ApiTicket[] }>(`/api/v1/orders/${encodeURIComponent(orderId)}/tickets`, signal, { headers: privateHeaders(accessToken) })).tickets;
+}
+
+export function getTicket(ticketId: string, accessToken: string, signal?: AbortSignal) {
+  return request<ApiTicket>(`/api/v1/tickets/${encodeURIComponent(ticketId)}`, signal, { headers: privateHeaders(accessToken) });
+}

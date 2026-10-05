@@ -1,0 +1,900 @@
+openapi: 3.1.0
+info:
+  title: Ticket Online Buyer API
+  version: 1.0.0
+  description: >-
+    Kontrak API katalog, reservasi, checkout, pembayaran simulasi, dan e-ticket
+    pembeli. Pembeli tidak memerlukan login; simpan ID order dan accessToken di
+    browser yang sama untuk memuat ulang detail serta tiket. Tiket Saya tidak
+    memiliki endpoint daftar lintas-order; ambil tiket melalui API tiap order.
+    Respons error memakai bentuk {error: {code, message}}.
+servers:
+  - url: /
+    description: Origin aplikasi
+tags:
+  - name: Katalog
+  - name: Reservasi
+  - name: Checkout
+  - name: Pembayaran
+  - name: E-ticket
+paths:
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      tags: [Katalog]
+      summary: Daftar konser
+      responses:
+        '200':
+          description: Daftar konser; array dapat kosong.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+              examples:
+                concerts:
+                  value:
+                    events:
+                      - id: nusa-malam
+                        artist: Nusa Malam
+                        city: Jakarta
+                        venue: Ruang Selatan
+                        address: Jl. Musik Raya, Jakarta
+                        startsAt: '2027-08-24T19:30:00Z'
+                        genre: Indie
+                        status: EARLY_BIRD
+                        image: https://example.test/nusa-malam.jpg
+                        description: Konser Nusa Malam.
+                        lineup: [Nusa Malam, Pembuka Sore]
+                        price: 225000
+                        zones:
+                          - {id: festival, name: Festival, description: Area berdiri umum}
+                        ticketTiers:
+                          - {id: festival, name: Festival, zoneId: festival, price: 225000, availableQuantity: 42, maxPerOrder: 6, benefit: Area berdiri umum, gate: Gate B, seating: free-standing}
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/events/{eventID}:
+    parameters:
+      - $ref: '#/components/parameters/EventID'
+    get:
+      operationId: getEvent
+      tags: [Katalog]
+      summary: Detail konser dan tier tiket
+      responses:
+        '200':
+          description: Detail konser.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              example:
+                id: nusa-malam
+                artist: Nusa Malam
+                city: Jakarta
+                venue: Ruang Selatan
+                address: Jl. Musik Raya, Jakarta
+                startsAt: '2027-08-24T19:30:00Z'
+                genre: Indie
+                status: EARLY_BIRD
+                image: https://example.test/nusa-malam.jpg
+                description: Konser Nusa Malam.
+                lineup: [Nusa Malam, Pembuka Sore]
+                price: 225000
+                zones:
+                  - {id: festival, name: Festival, description: Area berdiri umum}
+                ticketTiers:
+                  - {id: festival, name: Festival, zoneId: festival, price: 225000, availableQuantity: 42, maxPerOrder: 6, benefit: Area berdiri umum, gate: Gate B, seating: free-standing}
+        '404':
+          description: Konser tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: EVENT_NOT_FOUND, message: Event tidak ditemukan}
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reservations:
+    post:
+      operationId: createReservation
+      tags: [Reservasi]
+      summary: Tahan stok tiket untuk sementara
+      description: >-
+        Kirim key yang sama dan payload yang sama untuk mengulang request dengan aman.
+        Key harus 16–100 byte setelah trim. Reservation berlaku selama TTL yang
+        dikonfigurasi server.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReservationRequest'
+            example:
+              eventId: nusa-malam
+              items:
+                - {tierId: festival, quantity: 2}
+                - {tierId: vip-a, quantity: 1}
+      responses:
+        '201':
+          description: Reservasi dibuat. Replay key yang sama juga mengembalikan 201.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+              example:
+                id: 0123456789abcdef0123456789abcdef
+                status: ACTIVE
+                expiresAt: '2027-08-24T12:40:00Z'
+                event: {id: nusa-malam, artist: Nusa Malam}
+                items:
+                  - {tierId: festival, name: Festival, quantity: 2, unitPrice: 225000, lineTotal: 450000}
+                subtotal: 450000
+        '400':
+          description: Key hilang/tidak valid, JSON tidak valid, atau data reservasi tidak valid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidKey:
+                  value: {error: {code: INVALID_REQUEST, message: 'Idempotency-Key tidak valid'}}
+                invalidJSON:
+                  value: {error: {code: INVALID_JSON, message: 'JSON request tidak valid'}}
+                invalidRequest:
+                  value: {error: {code: INVALID_REQUEST, message: 'Data reservasi tidak valid'}}
+        '404':
+          description: Event atau tier tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                event:
+                  value: {error: {code: EVENT_NOT_FOUND, message: Event tidak ditemukan}}
+                tier:
+                  value: {error: {code: TIER_NOT_FOUND, message: Tier tiket tidak ditemukan}}
+        '409':
+          description: Stok kurang atau key telah digunakan untuk payload berbeda.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                stock:
+                  value: {error: {code: INSUFFICIENT_STOCK, message: Stok tiket tidak mencukupi}}
+                idempotency:
+                  value: {error: {code: IDEMPOTENCY_CONFLICT, message: Idempotency-Key sudah digunakan untuk request berbeda}}
+        '422':
+          description: Jumlah melampaui batas pemesanan tier.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: ORDER_LIMIT_EXCEEDED, message: Jumlah tiket melebihi batas pemesanan}
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reservations/{reservationID}:
+    parameters:
+      - $ref: '#/components/parameters/ReservationID'
+    get:
+      operationId: getReservation
+      tags: [Reservasi]
+      summary: Baca status reservasi
+      responses:
+        '200':
+          description: Reservasi dan snapshot item yang ditahan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '404':
+          description: Reservasi tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_NOT_FOUND, message: Reservasi tidak ditemukan}
+        '410':
+          description: Reservasi kedaluwarsa.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_EXPIRED, message: Reservasi sudah kedaluwarsa}
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: cancelReservation
+      tags: [Reservasi]
+      summary: Batalkan reservasi aktif dan kembalikan stok
+      responses:
+        '200':
+          description: Reservasi yang dibatalkan; pembatalan ulang mengembalikan status yang sama.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '404':
+          description: Reservasi tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_NOT_FOUND, message: Reservasi tidak ditemukan}
+        '409':
+          description: Reservasi telah dikonversi atau dibatalkan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                converted:
+                  value: {error: {code: RESERVATION_CONVERTED, message: Reservasi sudah dikonversi}}
+                cancelled:
+                  value: {error: {code: RESERVATION_CANCELLED, message: Reservasi sudah dibatalkan}}
+        '410':
+          description: Reservasi kedaluwarsa.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_EXPIRED, message: Reservasi sudah kedaluwarsa}
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reservations/{reservationID}/convert:
+    parameters:
+      - $ref: '#/components/parameters/ReservationID'
+    post:
+      operationId: convertReservation
+      tags: [Reservasi]
+      summary: Konversi reservasi ke tiket demo browser
+      description: >-
+        Endpoint kompatibilitas untuk alur demo saat ini. Endpoint ini mengubah
+        reservasi menjadi CONVERTED dan tidak membuat order atau e-ticket database.
+        Alur pembelian backend memakai endpoint checkout di bawah.
+      responses:
+        '200':
+          description: Reservasi yang sudah dikonversi.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '404':
+          description: Reservasi tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_NOT_FOUND, message: Reservasi tidak ditemukan}
+        '409':
+          description: Reservasi telah dibatalkan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_CANCELLED, message: Reservasi sudah dibatalkan}
+        '410':
+          description: Reservasi kedaluwarsa.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_EXPIRED, message: Reservasi sudah kedaluwarsa}
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/reservations/{reservationID}/checkout:
+    parameters:
+      - $ref: '#/components/parameters/ReservationID'
+    post:
+      operationId: createOrder
+      tags: [Checkout]
+      summary: Buat order idempoten dari reservasi
+      description: >-
+        Gunakan Idempotency-Key yang sama dengan saat membuat reservasi. Replay
+        request checkout yang sama mengembalikan order dan token akses yang sama.
+        Harga, biaya admin, dan diskon dihitung server. Order PENDING kedaluwarsa
+        pada expiresAt; tanggal kedaluwarsa token akses berbeda.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+            example:
+              buyer: {name: Nama Pembeli, email: buyer@example.com, phone: '+6281234567890', identity: '123456789012'}
+              attendees:
+                - {tierId: festival, names: [Peserta Satu, Peserta Dua]}
+              voucherCode: HEMAT10
+      responses:
+        '201':
+          description: Order baru dibuat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '200':
+          description: Replay dengan payload checkout yang sama; mengembalikan order yang sama.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          description: Key atau ID reservasi tidak valid, atau JSON tidak valid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidRequest:
+                  value: {error: {code: INVALID_REQUEST, message: Idempotency-Key tidak valid}}
+                invalidJSON:
+                  value: {error: {code: INVALID_JSON, message: JSON request tidak valid}}
+        '401':
+          description: Key tidak cocok dengan reservasi.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_ACCESS_DENIED, message: Akses reservasi tidak valid}
+        '404':
+          description: Reservasi atau target order tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                reservation:
+                  value: {error: {code: RESERVATION_NOT_FOUND, message: Reservasi tidak ditemukan}}
+                order:
+                  value: {error: {code: ORDER_NOT_FOUND, message: Order tidak ditemukan}}
+        '409':
+          description: Reservasi dibatalkan/dikonversi atau data checkout berbeda dari order yang ada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                cancelled:
+                  value: {error: {code: RESERVATION_CANCELLED, message: Reservasi sudah dibatalkan}}
+                converted:
+                  value: {error: {code: RESERVATION_CONVERTED, message: Reservasi sudah dikonversi}}
+                conflict:
+                  value: {error: {code: CHECKOUT_CONFLICT, message: Reservasi sudah dipesan dengan data checkout berbeda}}
+        '410':
+          description: Reservasi kedaluwarsa.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: RESERVATION_EXPIRED, message: Reservasi sudah kedaluwarsa}
+        '422':
+          description: Data checkout tidak valid atau voucher tidak didukung.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidRequest:
+                  value: {error: {code: INVALID_REQUEST, message: Data checkout tidak valid}}
+                invalidVoucher:
+                  value: {error: {code: INVALID_VOUCHER, message: Kode voucher tidak valid}}
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{orderID}:
+    parameters:
+      - $ref: '#/components/parameters/OrderID'
+    get:
+      operationId: getOrder
+      tags: [Checkout]
+      summary: Baca detail order dan pembayaran
+      security:
+        - OrderAccessToken: []
+      responses:
+        '200':
+          description: Order, data pembeli, peserta, dan ringkasan pembayaran jika sudah ada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+        '400':
+          $ref: '#/components/responses/InvalidID'
+        '401':
+          $ref: '#/components/responses/AccessTokenRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/AccessTokenExpired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{orderID}/simulate-payment:
+    parameters:
+      - $ref: '#/components/parameters/OrderID'
+    post:
+      operationId: simulatePayment
+      tags: [Pembayaran]
+      summary: Simulasikan pembayaran order
+      description: Endpoint hanya didaftarkan saat APP_ENV=development. Pembayaran sukses menerbitkan snapshot e-ticket; replay sukses mengembalikan pembayaran dan tiket yang sama.
+      security:
+        - OrderAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatePaymentRequest'
+            examples:
+              failed:
+                value: {method: QRIS, result: FAILED}
+              succeeded:
+                value: {method: QRIS, result: SUCCEEDED}
+      responses:
+        '201':
+          description: Pembayaran baru dicatat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResult'
+        '200':
+          description: Replay pembayaran atau percobaan ulang pembayaran gagal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResult'
+        '400':
+          $ref: '#/components/responses/InvalidIDOrJSON'
+        '401':
+          $ref: '#/components/responses/AccessTokenRequired'
+        '404':
+          description: Token salah atau order tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                token:
+                  value: {error: {code: NOT_FOUND, message: Data tidak ditemukan}}
+                order:
+                  value: {error: {code: ORDER_NOT_FOUND, message: Order tidak ditemukan}}
+        '409':
+          description: Order kedaluwarsa/tidak dapat dibayar, atau pembayaran sukses tidak dapat diubah.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notPayable:
+                  value: {error: {code: ORDER_NOT_PAYABLE, message: Order tidak dapat dibayar}}
+                conflict:
+                  value: {error: {code: PAYMENT_CONFLICT, message: Pembayaran berhasil dan tidak dapat diubah}}
+        '410':
+          $ref: '#/components/responses/AccessTokenExpired'
+        '422':
+          description: Metode atau hasil simulasi tidak valid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: {code: INVALID_REQUEST, message: Data pembayaran tidak valid}
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{orderID}/tickets:
+    parameters:
+      - $ref: '#/components/parameters/OrderID'
+    get:
+      operationId: listOrderTickets
+      tags: [E-ticket]
+      summary: Daftar e-ticket order
+      description: Daftar kosong sebelum pembayaran sukses.
+      security:
+        - OrderAccessToken: []
+      responses:
+        '200':
+          description: Daftar snapshot e-ticket yang sudah diterbitkan.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tickets]
+                properties:
+                  tickets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticket'
+        '400':
+          $ref: '#/components/responses/InvalidID'
+        '401':
+          $ref: '#/components/responses/AccessTokenRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/AccessTokenExpired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tickets/{ticketID}:
+    parameters:
+      - $ref: '#/components/parameters/TicketID'
+    get:
+      operationId: getTicket
+      tags: [E-ticket]
+      summary: Baca satu e-ticket
+      security:
+        - OrderAccessToken: []
+      responses:
+        '200':
+          description: Snapshot e-ticket.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400':
+          $ref: '#/components/responses/InvalidTicketID'
+        '401':
+          $ref: '#/components/responses/AccessTokenRequired'
+        '404':
+          description: Token salah, order tidak ditemukan, atau tiket tidak ditemukan; target disamarkan sebagai 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                token:
+                  value: {error: {code: NOT_FOUND, message: Data tidak ditemukan}}
+                ticket:
+                  value: {error: {code: TICKET_NOT_FOUND, message: E-ticket tidak ditemukan}}
+        '410':
+          $ref: '#/components/responses/AccessTokenExpired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    OrderAccessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Token opaque order dari respons checkout; terikat pada order dan berlaku sampai tengah malam WIB setelah tanggal konser.
+  parameters:
+    EventID:
+      name: eventID
+      in: path
+      required: true
+      description: ID event katalog.
+      schema: {type: string, minLength: 1}
+    ReservationID:
+      name: reservationID
+      in: path
+      required: true
+      description: ID reservasi.
+      schema: {type: string}
+    OrderID:
+      name: orderID
+      in: path
+      required: true
+      description: ID order 32 karakter heksadesimal.
+      schema: {type: string, pattern: '^[0-9a-fA-F]{32}$'}
+    TicketID:
+      name: ticketID
+      in: path
+      required: true
+      description: ID e-ticket 32 karakter heksadesimal.
+      schema: {type: string, pattern: '^[0-9a-fA-F]{32}$'}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Key yang sama wajib dipakai ulang untuk retry operasi reservasi dan checkout. Setelah trim, panjangnya harus 16–100 byte.
+      schema: {type: string}
+  responses:
+    InternalError:
+      description: Kesalahan internal atau database.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: {code: INTERNAL_ERROR, message: Terjadi kesalahan pada server}
+    InvalidID:
+      description: ID path bukan 32 karakter heksadesimal.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: {code: INVALID_REQUEST, message: ID order tidak valid}
+    InvalidTicketID:
+      description: ID e-ticket bukan 32 karakter heksadesimal.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: {code: INVALID_REQUEST, message: ID e-ticket tidak valid}
+    InvalidIDOrJSON:
+      description: ID path atau JSON request tidak valid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalidID:
+              value: {error: {code: INVALID_REQUEST, message: ID order tidak valid}}
+            invalidJSON:
+              value: {error: {code: INVALID_JSON, message: JSON request tidak valid}}
+    AccessTokenRequired:
+      description: Header bearer tidak ada atau tidak terbentuk dengan benar.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: {code: ACCESS_TOKEN_REQUIRED, message: Token akses diperlukan}
+    AccessTokenExpired:
+      description: Token order melewati waktu berlakunya.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: {code: ACCESS_TOKEN_EXPIRED, message: Token akses sudah kedaluwarsa}
+    NotFound:
+      description: Token salah atau order tidak ditemukan; keduanya disamarkan sebagai 404.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: {code: NOT_FOUND, message: Data tidak ditemukan}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+    Event:
+      type: object
+      required: [id, artist, city, venue, address, startsAt, genre, status, image, description, lineup, price, zones, ticketTiers]
+      properties:
+        id: {type: string}
+        artist: {type: string}
+        city: {type: string}
+        venue: {type: string}
+        address: {type: string}
+        startsAt: {type: string, format: date-time}
+        genre: {type: string}
+        status: {type: string, enum: [EARLY_BIRD, PRESALE, SOLD_OUT]}
+        image: {type: string}
+        description: {type: string}
+        lineup:
+          type: array
+          items: {type: string}
+        price: {type: integer, minimum: 0, description: Harga minimum tier dalam rupiah.}
+        zones:
+          type: array
+          items:
+            type: object
+            required: [id, name, description]
+            properties:
+              id: {type: string}
+              name: {type: string}
+              description: {type: string}
+        ticketTiers:
+          type: array
+          items:
+            type: object
+            required: [id, name, zoneId, price, availableQuantity, maxPerOrder, benefit, gate, seating]
+            properties:
+              id: {type: string}
+              name: {type: string}
+              zoneId: {type: string}
+              price: {type: integer, minimum: 0, description: Harga satu tiket dalam rupiah.}
+              availableQuantity: {type: integer, minimum: 0}
+              maxPerOrder: {type: integer, minimum: 1}
+              benefit: {type: string}
+              gate: {type: string}
+              seating: {type: string, enum: [assigned, free-standing]}
+    CreateReservationRequest:
+      type: object
+      additionalProperties: false
+      required: [eventId, items]
+      properties:
+        eventId: {type: string, minLength: 1}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: false
+            required: [tierId, quantity]
+            properties:
+              tierId: {type: string, minLength: 1}
+              quantity: {type: integer, minimum: 1, maximum: 4294967295}
+    Reservation:
+      type: object
+      required: [id, status, expiresAt, event, items, subtotal]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        status: {type: string, enum: [ACTIVE, EXPIRED, CANCELLED, CONVERTED]}
+        expiresAt: {type: string, format: date-time}
+        event:
+          type: object
+          required: [id, artist]
+          properties:
+            id: {type: string}
+            artist: {type: string}
+        items:
+          type: array
+          items:
+            type: object
+            required: [tierId, name, quantity, unitPrice, lineTotal]
+            properties:
+              tierId: {type: string}
+              name: {type: string}
+              quantity: {type: integer, minimum: 1}
+              unitPrice: {type: integer, minimum: 0}
+              lineTotal: {type: integer, minimum: 0}
+        subtotal: {type: integer, minimum: 0}
+        reference: {type: string}
+    CreateOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [buyer, attendees]
+      properties:
+        buyer:
+          type: object
+          additionalProperties: false
+          required: [name, email, phone, identity]
+          properties:
+            name: {type: string, minLength: 2, maxLength: 80}
+            email: {type: string, format: email, maxLength: 254}
+            phone: {type: string, description: 9–15 digit setelah spasi dan tanda hubung dihapus; awalan + opsional.}
+            identity: {type: string, pattern: '^[0-9]{12,20}$'}
+        attendees:
+          type: array
+          description: Nama peserta untuk setiap tier; jumlah nama harus sama dengan jumlah tiket tier itu.
+          items:
+            type: object
+            additionalProperties: false
+            required: [tierId, names]
+            properties:
+              tierId: {type: string, minLength: 1}
+              names:
+                type: array
+                minItems: 1
+                items: {type: string, minLength: 2, maxLength: 80}
+        voucherCode: {type: string, description: Hanya HEMAT10 yang didukung; tidak dikirim berarti tanpa diskon.}
+    OrderItem:
+      type: object
+      required: [tierId, name, quantity, unitPrice, lineTotal]
+      properties:
+        tierId: {type: string}
+        name: {type: string}
+        quantity: {type: integer, minimum: 1}
+        unitPrice: {type: integer, minimum: 0}
+        lineTotal: {type: integer, minimum: 0}
+    OrderBase:
+      type: object
+      required: [id, reference, reservationId, status, expiresAt, subtotal, adminFee, discount, total, items]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        reference: {type: string}
+        reservationId: {type: string, pattern: '^[0-9a-f]{32}$'}
+        status: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED]}
+        expiresAt: {type: string, format: date-time, description: Deadline pembayaran order.}
+        subtotal: {type: integer, minimum: 0}
+        adminFee: {type: integer, minimum: 0, description: Biaya admin rupiah yang ditetapkan server.}
+        discount: {type: integer, minimum: 0}
+        total: {type: integer, minimum: 0}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/OrderItem'}
+    OrderResponse:
+      allOf:
+        - $ref: '#/components/schemas/OrderBase'
+        - type: object
+          required: [accessToken, accessExpiresAt]
+          properties:
+            accessToken: {type: string, description: Token akses privat order; simpan di browser pembeli.}
+            accessExpiresAt: {type: string, format: date-time, description: Akhir masa berlaku token akses.}
+    OrderDetail:
+      allOf:
+        - $ref: '#/components/schemas/OrderBase'
+        - type: object
+          required: [buyer, attendees, payment, createdAt, updatedAt, eventStartsAt, accessExpiresAt]
+          properties:
+            buyer:
+              type: object
+              required: [name, email, phone, identity]
+              properties:
+                name: {type: string}
+                email: {type: string}
+                phone: {type: string}
+                identity: {type: string}
+            attendees:
+              type: array
+              items:
+                type: object
+                required: [tierId, ticketNumber, name]
+                properties:
+                  tierId: {type: string}
+                  ticketNumber: {type: integer, minimum: 1}
+                  name: {type: string}
+            payment:
+              oneOf:
+                - {$ref: '#/components/schemas/PaymentSummary'}
+                - type: 'null'
+            createdAt: {type: string, format: date-time}
+            updatedAt: {type: string, format: date-time}
+            eventStartsAt: {type: string, format: date-time}
+            accessExpiresAt: {type: string, format: date-time}
+    PaymentSummary:
+      type: object
+      required: [id, method, amount, status]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        method: {type: string, enum: [QRIS, VIRTUAL_ACCOUNT, GOPAY]}
+        amount: {type: integer, minimum: 0}
+        status: {type: string, enum: [FAILED, SUCCEEDED]}
+        paidAt: {type: string, format: date-time}
+    SimulatePaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [method, result]
+      properties:
+        method: {type: string, enum: [QRIS, VIRTUAL_ACCOUNT, GOPAY]}
+        result: {type: string, enum: [SUCCEEDED, FAILED]}
+    PaymentResult:
+      type: object
+      required: [id, orderId, orderStatus, method, amount, status, tickets]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        orderId: {type: string, pattern: '^[0-9a-f]{32}$'}
+        orderStatus: {type: string, enum: [PENDING, PAID]}
+        method: {type: string, enum: [QRIS, VIRTUAL_ACCOUNT, GOPAY]}
+        amount: {type: integer, minimum: 0}
+        status: {type: string, enum: [FAILED, SUCCEEDED]}
+        paidAt: {type: string, format: date-time}
+        tickets:
+          type: array
+          items: {$ref: '#/components/schemas/Ticket'}
+    Ticket:
+      type: object
+      required: [id, code, attendeeName, orderReference, eventId, eventArtist, eventCity, eventVenue, eventAddress, eventStartsAt, tierName, gate, issuedAt]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        code: {type: string}
+        attendeeName: {type: string}
+        orderReference: {type: string}
+        eventId: {type: string}
+        eventArtist: {type: string}
+        eventCity: {type: string}
+        eventVenue: {type: string}
+        eventAddress: {type: string}
+        eventStartsAt: {type: string, format: date-time}
+        tierName: {type: string}
+        gate: {type: string}
+        issuedAt: {type: string, format: date-time}
