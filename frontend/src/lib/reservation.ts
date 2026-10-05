@@ -1,3 +1,5 @@
+import type { CreateOrderRequest } from "./api.ts";
+
 export const RESERVATION_DURATION_MS = 10 * 60 * 1_000;
 export type StoredReservation = { reservationId?: string; idempotencyKey: string; eventId: string; basketKey: string };
 
@@ -20,6 +22,22 @@ export function parseStoredReservation(value: string | null): StoredReservation 
 }
 
 export function serializeStoredReservation(value: StoredReservation) { return JSON.stringify(value); }
+
+export function parseCheckoutAttempt(value: string | null, quantities: Record<string, number>): CreateOrderRequest | null {
+  try {
+    const payload = JSON.parse(value ?? "") as Partial<CreateOrderRequest>;
+    const buyer = payload.buyer;
+    const attendees = payload.attendees;
+    if (!buyer || ![buyer.name, buyer.email, buyer.phone, buyer.identity].every((part) => typeof part === "string") || !Array.isArray(attendees) || attendees.length !== Object.keys(quantities).length || (payload.voucherCode !== undefined && typeof payload.voucherCode !== "string")) return null;
+    const seen = new Set<string>();
+    for (const attendee of attendees) {
+      const quantity = quantities[attendee.tierId];
+      if (typeof attendee.tierId !== "string" || typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || seen.has(attendee.tierId) || !Array.isArray(attendee.names) || attendee.names.length !== quantity || attendee.names.some((name) => typeof name !== "string")) return null;
+      seen.add(attendee.tierId);
+    }
+    return payload as CreateOrderRequest;
+  } catch { return null; }
+}
 
 export function createReservationExpiry(now = Date.now()) {
   return now + RESERVATION_DURATION_MS;

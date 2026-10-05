@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { RESERVATION_DURATION_MS, createReservationExpiry, isReservationExpired, parseStoredReservation, remainingReservationSeconds, reservationBasketKey, reservationExpiryFromStorage, serializeStoredReservation, validReservationExpiry } from "./src/lib/reservation.ts";
+import { RESERVATION_DURATION_MS, createReservationExpiry, isReservationExpired, parseCheckoutAttempt, parseStoredReservation, remainingReservationSeconds, reservationBasketKey, reservationExpiryFromStorage, serializeStoredReservation, validReservationExpiry } from "./src/lib/reservation.ts";
 
 test("creates and evaluates an absolute reservation deadline", () => {
   const now = Date.parse("2027-01-01T00:00:00Z");
@@ -31,4 +31,12 @@ test("accepts only opaque persisted reservation metadata", () => {
   expect(parseStoredReservation(JSON.stringify({ ...value, expiresAt: Date.now() + 1_000 }))).toEqual(value);
   expect(parseStoredReservation(JSON.stringify({ ...value, reservationId: "" }))).toBeNull();
   expect(parseStoredReservation("not-json")).toBeNull();
+});
+
+test("restores a checkout retry only when its participant counts match the basket", () => {
+  const payload = { buyer: { name: "Pembeli", email: "buyer@example.com", phone: "08123456789", identity: "123456789012" }, attendees: [{ tierId: "festival", names: ["Satu", "Dua"] }, { tierId: "vip-a", names: ["Tiga"] }], voucherCode: "HEMAT10" };
+  const quantities = { festival: 2, "vip-a": 1 };
+  expect(parseCheckoutAttempt(JSON.stringify(payload), quantities)).toEqual(payload);
+  expect(parseCheckoutAttempt(JSON.stringify({ ...payload, attendees: [{ tierId: "festival", names: ["Satu"] }, payload.attendees[1]] }), quantities)).toBeNull();
+  expect(parseCheckoutAttempt("not-json", quantities)).toBeNull();
 });
