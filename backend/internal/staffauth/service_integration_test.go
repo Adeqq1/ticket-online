@@ -100,6 +100,20 @@ func TestStaffSessionPermissionsAndRevocation(t *testing.T) {
 
 	mux := http.NewServeMux()
 	NewHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil))).Register(mux)
+	badLoginBody, _ := json.Marshal(map[string]string{"email": "missing-" + suffix + "@example.com", "password": "wrong password"})
+	for attempt := 1; attempt <= 5; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/staff/login", bytes.NewReader(badLoginBody))
+		request.RemoteAddr = "198.51.100.220:4000"
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		want := http.StatusUnauthorized
+		if attempt == 5 {
+			want = http.StatusTooManyRequests
+		}
+		if response.Code != want {
+			t.Fatalf("bad login attempt %d returned %d, want %d: %s", attempt, response.Code, want, response.Body.String())
+		}
+	}
 	adminSession, err := service.Login(ctx, adminEmail, "admin password for test", "192.0.2.11:4000")
 	if err != nil {
 		t.Fatal(err)
@@ -188,10 +202,24 @@ func TestStaffSessionPermissionsAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/staff/logout", nil)
+	request.Header.Set("Authorization", "Bearer "+newSession.AccessToken)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("staff logout returned %d: %s", response.Code, response.Body.String())
+	}
+	if _, err := service.Authenticate(ctx, newSession.AccessToken); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("logout did not revoke session: %v", err)
+	}
+	deactivationSession, err := service.Login(ctx, staff.Email, "new staff password for test", "192.0.2.10:4002")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := service.UpdateStaff(ctx, staff.ID, nil, boolPointer(false)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Authenticate(ctx, newSession.AccessToken); !errors.Is(err, ErrUnauthorized) {
+	if _, err := service.Authenticate(ctx, deactivationSession.AccessToken); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("deactivation did not revoke session: %v", err)
 	}
 

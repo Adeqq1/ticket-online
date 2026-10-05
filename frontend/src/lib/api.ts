@@ -47,10 +47,13 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit, expectedStatus?: number): Promise<T> {
   let response: Response;
   try { response = await fetch(path, { ...init, signal, headers: { Accept: "application/json", ...init?.headers } }); }
   catch (error) { if (error instanceof DOMException && error.name === "AbortError") throw error; throw new ApiError("Tidak dapat terhubung ke server.", 0, "NETWORK_ERROR"); }
+  if (response.ok && expectedStatus !== undefined && response.status !== expectedStatus) {
+    throw new ApiError("Respons server tidak dapat dipastikan; hasil operasi belum diketahui.", 0, "UNKNOWN_OUTCOME");
+  }
   if (!response.ok) {
     let body: ApiErrorBody = {};
     try { body = await response.json() as ApiErrorBody; } catch { /* malformed error body */ }
@@ -124,7 +127,7 @@ export async function getStaffProfile(accessToken: string, signal?: AbortSignal)
 }
 
 export function logoutStaff(accessToken: string, signal?: AbortSignal) {
-  return request<void>("/api/v1/staff/logout", signal, { method: "POST", headers: staffHeaders(accessToken) });
+  return request<void>("/api/v1/staff/logout", signal, { method: "POST", headers: staffHeaders(accessToken) }, 204);
 }
 
 export async function listStaff(accessToken: string, signal?: AbortSignal) {
@@ -148,5 +151,21 @@ export function resetStaffPassword(accessToken: string, staffId: string, passwor
 }
 
 export function checkInTicket(accessToken: string, payload: CheckInRequest, signal?: AbortSignal) {
-  return request<CheckInResult>("/api/v1/staff/check-ins", signal, staffJSON(accessToken, payload));
+  return request<unknown>("/api/v1/staff/check-ins", signal, staffJSON(accessToken, payload), 201).then((result) => {
+    if (!isCheckInResult(result, payload)) throw new ApiError("Respons check-in tidak lengkap; hasil belum diketahui.", 0, "UNKNOWN_OUTCOME");
+    return result;
+  });
+}
+
+function isCheckInResult(value: unknown, request: CheckInRequest): value is CheckInResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Partial<CheckInResult>;
+  const ticket = result.ticket;
+  if (result.status !== "CHECKED_IN" || typeof result.checkedInAt !== "string" || !Number.isFinite(Date.parse(result.checkedInAt)) || !ticket || typeof ticket !== "object") return false;
+  const candidate = ticket as Partial<CheckInTicket>;
+  const ticketID = request.code.trim().toLowerCase().match(/^et-([0-9a-f]{32})$/)?.[1];
+  return Boolean(ticketID && candidate.id === ticketID && candidate.code?.toUpperCase() === request.code.trim().toUpperCase() &&
+    candidate.eventId === request.eventId && candidate.gate === request.gate &&
+    typeof candidate.attendeeName === "string" && candidate.attendeeName.trim() &&
+    typeof candidate.tierName === "string" && candidate.tierName.trim());
 }

@@ -63,7 +63,7 @@ Dari root repository:
 
 ```bash
 cd backend
-export MYSQL_DSN='ticket:ticket@tcp(127.0.0.1:3306)/ticket_online?parseTime=true&loc=UTC'
+export MYSQL_DSN='ticket:ticket@tcp(127.0.0.1:8000)/ticket_online?parseTime=true&loc=UTC'
 go run ./cmd/migrate
 go run ./cmd/api
 ```
@@ -86,15 +86,20 @@ Untuk memakai endpoint pembayaran simulasi di Docker Compose, aktifkan kedua bat
 
 ## Akun Petugas
 
-Buat admin pertama dengan command di image backend setelah database berjalan. Password dibaca satu baris dari stdin; isi lewat secret manager atau file secret agar password tidak masuk argumen proses:
+Buat admin pertama sekali setelah database berjalan. Jalankan dari root repo. Beri nama 2–80 karakter, email valid (misalnya `admin@example.com`), dan password 12–128 byte. Password dibaca tersembunyi lalu diteruskan melalui stdin, bukan argumen proses:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint /app/ticket-staff api bootstrap-admin --name 'Admin Event' --email admin@example.com < /run/secrets/admin-password
+read -rsp 'Password admin (12–128 byte): ' STAFF_BOOTSTRAP_PASSWORD
+printf '\n'
+printf '%s\n' "$STAFF_BOOTSTRAP_PASSWORD" | docker compose run --rm -T --no-deps --entrypoint /app/ticket-staff api bootstrap-admin --name 'Admin Event' --email admin@example.com
+unset STAFF_BOOTSTRAP_PASSWORD
 ```
 
-Admin login melalui `POST /api/v1/staff/login`, lalu mengelola akun STAFF lewat `/api/v1/admin/staff`. Sesi berlaku 8 jam dan dikirim pada header `Authorization: Bearer <accessToken>`. Gunakan `GET /api/v1/staff/me` untuk profil serta penugasan. Logout dengan `POST /api/v1/staff/logout`. Admin membuat petugas beserta pasangan `eventId` dan `gate`, dapat mengganti penugasan, menonaktifkan akun, dan reset password. Penugasan petugas menentukan akses scan pada task berikutnya.
+Jika command mengembalikan `invalid staff input`, periksa nama, format email, dan panjang password. Admin berikutnya dibuat dari halaman `/admin/staff`; bootstrap hanya untuk admin pertama dan gagal jika admin sudah ada. Buka `http://localhost:5173/admin/login` (atau `/admin/login` pada host Anda). Admin masuk ke `/admin/staff`, sedangkan akun STAFF masuk ke `/admin/scan`.
 
-Check-in dilakukan lewat `POST /api/v1/staff/check-ins` dengan token sesi STAFF, `eventId`, `gate`, dan kode e-ticket individual (`ET-` diikuti ID tiket 32 digit heksadesimal). Server hanya menerima tiket dari order yang sudah dibayar dan gate yang sesuai dengan snapshot e-ticket. Check-in sukses langsung menandai tiket terpakai; request berikutnya untuk tiket yang sama mengembalikan `409 TICKET_ALREADY_USED`. Gate yang salah mengembalikan `409 WRONG_GATE` beserta `expectedGate`. Satu petugas hanya dapat check-in pada gate yang ditugaskan admin.
+Di `/admin/staff`, admin dapat membuat petugas, mengubah nama dan status aktif, mengganti password, serta menetapkan event dan gate. Pilihan gate bersumber dari tier tiket event. Menonaktifkan akun atau mengganti password mencabut semua sesi petugas terkait. Sesi berlangsung 8 jam dan profil/penugasan dibaca lewat `GET /api/v1/staff/me`. Tombol Keluar memanggil `POST /api/v1/staff/logout` dan menghapus token petugas tab ini. Jika jaringan gagal, token lokal tetap dibersihkan dan halaman menyatakan bahwa pencabutan sesi di server belum dapat dipastikan.
+
+STAFF memilih penugasan event/gate lalu memasukkan kode e-ticket individual (`ET-` diikuti ID 32 digit heksadesimal); scanner yang bertindak sebagai keyboard juga dapat digunakan. Check-in dikirim ke `POST /api/v1/staff/check-ins`. Server hanya menerima order berstatus PAID dan gate yang sesuai snapshot tiket. Hasil menampilkan tiket berhasil, telah dipakai (`TICKET_ALREADY_USED`), gate salah (`WRONG_GATE`, beserta gate yang benar), tiket tidak ditemukan, order belum dibayar, atau akses ditolak. Jika koneksi putus setelah pengiriman, tampil “Hasil belum diketahui”; gate harus tetap ditahan dan petugas tidak boleh retry otomatis. Minta admin memeriksa status tiket sebelum melakukan tindakan lanjutan. Penghitung scanner hanya mencatat aktivitas sesi petugas di tab itu, bukan total pengunjung.
 
 Di production, layani API melalui HTTPS agar password dan token petugas terlindungi saat transit.
 

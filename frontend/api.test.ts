@@ -100,7 +100,7 @@ test("calls staff APIs with staff bearer auth and handles empty 204 responses", 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     const body = responses.shift();
-    return body === null ? new Response(null, { status: 204 }) : new Response(JSON.stringify(body), { status: calls.length === 1 || calls.length === 4 ? 201 : 200, headers: { "Content-Type": "application/json" } });
+    return body === null ? new Response(null, { status: 204 }) : new Response(JSON.stringify(body), { status: calls.length === 1 || calls.length === 4 || calls.length === 9 ? 201 : 200, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
   try {
     const session = await loginStaff({ email: "staff@example.com", password: "long enough password" });
@@ -146,5 +146,21 @@ test("marks interrupted operation responses as unknown without retrying", async 
   try {
     await expect(checkInTicket("staff-token", { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` })).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
     expect(calls).toBe(1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("rejects incomplete successful check-in responses as unknown", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ status: "CHECKED_IN", ticket: {}, checkedInAt: "2026-10-05T12:00:00Z" }), { status: 201 })) as unknown as typeof fetch;
+  try {
+    await expect(checkInTicket("staff-token", { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` })).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("requires the backend's 204 confirmation for staff logout", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
+  try {
+    await expect(logoutStaff("staff-token")).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
   } finally { globalThis.fetch = originalFetch; }
 });

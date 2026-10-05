@@ -1,4 +1,4 @@
-import type { Staff, StaffRole } from "./api.ts";
+import { ApiError, logoutStaff, type Staff, type StaffRole } from "./api.ts";
 
 export type StaffSessionRecord = { accessToken: string; expiresAt: string };
 export const staffSessionKey = "ticket-online:staff-session";
@@ -23,8 +23,22 @@ export function saveStaffSession(session: StaffSessionRecord, storage = sessionS
   } catch { return false; }
 }
 
-export function clearStaffSession(storage = sessionStorageOrNull()): void {
-  try { storage?.removeItem(staffSessionKey); } catch { /* storage may be unavailable */ }
+export function clearStaffSession(storage = sessionStorageOrNull()): boolean {
+  try {
+    if (!storage) return false;
+    storage.removeItem(staffSessionKey);
+    return storage.getItem(staffSessionKey) === null;
+  } catch { return false; }
+}
+
+export async function logoutStaffSession(accessToken: string, storage = sessionStorageOrNull()): Promise<{ localCleared: boolean; remote: "revoked" | "invalid" | "unconfirmed" }> {
+  const localCleared = clearStaffSession(storage);
+  try {
+    await logoutStaff(accessToken, AbortSignal.timeout(10_000));
+    return { localCleared, remote: "revoked" };
+  } catch (cause) {
+    return { localCleared, remote: cause instanceof ApiError && cause.status === 401 ? "invalid" : "unconfirmed" };
+  }
 }
 
 export function staffHome(role: StaffRole): string {

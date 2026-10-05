@@ -4,7 +4,7 @@
   import { ApiError, createStaff, getEvents, listStaff, resetStaffPassword, updateStaff, replaceStaffAssignments, type Staff, type StaffAssignment } from "../lib/api.ts";
   import type { Concert } from "../lib/concerts.ts";
 
-  let { accessToken, onUnauthorized }: { accessToken: string; onUnauthorized: () => void } = $props();
+  let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let staff = $state<Staff[]>([]);
   let events = $state<Concert[]>([]);
   let loadingStaff = $state(true);
@@ -112,7 +112,7 @@
 
 <div class="scan-shell staff-admin-shell">
   <a class="skip-link" href="#staff-admin-content">Lewati ke pengelolaan petugas</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span></header>
+  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={saving || loggingOut} onclick={onLogout}>Keluar</button></header>
   <main id="staff-admin-content" class="staff-admin-content">
     <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMINISTRASI</p><h1>Kelola petugas.</h1><p>Atur akses tim pada event dan gate yang ditugaskan.</p></div></div>
 
