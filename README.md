@@ -99,9 +99,9 @@ Jika command mengembalikan `invalid staff input`, periksa nama, format email, da
 
 Di `/admin/staff`, admin dapat membuat petugas, mengubah nama dan status aktif, mengganti password, serta menetapkan event dan gate. Pilihan gate bersumber dari tier tiket event. Menonaktifkan akun atau mengganti password mencabut semua sesi petugas terkait. Sesi berlangsung 8 jam dan profil/penugasan dibaca lewat `GET /api/v1/staff/me`. Tombol Keluar memanggil `POST /api/v1/staff/logout` dan menghapus token petugas tab ini. Jika jaringan gagal, token lokal tetap dibersihkan dan halaman menyatakan bahwa pencabutan sesi di server belum dapat dipastikan.
 
-STAFF memilih penugasan event/gate lalu memasukkan kode e-ticket individual (`ET-` diikuti ID 32 digit heksadesimal); scanner yang bertindak sebagai keyboard juga dapat digunakan. Check-in dikirim ke `POST /api/v1/staff/check-ins`. Server hanya menerima order berstatus PAID dan gate yang sesuai snapshot tiket. Hasil menampilkan tiket berhasil, telah dipakai (`TICKET_ALREADY_USED`), gate salah (`WRONG_GATE`, beserta gate yang benar), tiket tidak ditemukan, order belum dibayar, atau akses ditolak. Jika koneksi putus setelah pengiriman, tampil “Hasil belum diketahui”; gate harus tetap ditahan dan petugas tidak boleh retry otomatis. Minta admin memeriksa status tiket sebelum melakukan tindakan lanjutan. Penghitung scanner hanya mencatat aktivitas sesi petugas di tab itu, bukan total pengunjung.
+STAFF memilih penugasan event/gate, lalu scan QR e-ticket dengan kamera atau masukkan kode individual (`ET-` diikuti ID 32 digit heksadesimal). Browser akan meminta izin kamera; browser/perangkat tanpa dukungan kamera dapat memakai input manual atau scanner keyboard. Check-in dikirim ke `POST /api/v1/staff/check-ins`. Server hanya menerima order berstatus PAID dan gate yang sesuai snapshot tiket. Hasil menampilkan tiket berhasil, telah dipakai (`TICKET_ALREADY_USED`), gate salah (`WRONG_GATE`, beserta gate yang benar), tiket tidak ditemukan, order belum dibayar, atau akses ditolak. Jika koneksi putus setelah pengiriman, tampil “Hasil belum diketahui”; gate harus tetap ditahan dan petugas tidak boleh retry otomatis. Minta admin memeriksa status tiket sebelum melakukan tindakan lanjutan. Penghitung scanner hanya mencatat aktivitas sesi petugas di tab itu, bukan total pengunjung.
 
-Di production, layani API melalui HTTPS agar password dan token petugas terlindungi saat transit.
+Di production, layani API melalui HTTPS agar password, token petugas, dan akses kamera terlindungi.
 
 Contoh body checkout (jumlah nama harus sama dengan jumlah tiket reservasi pada setiap tier):
 
@@ -177,4 +177,4 @@ docker compose up --build
 - Final backend image berjalan sebagai non-root user.
 - Gunakan password, DSN, dan secret berbeda untuk production melalui secret manager atau environment deployment.
 - Jangan commit `.env`, password production, generated binary, atau database volume.
-- Kode `ET-…` saat ini bukan QR yang dapat dipindai. Pembayaran memakai simulasi development; payment gateway asli, pengiriman email, login pembeli, pemulihan lintas perangkat, dan refund belum tersedia.
+- QR e-ticket berisi kode `ET-…` saja; pembayaran memakai simulasi development. Payment gateway asli, pengiriman email, login pembeli, pemulihan lintas perangkat, dan refund belum tersedia.

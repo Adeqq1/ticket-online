@@ -16,6 +16,12 @@ export function normalizeScanCode(value: string) {
   return value.trim().toUpperCase();
 }
 
+export function parseCameraScanCode(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const code = normalizeScanCode(value);
+  return /^ET-[0-9A-F]{32}$/.test(code) ? code : null;
+}
+
 function failed(state: ScannerState, cause: unknown, checkInSent: boolean, onUnauthorized: () => void) {
   const apiError = cause instanceof ApiError ? cause : undefined;
   state.resultTicket = apiError?.ticket ?? null;

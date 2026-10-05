@@ -2,10 +2,12 @@
   import { tick } from "svelte";
   import type { Staff } from "../lib/api.ts";
   import { submitScan, type ScannerState } from "../lib/scanner.ts";
+  import CameraScanner from "./CameraScanner.svelte";
 
-  let { accessToken, staff, onUnauthorized, onProfile, onLogout, loggingOut }: {
+  let { accessToken, staff, sessionReady, onUnauthorized, onProfile, onLogout, loggingOut }: {
     accessToken: string;
     staff: Staff;
+    sessionReady: boolean;
     onUnauthorized: () => void;
     onProfile: (staff: Staff) => void;
     onLogout: () => void;
@@ -34,15 +36,20 @@
     error: { label: "Check-in gagal", title: "Server menolak check-in", detail: "Periksa pesan server sebelum melanjutkan." },
   };
 
-  async function handleScan(event: SubmitEvent) {
-    event.preventDefault();
+  async function scanCode(value: string) {
     if (scan.busy || !assignment) return;
-    await submitScan(scan, accessToken, assignment, code, onProfile, onUnauthorized);
+    code = value;
+    await submitScan(scan, accessToken, assignment, value, onProfile, onUnauthorized);
     if (scan.status !== "unknown") {
       code = "";
       await tick();
       codeInput?.focus();
     }
+  }
+
+  async function handleScan(event: SubmitEvent) {
+    event.preventDefault();
+    await scanCode(code);
   }
 </script>
 
@@ -77,6 +84,7 @@
             <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:this={codeInput} bind:value={code} placeholder="Contoh: ET-…" autocomplete="off" spellcheck="false" required disabled={scan.busy || !assignment} aria-describedby="ticket-code-note" /><button class="scan-submit" type="submit" disabled={scan.busy || !assignment}>{scan.busy ? "Memeriksa…" : "Verifikasi"} <span aria-hidden="true">↗</span></button></div>
             <p id="ticket-code-note" class="input-note">Masukkan kode ET- dari e-ticket. Scanner keyboard dapat langsung mengetik kode di sini.</p>
           </form>
+          <CameraScanner enabled={Boolean(assignment) && sessionReady} busy={scan.busy || loggingOut} onCode={scanCode} />
           {#if !staff.assignments.length}<p class="staff-muted" role="status">Check-in dinonaktifkan karena akun ini belum memiliki penugasan event dan gate.</p>{/if}
         </div>
         <div class="session-strip"><div><span class="strip-label">Aktivitas check-in sesi ini</span><strong>{String(scan.scanCount).padStart(2, "0")}</strong></div><div><span class="strip-label">Aktivitas terakhir</span><strong>{scan.lastScan}</strong></div></div>

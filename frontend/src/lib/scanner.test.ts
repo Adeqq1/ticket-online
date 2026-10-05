@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import jsQR from "jsqr";
+import qrcode from "qrcode-generator";
 import type { Staff } from "./api.ts";
-import { normalizeScanCode, submitScan, type ScannerState } from "./scanner.ts";
+import { normalizeScanCode, parseCameraScanCode, submitScan, type ScannerState } from "./scanner.ts";
 
 const assignment = { eventId: "nusa-malam", gate: "Gate B" };
 const code = `ET-${"A".repeat(32)}`;
@@ -16,6 +18,28 @@ function jsonResponse(body: unknown, status = 200) {
 describe("scanner operations", () => {
   test("trims surrounding whitespace and normalizes case", () => {
     expect(normalizeScanCode("  et-0123abcd  ")).toBe("ET-0123ABCD");
+  });
+
+  test("decodes a ticket QR and rejects non-ticket QR values", () => {
+    const matrix = qrcode(0, "M");
+    matrix.addData(code);
+    matrix.make();
+    const scale = 5;
+    const quiet = 8;
+    const width = (matrix.getModuleCount() + quiet * 2) * scale;
+    const pixels = new Uint8ClampedArray(width * width * 4).fill(255);
+    for (let row = 0; row < matrix.getModuleCount(); row += 1) {
+      for (let column = 0; column < matrix.getModuleCount(); column += 1) {
+        if (!matrix.isDark(row, column)) continue;
+        for (let y = 0; y < scale; y += 1) for (let x = 0; x < scale; x += 1) {
+          const offset = (((row + quiet) * scale + y) * width + (column + quiet) * scale + x) * 4;
+          pixels[offset] = 0; pixels[offset + 1] = 0; pixels[offset + 2] = 0;
+        }
+      }
+    }
+    expect(parseCameraScanCode(jsQR(pixels, width, width)?.data)).toBe(code);
+    expect(parseCameraScanCode("https://example.com/ticket")).toBeNull();
+    expect(parseCameraScanCode(null)).toBeNull();
   });
 
   test("submits exactly once after refreshing the session assignment", async () => {

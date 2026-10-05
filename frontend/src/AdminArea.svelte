@@ -105,7 +105,7 @@
 {#if staff}
   <div inert={checking || Boolean(error)} aria-hidden={checking || Boolean(error)}>
     {#if page === "staff"}<AdminStaffPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
-    {:else if page === "scan"}<AdminScanPage accessToken={readStaffSession()?.accessToken ?? ""} {staff} onUnauthorized={login} onProfile={profileUpdated} onLogout={logout} loggingOut={logoutPending} />{/if}
+    {:else if page === "scan"}<AdminScanPage accessToken={readStaffSession()?.accessToken ?? ""} {staff} sessionReady={Boolean(staff) && !checking && !error && !logoutPending} onUnauthorized={login} onProfile={profileUpdated} onLogout={logout} loggingOut={logoutPending} />{/if}
   </div>
 {/if}
 {#if !staff && !checking && !error && page === "login"}<AdminLoginPage />{/if}
