@@ -38,6 +38,13 @@ export function hasPersistentOrderAccess(orderId: string) {
   try { return Boolean(parseOrderAccess(storage()?.getItem(key(orderId)) ?? null)); } catch { return false; }
 }
 
+export function hasPersistentTicketAccess(orderId: string, ticketId: string) {
+  try {
+    const access = parseOrderAccess(storage()?.getItem(key(orderId)) ?? null);
+    return access?.orderId === orderId && access.ticketIds.includes(ticketId);
+  } catch { return false; }
+}
+
 export function listOrderAccess(): OrderAccess[] {
   const records = new Map(memory);
   const local = storage();

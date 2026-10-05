@@ -5,6 +5,7 @@
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, voucherDiscount, type Buyer } from "../lib/checkout.ts";
   import { listOrderAccess, saveOrderAccess, type OrderAccess } from "../lib/order-access.ts";
+  import { findOrderForActiveReservation } from "../lib/checkout-recovery.ts";
   import Toast from "../components/Toast.svelte";
   import { concertTerms } from "../lib/terms.ts";
   import { RESERVATION_DURATION_MS, isReservationExpired, remainingReservationSeconds, reservationBasketKey, parseCheckoutAttempt, parseStoredReservation, serializeStoredReservation, type StoredReservation } from "../lib/reservation.ts";
@@ -47,6 +48,7 @@
   function closeDialog(dialog: HTMLDialogElement) { dialog.close(); }
   function restartSelection() { try { sessionStorage.removeItem(reservationKey); sessionStorage.removeItem(completionKey); sessionStorage.removeItem(checkoutAttemptKey); } catch { /* storage can be unavailable */ } }
   function startOver() { restartSelection(); if (concert) location.assign(`/konser/${concert.id}?${location.search.slice(1)}`); }
+  function buyAgain() { restartSelection(); if (concert) location.assign(`/konser/${concert.id}`); }
   function recoverExpiredCheckout() { restartSelection(); if (concert) location.assign(`/konser/${concert.id}?${location.search.slice(1)}`); }
   function checkExpiry() {
     if (completed || checkoutUncertain || paymentUncertain || activeOrder?.status === "PAID" || expiresAt === null || !isReservationExpired(expiresAt)) return false;
@@ -188,13 +190,19 @@
     let stored: StoredReservation | null = null;
     try { stored = parseStoredReservation(sessionStorage.getItem(reservationKey)); } catch { /* storage can be unavailable */ }
     const basketKey = reservationKey.slice(reservationKey.lastIndexOf(":") + 1);
-    for (const savedOrder of listOrderAccess()) if (savedOrder.basketKey === reservationKey) {
+    const savedOrder = findOrderForActiveReservation(listOrderAccess(), stored, reservationKey);
+    if (savedOrder) {
       try {
         const detail = await getOrder(savedOrder.orderId, savedOrder.accessToken, signal);
         if (signal.aborted) return;
-        await restoreOrder(detail, savedOrder, signal);
-        creatingReservation = false;
-        return startExpiryTimer();
+        if (["PAID", "EXPIRED", "CANCELLED"].includes(detail.status)) {
+          try { sessionStorage.removeItem(reservationKey); sessionStorage.removeItem(checkoutAttemptKey); } catch { storageFailed = true; }
+          stored = null;
+        } else {
+          await restoreOrder(detail, savedOrder, signal);
+          creatingReservation = false;
+          return startExpiryTimer();
+        }
       } catch (value) {
         if (signal.aborted) return;
         reservationError = value instanceof ApiError ? value.message : "Pesanan sebelumnya belum dapat dimuat.";
@@ -294,7 +302,29 @@
 {:else}
    <section class="checkout shell"><a class="back-link" href={`/konser/${concert.id}?${location.search.slice(1)}`}>Kembali ke detail konser</a><div class="checkout-heading"><p class="checkout-kicker">Checkout aman</p><h1>Selesaikan pesananmu.</h1><p>{concert.artist} · {concert.date} · {concert.venue}</p></div>{#if !completed}<div class:reservation-warning={remainingSeconds <= 60} class="reservation-banner" role="timer"><span class="reservation-icon" aria-hidden="true">◷</span><span><b>{activeOrder ? "Pesanan menunggu pembayaran" : "Reservasi tiket sementara"}</b><small>Selesaikan pembayaran dalam {String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:{String(remainingSeconds % 60).padStart(2, "0")}</small></span></div>{/if}<ol class="checkout-steps" aria-label="Tahap checkout">{#each ["Data Diri", "Metode Bayar", "Konfirmasi"] as label, index}<li class:is-complete={index + 1 < step || completed} aria-current={index + 1 === step && !completed ? "step" : undefined}><span>{index + 1}</span><b>{label}</b></li>{/each}</ol>
     <div class="checkout-layout"><section class="checkout-panel">
-       {#if completed}<section class="checkout-success"><p class="checkout-kicker">Pesanan berhasil</p><h2 id="success-title" tabindex="-1">E-ticket sudah dibuat.</h2><p>Pembayaran dikonfirmasi untuk {buyer.email}.</p><div class="booking-code"><span>Reference pesanan</span><strong>{reference}</strong></div>{#if storageFailed}<p class="success-note">Akses tiket hanya tersedia selama halaman checkout ini terbuka. Simpan atau cetak kode setiap peserta sebelum meninggalkan halaman.</p>{#each issuedTickets as ticket}<article class="memory-ticket"><b>{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</b><span>{ticket.eventArtist} · {ticket.eventVenue}</span><strong>{ticket.code}</strong></article>{/each}{:else}{#each ticketIds as id}<a class="button" href={`/tiket/${encodeURIComponent(id)}`}>Lihat e-ticket</a>{/each}{/if}<a class="button button-secondary" href="/konser">Cari konser lain</a></section>
+       {#if completed}
+         <section class="checkout-success">
+           <p class="checkout-kicker">Pesanan berhasil</p>
+           <h2 id="success-title" tabindex="-1">E-ticket sudah dibuat.</h2>
+           <p>Pembayaran dikonfirmasi untuk {buyer.email}.</p>
+           <div class="booking-code"><span>Reference pesanan</span><strong>{reference}</strong></div>
+           {#if storageFailed}
+             <p class="success-note">Akses tiket hanya tersedia selama halaman checkout ini terbuka. Simpan atau cetak kode setiap peserta sebelum meninggalkan halaman.</p>
+             {#each issuedTickets as ticket}
+               <article class="memory-ticket">
+                 <b>{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</b>
+                 <span>{ticket.eventArtist} · {ticket.eventVenue}</span>
+                 <strong>{ticket.code}</strong>
+               </article>
+             {/each}
+           {:else}
+             {#each ticketIds as ticketId}
+               <a class="button" href={`/tiket/${encodeURIComponent(ticketId)}`}>Lihat e-ticket</a>
+             {/each}
+           {/if}
+           <button class="button button-secondary" type="button" onclick={buyAgain}>Beli tiket lagi</button>
+           <a class="button button-secondary" href="/konser">Cari konser lain</a>
+         </section>
       {:else if step === 1}<form id="buyer-form" novalidate onsubmit={submitBuyer}><div class="step-title"><p>Langkah 1 dari 3</p><h2 id="buyer-title" tabindex="-1">Data pemesan</h2><span>Data order disimpan pada browser yang sama; e-ticket belum dikirim lewat email.</span></div><div class="field-grid">{#each [{ name: "name", label: "Nama lengkap", type: "text" }, { name: "email", label: "Email", type: "email" }, { name: "phone", label: "No. HP", type: "tel" }, { name: "identity", label: "No. identitas", type: "text" }] as field}<label for={`buyer-${field.name}`}>{field.label}<input id={`buyer-${field.name}`} name={field.name} type={field.type} autocomplete={field.name === "name" ? "name" : field.name === "email" ? "email" : field.name === "phone" ? "tel" : "off"} inputmode={field.name === "phone" ? "tel" : field.name === "identity" ? "numeric" : undefined} maxlength={field.name === "name" ? 80 : undefined} disabled={Boolean(activeOrder) || checkoutUncertain} bind:value={buyer[field.name as keyof Buyer]} aria-describedby={`${field.name}-error`} aria-invalid={Boolean(errors[field.name as keyof Buyer])} class:is-invalid={Boolean(errors[field.name as keyof Buyer])} onblur={() => validate(field.name as keyof Buyer)} required /><small id={`${field.name}-error`} aria-live="polite">{errors[field.name as keyof Buyer]}</small></label>{/each}</div><section class="attendee-fields" aria-label="Nama pemegang tiket"><h3>Nama pemegang tiket</h3>{#each lines as line}<fieldset><legend>{line.quantity} tiket {line.tier.name}</legend>{#each attendeeNames[line.tier.id] ?? [] as _name, index}<label for={`attendee-${line.tier.id}-${index}`}>Peserta {index + 1}<input id={`attendee-${line.tier.id}-${index}`} value={attendeeNames[line.tier.id]?.[index] ?? ""} oninput={(event) => setAttendeeName(line.tier.id, index, event.currentTarget.value)} maxlength="80" autocomplete="off" disabled={Boolean(activeOrder) || checkoutUncertain} aria-invalid={Boolean(attendeeErrors[line.tier.id]?.[index])} required /><small class="form-error">{attendeeErrors[line.tier.id]?.[index] ?? ""}</small></label>{/each}</fieldset>{/each}</section><div class="step-actions"><span></span><button class="button" type="submit">Lanjut ke pembayaran</button></div></form>
       {:else if step === 2}<form id="payment-form" onsubmit={submitPayment}><div class="step-title"><p>Langkah 2 dari 3</p><h2 id="payment-title" tabindex="-1">Pilih metode bayar.</h2><span>{simulationEnabled ? "Pembayaran di halaman ini hanya simulasi." : "Pembayaran belum tersedia di lingkungan ini."}</span></div>{#if simulationEnabled}<fieldset aria-describedby="payment-error" class:has-error={Boolean(paymentError)}><legend class="sr-only">Metode pembayaran</legend><div class="payment-options">{#each [{ id: "QRIS", label: "QRIS" }, { id: "VIRTUAL_ACCOUNT", label: "Virtual Account" }, { id: "GOPAY", label: "GoPay" }] as method}<label class="payment-card"><input bind:group={payment} type="radio" name="payment" value={method.id} aria-describedby="payment-error" disabled={Boolean(activeOrder) || checkoutUncertain} /><span class="payment-logo" class:gopay={method.id === "GOPAY"}>{method.label}</span><span><b>{method.label}</b><small>Simulasi pembayaran</small></span></label>{/each}</div></fieldset>{:else}<p role="status">Buat order untuk melihat nominal dari server. Pembayaran dapat diselesaikan saat simulasi diaktifkan.</p>{/if}<p id="payment-error" class="form-error" aria-live="polite">{paymentError}</p><div class="step-actions"><button class="text-button" type="button" disabled={Boolean(activeOrder) || checkoutUncertain} onclick={() => goToStep(1)}>Kembali</button><button class="button" type="submit">{simulationEnabled ? "Tinjau pesanan" : "Lanjutkan"}</button></div></form>
        {:else}<section id="confirmation"><div class="step-title"><p>Langkah 3 dari 3</p><h2 id="confirmation-title" tabindex="-1">Periksa sebelum memesan.</h2><span>Pastikan data dan pesananmu sudah benar.</span></div><div class="confirmation-block"><div><span>Pemesan</span><b>{buyer.name}</b><p>{buyer.email} · {buyer.phone}</p></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(1)}>Ubah data</button>{/if}</div><div class="confirmation-block"><div><span>Pembayaran</span><b>{simulationEnabled ? paymentLabel : "Belum tersedia"}</b></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(2)}>Ubah metode</button>{/if}</div><p class="terms-trigger">Dengan melanjutkan, kamu menyetujui <button class="text-button" type="button" onclick={openTerms}>S&K Konser</button>.</p><p class="form-error" aria-live="polite">{paymentError}</p>{#if paymentStatus === "FAILED"}<p role="status">Pembayaran gagal. Order tetap tersimpan dan kamu dapat mencoba lagi.</p>{/if}{#if activeOrder && !simulationEnabled && activeOrder.status !== "PAID"}<p role="status">Pembayaran belum tersedia. Akses order disimpan pada browser ini.</p>{/if}<div class="step-actions"><button class="text-button" type="button" disabled={checkoutUncertain} onclick={() => goToStep(2)}>Kembali</button>{#if !completed}<button class="button" type="button" disabled={converting || (reservationExpired && !paymentUncertain && simulationEnabled)} onclick={() => activeOrder && !simulationEnabled ? refreshOrderStatus() : completeOrder("SUCCEEDED")}>{converting ? "Memproses..." : checkoutUncertain ? "Coba ulang checkout" : paymentUncertain ? "Periksa status pembayaran" : activeOrder ? !simulationEnabled ? "Periksa status order" : paymentStatus === "FAILED" ? "Coba bayar lagi" : "Muat e-ticket lagi" : simulationEnabled ? "Buat pesanan dan bayar" : "Buat order"}</button>{/if}</div>{#if simulationEnabled && !activeOrder && !checkoutUncertain}<button class="text-button" type="button" disabled={reservationExpired || converting} onclick={() => completeOrder("FAILED")}>Simulasikan pembayaran gagal</button>{/if}</section>{/if}

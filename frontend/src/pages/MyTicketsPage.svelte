@@ -3,7 +3,7 @@
   import { eventDate } from "../lib/concerts.ts";
   import { ApiError, type ApiTicket } from "../lib/api.ts";
   import { loadBuyerOrderTickets, uniqueBuyerTickets, type BuyerOrderTickets } from "../lib/buyer-tickets.ts";
-  import { hasPersistentOrderAccess, listOrderAccess, saveOrderAccess } from "../lib/order-access.ts";
+  import { hasPersistentTicketAccess, listOrderAccess, saveOrderAccess } from "../lib/order-access.ts";
   import { listTicketSnapshots } from "../lib/tickets.ts";
 
   let orders = $state<BuyerOrderTickets[]>([]);
@@ -14,6 +14,11 @@
   const tickets = $derived(uniqueBuyerTickets(orders));
   const ordersNeedingRetry = $derived(orders.filter((order) => order.error || order.detail?.status !== "PAID" || !order.tickets.length));
   const upcoming = (ticket: ApiTicket) => Date.parse(ticket.eventStartsAt) > Date.now();
+  function persistTickets(access: BuyerOrderTickets["access"], ticketList: ApiTicket[]) {
+    if (!ticketList.length) return;
+    const saved = saveOrderAccess({ ...access, ticketIds: [...new Set([...access.ticketIds, ...ticketList.map((ticket) => ticket.id)])] });
+    if (!saved) listError = "Penyimpanan browser gagal. Kode tiket tetap terlihat di halaman ini, tetapi tautan e-ticket tidak akan tersedia setelah halaman ditutup.";
+  }
 
   async function refreshOrder(orderId: string) {
     if (loadingOrders.includes(orderId)) return;
@@ -26,8 +31,7 @@
     }
     const result = await loadBuyerOrderTickets(access, pageController?.signal);
     if (result.tickets.length) {
-      const nextAccess = { ...access, ticketIds: [...new Set([...access.ticketIds, ...result.tickets.map((ticket) => ticket.id)])] };
-      saveOrderAccess(nextAccess);
+      persistTickets(access, result.tickets);
     }
     orders = [...orders.filter((order) => order.access.orderId !== orderId), result];
     loadingOrders = loadingOrders.filter((id) => id !== orderId);
@@ -41,9 +45,7 @@
     Promise.all(savedOrders.map((order) => loadBuyerOrderTickets(order, pageController?.signal))).then((results) => {
       if (!active) return;
       orders = results;
-      for (const result of results) if (result.tickets.length) {
-        saveOrderAccess({ ...result.access, ticketIds: [...new Set([...result.access.ticketIds, ...result.tickets.map((ticket) => ticket.id)])] });
-      }
+      for (const result of results) persistTickets(result.access, result.tickets);
     }).catch(() => { if (active) listError = "Daftar order belum dapat dimuat."; }).finally(() => { if (active) loading = false; });
     return () => { active = false; pageController?.abort(); };
   });
@@ -72,21 +74,80 @@
     <ul class="my-tickets-list" aria-label="Daftar e-ticket">
       {#each tickets as ticket (ticket.id)}
         {@const access = orders.find((order) => order.tickets.some((item) => item.id === ticket.id))?.access}
-        {@const persistent = access ? hasPersistentOrderAccess(access.orderId) : false}
-        <li><article class="my-ticket-card"><div class="my-ticket-card-link">
-          <div class="my-ticket-poster" aria-hidden="true">{ticket.code}</div>
-          <div class="my-ticket-card-body"><div class="my-ticket-card-topline"><span class:past={!upcoming(ticket)} class="my-ticket-status">{upcoming(ticket) ? "Mendatang" : "Selesai"}</span><span class="my-ticket-reference">{ticket.orderReference}</span></div>
-            <h2>{ticket.eventArtist}</h2><p class="my-ticket-date">{eventDate(ticket.eventStartsAt)}</p><p class="my-ticket-venue">{ticket.eventVenue}, {ticket.eventCity}</p><p class="my-ticket-venue">{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</p>
-            {#if persistent}<a class="my-ticket-action" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Lihat e-ticket <span aria-hidden="true">→</span></a>{:else}<p class="my-ticket-action">Kode tiket tersedia selama halaman ini terbuka.</p>{/if}
-          </div>
-        </div></article></li>
+        {@const persistent = access ? hasPersistentTicketAccess(access.orderId, ticket.id) : false}
+        <li>
+          <article class="my-ticket-card">
+            <div class="my-ticket-card-link">
+              <div class="my-ticket-poster" aria-hidden="true">{ticket.code}</div>
+              <div class="my-ticket-card-body">
+                <div class="my-ticket-card-topline">
+                  <span class:past={!upcoming(ticket)} class="my-ticket-status">{upcoming(ticket) ? "Mendatang" : "Selesai"}</span>
+                  <span class="my-ticket-reference">{ticket.orderReference}</span>
+                </div>
+                <h2>{ticket.eventArtist}</h2>
+                <p class="my-ticket-date">{eventDate(ticket.eventStartsAt)}</p>
+                <p class="my-ticket-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
+                <p class="my-ticket-venue">{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</p>
+                {#if persistent}
+                  <a class="my-ticket-action" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Lihat e-ticket <span aria-hidden="true">→</span></a>
+                {:else}
+                  <p class="my-ticket-action">Kode tiket tersedia selama halaman ini terbuka.</p>
+                {/if}
+              </div>
+            </div>
+          </article>
+        </li>
       {/each}
     </ul>
-    {#if ordersNeedingRetry.length}<ul class="my-order-list" aria-label="Order yang perlu diperiksa">{#each ordersNeedingRetry as order (order.access.orderId)}<li><article class="my-order-card"><div><b>Order {order.access.reference}</b>{#if order.detail}<p>Status: {order.detail.status === "PAID" ? "Dibayar, tiket belum tersedia" : order.detail.status === "PENDING" ? "Menunggu pembayaran" : order.detail.status === "EXPIRED" ? "Kedaluwarsa" : "Dibatalkan"}</p>{:else if order.error instanceof ApiError && order.error.code === "ACCESS_TOKEN_EXPIRED"}<p>Akses order di browser ini sudah kedaluwarsa.</p>{:else if order.error instanceof ApiError && order.error.status === 404}<p>Order tidak ditemukan dengan akses yang tersimpan.</p>{:else}<p>{order.error?.message ?? "Tiket belum tersedia."}</p>{/if}</div><button class="button button-secondary" type="button" disabled={loadingOrders.includes(order.access.orderId)} onclick={() => refreshOrder(order.access.orderId)}>{loadingOrders.includes(order.access.orderId) ? "Memuat..." : "Coba muat ulang"}</button></article></li>{/each}</ul>{/if}
+    {#if ordersNeedingRetry.length}
+      <ul class="my-order-list" aria-label="Order yang perlu diperiksa">
+        {#each ordersNeedingRetry as order (order.access.orderId)}
+          <li>
+            <article class="my-order-card">
+              <div>
+                <b>Order {order.access.reference}</b>
+                {#if order.detail}
+                  <p>Status: {order.detail.status === "PAID" ? "Dibayar" : order.detail.status === "PENDING" ? "Menunggu pembayaran" : order.detail.status === "EXPIRED" ? "Kedaluwarsa" : "Dibatalkan"}</p>
+                  {#if order.error}<p>{order.error.message}</p>{/if}
+                {:else if order.error instanceof ApiError && order.error.code === "ACCESS_TOKEN_EXPIRED"}
+                  <p>Akses order di browser ini sudah kedaluwarsa.</p>
+                {:else if order.error instanceof ApiError && order.error.status === 404}
+                  <p>Order tidak ditemukan dengan akses yang tersimpan.</p>
+                {:else}
+                  <p>{order.error?.message ?? "Tiket belum tersedia."}</p>
+                {/if}
+              </div>
+              <button class="button button-secondary" type="button" disabled={loadingOrders.includes(order.access.orderId)} onclick={() => refreshOrder(order.access.orderId)}>
+                {loadingOrders.includes(order.access.orderId) ? "Memuat..." : "Coba muat ulang"}
+              </button>
+            </article>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {:else if orders.length}
     <ul class="my-order-list" aria-label="Status order tersimpan">
       {#each orders as order (order.access.orderId)}
-        <li><article class="my-order-card"><div><b>Order {order.access.reference}</b>{#if order.detail}<p>Status: {order.detail.status === "PAID" ? "Dibayar, tiket belum tersedia" : order.detail.status === "PENDING" ? "Menunggu pembayaran" : order.detail.status === "EXPIRED" ? "Kedaluwarsa" : "Dibatalkan"}</p>{:else if order.error instanceof ApiError && order.error.code === "ACCESS_TOKEN_EXPIRED"}<p>Akses order di browser ini sudah kedaluwarsa.</p>{:else if order.error instanceof ApiError && order.error.status === 404}<p>Order tidak ditemukan dengan akses yang tersimpan.</p>{:else}<p>{order.error?.message ?? "Tiket belum tersedia."}</p>{/if}</div><button class="button button-secondary" type="button" disabled={loadingOrders.includes(order.access.orderId)} onclick={() => refreshOrder(order.access.orderId)}>{loadingOrders.includes(order.access.orderId) ? "Memuat..." : "Coba muat ulang"}</button></article></li>
+        <li>
+          <article class="my-order-card">
+            <div>
+              <b>Order {order.access.reference}</b>
+              {#if order.detail}
+                <p>Status: {order.detail.status === "PAID" ? "Dibayar" : order.detail.status === "PENDING" ? "Menunggu pembayaran" : order.detail.status === "EXPIRED" ? "Kedaluwarsa" : "Dibatalkan"}</p>
+                {#if order.error}<p>{order.error.message}</p>{/if}
+              {:else if order.error instanceof ApiError && order.error.code === "ACCESS_TOKEN_EXPIRED"}
+                <p>Akses order di browser ini sudah kedaluwarsa.</p>
+              {:else if order.error instanceof ApiError && order.error.status === 404}
+                <p>Order tidak ditemukan dengan akses yang tersimpan.</p>
+              {:else}
+                <p>{order.error?.message ?? "Tiket belum tersedia."}</p>
+              {/if}
+            </div>
+            <button class="button button-secondary" type="button" disabled={loadingOrders.includes(order.access.orderId)} onclick={() => refreshOrder(order.access.orderId)}>
+              {loadingOrders.includes(order.access.orderId) ? "Memuat..." : "Coba muat ulang"}
+            </button>
+          </article>
+        </li>
       {/each}
     </ul>
   {:else}

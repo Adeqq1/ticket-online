@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -252,22 +253,69 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 	if response := call(expiredSession.AccessToken, code(ticketIDs[1]), eventID, gateA); response.Code != http.StatusUnauthorized {
 		t.Fatalf("expired staff session status=%d body=%s", response.Code, response.Body.String())
 	}
-	if err := staff.Logout(ctx, validSession.AccessToken); err != nil {
-		t.Fatal(err)
+	// The check-in authorization locks staff and session rows before the write.
+	// When those shared locks are acquired first, revocation waits for that
+	// transaction; requests after the revocation commits must then be rejected.
+	withAuthorizationLock := func(token string, revoke func(context.Context) error) {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := staff.AuthorizeGateTx(ctx, tx, token, eventID, gateA); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("authorize before revocation: %v", err)
+		}
+		lockCtx, stopLockWait := context.WithTimeout(ctx, 250*time.Millisecond)
+		defer stopLockWait()
+		started := make(chan struct{})
+		finished := make(chan error, 1)
+		go func() {
+			close(started)
+			finished <- revoke(lockCtx)
+		}()
+		<-started
+		if err := <-finished; !errors.Is(err, context.DeadlineExceeded) {
+			_ = tx.Rollback()
+			t.Fatalf("revocation should wait for the authorized check-in lock, got %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := revoke(ctx); err != nil {
+			t.Fatalf("revocation after authorized check-in: %v", err)
+		}
 	}
-	if response := call(validSession.AccessToken, code(ticketIDs[1]), eventID, gateA); response.Code != http.StatusUnauthorized {
-		t.Fatalf("logged-out staff session status=%d body=%s", response.Code, response.Body.String())
+
+	withAuthorizationLock(validSession.AccessToken, func(lockCtx context.Context) error {
+		return staff.ReplaceAssignments(lockCtx, validStaff.ID, []staffauth.Assignment{})
+	})
+	if response := call(validSession.AccessToken, code(ticketIDs[1]), eventID, gateA); response.Code != http.StatusForbidden {
+		t.Fatalf("check-in after assignment revocation status=%d body=%s", response.Code, response.Body.String())
 	}
-	deactivatedSession, err := staff.Login(ctx, validStaff.Email, "check-in staff password", "192.0.2.20:4002")
-	if err != nil {
+	if err := staff.ReplaceAssignments(ctx, validStaff.ID, []staffauth.Assignment{{EventID: eventID, Gate: gateA}}); err != nil {
 		t.Fatal(err)
 	}
 	active := false
+	withAuthorizationLock(validSession.AccessToken, func(lockCtx context.Context) error {
+		return staff.UpdateStaff(lockCtx, validStaff.ID, nil, &active)
+	})
+	if response := call(validSession.AccessToken, code(ticketIDs[1]), eventID, gateA); response.Code != http.StatusUnauthorized {
+		t.Fatalf("check-in after staff deactivation status=%d body=%s", response.Code, response.Body.String())
+	}
+	active = true
 	if err := staff.UpdateStaff(ctx, validStaff.ID, nil, &active); err != nil {
 		t.Fatal(err)
 	}
-	if response := call(deactivatedSession.AccessToken, code(ticketIDs[1]), eventID, gateA); response.Code != http.StatusUnauthorized {
-		t.Fatalf("deactivated staff session status=%d body=%s", response.Code, response.Body.String())
+	logoutSession, err := staff.Login(ctx, validStaff.Email, "check-in staff password", "192.0.2.20:4003")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withAuthorizationLock(logoutSession.AccessToken, func(lockCtx context.Context) error {
+		return staff.Logout(lockCtx, logoutSession.AccessToken)
+	})
+	if response := call(logoutSession.AccessToken, code(ticketIDs[1]), eventID, gateA); response.Code != http.StatusUnauthorized {
+		t.Fatalf("check-in after logout status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
