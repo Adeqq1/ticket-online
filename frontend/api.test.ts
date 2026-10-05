@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, createOrder, getEvent, getOrder, getTicket, listOrderTickets, mapApiEvent, simulatePayment, type ApiEvent } from "./src/lib/api.ts";
+import { ApiError, checkInTicket, createOrder, createStaff, getEvent, getOrder, getStaffProfile, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, replaceStaffAssignments, resetStaffPassword, simulatePayment, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -87,4 +87,94 @@ test("surfaces wrong and expired private ticket access responses", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("calls staff APIs with staff bearer auth and handles empty 204 responses", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const staff: Staff = { id: "a".repeat(32), name: "Petugas", email: "staff@example.com", role: "STAFF", active: true, assignments: [{ eventId: "nusa-malam", gate: "Gate B" }] };
+  const responses: unknown[] = [
+    { accessToken: "staff-token", expiresAt: "2027-08-24T20:00:00Z", staff },
+    { staff }, { staff: [staff] }, staff, null, null, null, null, { status: "CHECKED_IN", checkedInAt: "2027-08-24T12:30:00Z", ticket: { id: "a".repeat(32), code: `ET-${"A".repeat(32)}`, attendeeName: "Peserta", tierName: "Festival", eventId: "nusa-malam", gate: "Gate B" } },
+  ];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    const body = responses.shift();
+    return body === null ? new Response(null, { status: 204 }) : new Response(JSON.stringify(body), { status: calls.length === 1 || calls.length === 4 || calls.length === 9 ? 201 : 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const session = await loginStaff({ email: "staff@example.com", password: "long enough password" });
+    expect(session.accessToken).toBe("staff-token");
+    expect(await getStaffProfile(session.accessToken)).toEqual(staff);
+    expect(await listStaff(session.accessToken)).toEqual([staff]);
+    expect(await createStaff(session.accessToken, { name: "Petugas", email: "staff@example.com", password: "long enough password", assignments: staff.assignments })).toEqual(staff);
+    expect(await updateStaff(session.accessToken, staff.id, { active: false })).toBeUndefined();
+    expect(await replaceStaffAssignments(session.accessToken, staff.id, [])).toBeUndefined();
+    expect(await resetStaffPassword(session.accessToken, staff.id, "another long password")).toBeUndefined();
+    expect(await logoutStaff(session.accessToken)).toBeUndefined();
+    expect((await checkInTicket(session.accessToken, { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` })).status).toBe("CHECKED_IN");
+    expect(calls.map(({ url }) => url)).toEqual([
+      "/api/v1/staff/login", "/api/v1/staff/me", "/api/v1/admin/staff", "/api/v1/admin/staff",
+      `/api/v1/admin/staff/${staff.id}`, `/api/v1/admin/staff/${staff.id}/assignments`,
+      `/api/v1/admin/staff/${staff.id}/password`, "/api/v1/staff/logout", "/api/v1/staff/check-ins",
+    ]);
+    expect(calls.map(({ init }) => init?.method ?? "GET")).toEqual(["POST", "GET", "GET", "POST", "PATCH", "PUT", "PUT", "POST", "POST"]);
+    for (const call of calls.slice(1)) expect(new Headers(call.init?.headers).get("Authorization")).toBe("Bearer staff-token");
+    expect(new Headers(calls[0]?.init?.headers).get("Authorization")).toBeNull();
+    expect(JSON.parse(String(calls[5]?.init?.body))).toEqual({ assignments: [] });
+    expect(JSON.parse(String(calls[8]?.init?.body))).toEqual({ eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("preserves expected gate and previous check-in details from server errors", async () => {
+  const originalFetch = globalThis.fetch;
+  const errors = [
+    { error: { code: "WRONG_GATE", message: "Gate lain", expectedGate: "Gate C" } },
+    { error: { code: "TICKET_ALREADY_USED", message: "Sudah digunakan" }, status: "ALREADY_USED", ticket: { id: "a".repeat(32), code: `ET-${"A".repeat(32)}`, attendeeName: "Peserta", tierName: "Festival", eventId: "nusa-malam", gate: "Gate B" }, checkedInAt: "2027-08-24T12:30:00Z" },
+  ];
+  globalThis.fetch = (async () => new Response(JSON.stringify(errors.shift()), { status: 409 })) as unknown as typeof fetch;
+  try {
+    await expect(checkInTicket("staff-token", { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` })).rejects.toMatchObject({ code: "WRONG_GATE", expectedGate: "Gate C" });
+    await expect(checkInTicket("staff-token", { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` })).rejects.toMatchObject({ code: "TICKET_ALREADY_USED", resultStatus: "ALREADY_USED", checkedInAt: "2027-08-24T12:30:00Z", ticket: { attendeeName: "Peserta" } });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("marks interrupted operation responses as unknown without retrying", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => { calls += 1; return { ok: true, status: 201, json: async () => { throw new TypeError("connection closed"); } } as unknown as Response; }) as unknown as typeof fetch;
+  try {
+    await expect(checkInTicket("staff-token", { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` })).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+    expect(calls).toBe(1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("rejects incomplete successful check-in responses as unknown", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ status: "CHECKED_IN", ticket: {}, checkedInAt: "2026-10-05T12:00:00Z" }), { status: 201 })) as unknown as typeof fetch;
+  try {
+    await expect(checkInTicket("staff-token", { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` })).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test.each([123, {}, null, undefined])("rejects malformed successful ticket code %p as unknown", async (code) => {
+  const originalFetch = globalThis.fetch;
+  const payload = { eventId: "nusa-malam", gate: "Gate B", code: `ET-${"A".repeat(32)}` };
+  const result = { status: "CHECKED_IN", checkedInAt: "2026-10-05T12:00:00Z", ticket: { id: "a".repeat(32), code, attendeeName: "Peserta", tierName: "Festival", eventId: payload.eventId, gate: payload.gate } };
+  let calls = 0;
+  globalThis.fetch = (async () => { calls += 1; return new Response(JSON.stringify(result), { status: 201 }); }) as unknown as typeof fetch;
+  try {
+    const error = await checkInTicket("staff-token", payload).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+    expect(calls).toBe(1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("requires the backend's 204 confirmation for staff logout", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
+  try {
+    await expect(logoutStaff("staff-token")).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+  } finally { globalThis.fetch = originalFetch; }
 });

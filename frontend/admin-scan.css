@@ -11,5 +11,8 @@
 @media (max-width: 540px) { .scan-topbar { min-height: 64px; }.scan-brand b, .scan-live-state { display: none; }.scan-live { font-size: 12px; }.scan-live strong { white-space: nowrap; }.scan-heading h1 { font-size: clamp(48px, 15vw, 72px); }.scan-intro { font-size: 14px; }.scanner-panel, .result-panel { padding: 22px 18px; }.scan-input-wrap { align-items: stretch; flex-wrap: wrap; padding: 11px 12px; }.scan-input-wrap input { min-height: 44px; width: calc(100% - 35px); }.scan-submit { min-height: 45px; width: 100%; }.preset-block { margin-top: 40px; }.session-strip { grid-template-columns: 1fr 1fr; padding: 15px; }.session-strip button { grid-column: 1 / -1; justify-self: start; }.result-main { padding: 55px 0; }.result-main h2 { font-size: 42px; }.ticket-detail-card { gap: 15px 10px; }.scan-footer { display: grid; gap: 10px; }.scan-footer span:last-child { text-align: left; } }
 .scan-input-wrap input::placeholder, .scan-footer { color: var(--scan-muted); }
 .scan-live-state { display: inline; width: auto !important; height: auto !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+.scan-event-meta select { width: 100%; padding: 9px 10px; border: 1px solid var(--scan-line); background: #111918; color: var(--scan-text); font: 13px Arial, Helvetica, sans-serif; }
+.scan-event-meta select:focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
+.scan-shell button:disabled { cursor: not-allowed; opacity: .55; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 540px) { .scan-live-state { display: none; } }
