@@ -3,6 +3,7 @@ package platform
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
@@ -16,16 +17,20 @@ type Config struct {
 	ReservationTTL    time.Duration
 	ExpiryInterval    time.Duration
 	OrderAccessSecret []byte
+	MidtransServerKey string
+	FrontendURL       string
 }
 
 func LoadConfig() (Config, error) {
 	cfg := Config{
-		AppEnv:         envOr("APP_ENV", "production"),
-		HTTPAddr:       envOr("HTTP_ADDR", ":8080"),
-		MySQLDSN:       os.Getenv("MYSQL_DSN"),
-		StaticDir:      os.Getenv("STATIC_DIR"),
-		ReservationTTL: 10 * time.Minute,
-		ExpiryInterval: 15 * time.Second,
+		AppEnv:            envOr("APP_ENV", "production"),
+		HTTPAddr:          envOr("HTTP_ADDR", ":8080"),
+		MySQLDSN:          os.Getenv("MYSQL_DSN"),
+		StaticDir:         os.Getenv("STATIC_DIR"),
+		MidtransServerKey: strings.TrimSpace(os.Getenv("MIDTRANS_SERVER_KEY")),
+		FrontendURL:       strings.TrimRight(envOr("FRONTEND_URL", "http://localhost:5173"), "/"),
+		ReservationTTL:    10 * time.Minute,
+		ExpiryInterval:    15 * time.Second,
 	}
 	var err error
 	if cfg.AppEnv != "development" && cfg.AppEnv != "production" {

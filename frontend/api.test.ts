@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, checkInTicket, createOrder, createStaff, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, replaceStaffAssignments, resetStaffPassword, simulatePayment, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
+import { ApiError, checkInTicket, createOrder, createStaff, getAdminCheckInHistory, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, replaceStaffAssignments, resetStaffPassword, simulatePayment, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -153,6 +153,28 @@ test("reads ticket check-in status with staff authentication and no mutations", 
     expect(calls[0]?.headers.get("Authorization")).toBe("Bearer staff-token");
     expect(JSON.stringify(calls[0])).not.toContain("accessToken");
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test("loads admin check-in history with literal filters, cursor, and staff authentication", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string; headers: Headers }> = [];
+  globalThis.fetch = (async (input, init) => {
+    calls.push({ url: String(input), method: init?.method ?? "GET", headers: new Headers(init?.headers) });
+    return Response.json({ items: [{ id: "23", code: `ET-${"A".repeat(32)}`, eventId: "nusa-malam", eventName: "Nusa Malam", gate: "Gate B", staff: { id: "b".repeat(32), name: "Petugas" }, outcome: "CHECKED_IN", recordedAt: "2026-10-05T12:30:00Z", checkedInAt: "2026-10-05T12:30:00Z" }], nextCursor: "23", filterOptions: [{ id: "nusa-malam", name: "Nusa Malam", gates: ["Gate B"] }] });
+  }) as typeof fetch;
+  try {
+    await expect(getAdminCheckInHistory("admin-token", { eventId: "nusa malam", gate: "Gate B", q: "abcd", beforeId: "45" })).resolves.toMatchObject({ nextCursor: "23", items: [{ outcome: "CHECKED_IN" }] });
+    expect(calls[0]?.url).toBe("/api/v1/admin/check-ins?eventId=nusa+malam&gate=Gate+B&q=abcd&beforeId=45");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.get("Authorization")).toBe("Bearer admin-token");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("rejects malformed check-in history responses", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ items: [{ id: "1", outcome: "UNKNOWN" }], nextCursor: null, filterOptions: [] })) as unknown as typeof fetch;
+  try { await expect(getAdminCheckInHistory("admin-token")).rejects.toMatchObject({ code: "INVALID_RESPONSE" }); }
+  finally { globalThis.fetch = originalFetch; }
 });
 
 test("marks interrupted operation responses as unknown without retrying", async () => {

@@ -62,6 +62,39 @@ func (h *Handler) TicketStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	token, ok := orderaccess.Bearer(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Autentikasi administrator diperlukan")
+		return
+	}
+	query := r.URL.Query()
+	for name, values := range query {
+		if (name != "eventId" && name != "gate" && name != "q" && name != "beforeId") || len(values) != 1 {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Filter riwayat check-in tidak valid")
+			return
+		}
+	}
+	result, err := h.service.ListHistory(r.Context(), token, HistoryFilter{
+		EventID: query.Get("eventId"), Gate: query.Get("gate"), Query: query.Get("q"), BeforeID: query.Get("beforeId"),
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidRequest) {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Filter riwayat check-in tidak valid")
+		} else if errors.Is(err, staffauth.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Sesi administrator tidak valid atau sudah berakhir")
+		} else if errors.Is(err, staffauth.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "Endpoint ini hanya dapat diakses administrator")
+		} else {
+			h.logger.ErrorContext(r.Context(), "list check-in history failed", "request_id", r.Header.Get("X-Request-ID"), "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan pada server")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error, result Result) {
 	switch {
 	case errors.Is(err, ErrInvalidRequest):

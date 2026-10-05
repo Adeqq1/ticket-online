@@ -76,13 +76,17 @@ Environment variable backend:
 | `MYSQL_DSN` | wajib | DSN MySQL aplikasi |
 | `ORDER_ACCESS_SECRET` | wajib | Base64 dari 32 byte acak; harus tetap sama setelah restart |
 | `APP_ENV` | `production` | Aktifkan endpoint pembayaran simulasi hanya dengan `development` |
+| `MIDTRANS_SERVER_KEY` | kosong | Server key Midtrans sandbox; mengaktifkan Snap dan webhook bertanda tangan |
+| `FRONTEND_URL` | `http://localhost:5173` | Origin frontend untuk validasi URL kembali Snap |
 | `STATIC_DIR` | kosong | Direktori frontend production |
 | `RESERVATION_TTL` | `10m` | Lama reservation |
 | `EXPIRY_INTERVAL` | `15s` | Interval expiry worker |
 
 `go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali. Backend terpisah juga memerlukan `ORDER_ACCESS_SECRET` yang sama setiap kali proses API dijalankan.
 
-Untuk memakai endpoint pembayaran simulasi di Docker Compose, aktifkan kedua batas development: `APP_ENV=development VITE_ENABLE_PAYMENT_SIMULATION=true docker compose up --build`. Frontend default menonaktifkan kontrol simulasi; backend hanya mendaftarkan endpoint pembayaran ketika `APP_ENV=development`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah gangguan jaringan frontend membaca status order sebelum retry. Setelah berhasil, pembayaran tidak dapat diubah dan retry mengembalikan e-ticket yang sama. Baca detail order lewat `GET /api/v1/orders/{orderID}`, daftar tiket lewat `GET /api/v1/orders/{orderID}/tickets`, atau satu tiket lewat `GET /api/v1/tickets/{ticketID}`. Ketiga endpoint tersebut dan pembayaran simulasi memerlukan token privat order dari checkout.
+Untuk sandbox, isi `MIDTRANS_SERVER_KEY` dengan Server Key sandbox dari dashboard Midtrans dan set `FRONTEND_URL` ke origin aplikasi, lalu jalankan Compose. Daftarkan notifikasi Midtrans ke `POST /api/v1/payments/midtrans/notification`. Checkout meminta sesi Snap melalui `POST /api/v1/orders/{orderID}/payments`, lalu mengarahkan pembeli ke halaman pembayaran Midtrans. Order hanya ditandai lunas dan e-ticket diterbitkan setelah notifikasi bertanda tangan valid dengan nominal yang cocok; status order dapat dimuat ulang setelah pembeli kembali ke checkout. Snap sandbox memakai QRIS, transfer bank, dan GoPay. Jangan gunakan server key production untuk sandbox.
+
+Endpoint simulasi lokal tetap tersedia hanya ketika `APP_ENV=development` dan dapat diaktifkan dengan `VITE_ENABLE_PAYMENT_SIMULATION=true`. Pembayaran simulasi memerlukan token privat order dari checkout. Detail order dan e-ticket tetap tersedia melalui `GET /api/v1/orders/{orderID}`, `GET /api/v1/orders/{orderID}/tickets`, dan `GET /api/v1/tickets/{ticketID}`.
 
 ## Akun Petugas
 
@@ -98,6 +102,8 @@ unset STAFF_BOOTSTRAP_PASSWORD
 Jika command mengembalikan `invalid staff input`, periksa nama, format email, dan panjang password. Akun petugas STAFF dibuat dari halaman `/admin/staff`; bootstrap hanya untuk admin pertama dan gagal jika admin sudah ada. Buka `http://localhost:5173/admin/login` (atau `/admin/login` pada host Anda). Admin masuk ke `/admin/staff`, sedangkan akun STAFF masuk ke `/admin/scan`.
 
 Di `/admin/staff`, admin dapat membuat petugas, mengubah nama dan status aktif, mengganti password, serta menetapkan event dan gate. Pilihan gate bersumber dari tier tiket event. Menonaktifkan akun atau mengganti password mencabut semua sesi petugas terkait. Sesi berlangsung 8 jam dan profil/penugasan dibaca lewat `GET /api/v1/staff/me`. Tombol Keluar memanggil `POST /api/v1/staff/logout` dan menghapus token petugas tab ini. Jika jaringan gagal, token lokal tetap dibersihkan dan halaman menyatakan bahwa pencabutan sesi di server belum dapat dipastikan.
+
+Halaman `/admin/check-ins` menampilkan riwayat hasil final request check-in STAFF, dengan filter event/gate, pencarian potongan kode, waktu check-in, dan nama petugas. Endpoint `GET /api/v1/admin/check-ins` hanya untuk ADMIN dan memuat maksimal 50 hasil per halaman. Migrasi mengisi riwayat keberhasilan lama; percobaan terdahulu yang gagal tidak memiliki catatan. Kode input tidak valid disimpan tanpa payload mentah atau data pribadi. Request tanpa sesi STAFF valid dan kegagalan teknis yang belum memiliki hasil final tidak dicatat.
 
 STAFF memilih penugasan event/gate, lalu scan QR e-ticket dengan kamera atau masukkan kode individual (`ET-` diikuti ID 32 digit heksadesimal). Browser akan meminta izin kamera; browser/perangkat tanpa dukungan kamera dapat memakai input manual atau scanner keyboard. Check-in dikirim ke `POST /api/v1/staff/check-ins`. Sesudah percobaan, kamera dan input manual terkunci sampai petugas memilih “Scan berikutnya”. Server hanya menerima order berstatus PAID dan gate yang sesuai snapshot tiket. Hasil menampilkan tiket berhasil, telah dipakai (`TICKET_ALREADY_USED`), gate salah (`WRONG_GATE`, beserta gate yang benar), tiket tidak ditemukan, order belum dibayar, atau akses ditolak.
 
@@ -139,7 +145,7 @@ go vet ./...
 go build ./cmd/api ./cmd/migrate ./cmd/staff
 ```
 
-Tes integrasi checkout, pembayaran, expiry, dan sesi petugas memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variabel tersebut, tes integrasi dilewati. Gunakan database tes yang dapat dibuang, lalu jalankan dari `backend/`:
+Tes integrasi checkout, pembayaran, expiry, sesi petugas, dan check-in/riwayat memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variabel tersebut, tes integrasi dilewati. Gunakan database tes yang dapat dibuang, lalu jalankan dari `backend/`:
 
 ```bash
 MYSQL_TEST_DSN="$MYSQL_DSN" go test -v ./...

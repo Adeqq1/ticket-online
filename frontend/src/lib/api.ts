@@ -10,7 +10,7 @@ export type Reservation = { id: string; status: string; expiresAt: string; event
 export type OrderItem = ReservationItem;
 export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED";
 export type PaymentMethod = "QRIS" | "VIRTUAL_ACCOUNT" | "GOPAY";
-export type PaymentStatus = "FAILED" | "SUCCEEDED";
+export type PaymentStatus = "PENDING" | "FAILED" | "SUCCEEDED";
 export type OrderAttendeeInput = { tierId: string; names: string[] };
 export type CreateOrderRequest = { buyer: Buyer; attendees: OrderAttendeeInput[]; voucherCode?: string };
 export type OrderBase = { id: string; reference: string; reservationId: string; status: OrderStatus; expiresAt: string; subtotal: number; adminFee: number; discount: number; total: number; items: OrderItem[] };
@@ -31,6 +31,11 @@ export type CheckInTicket = { id: string; code: string; attendeeName: string; ti
 export type CheckInResult = { status: "CHECKED_IN"; ticket: CheckInTicket; checkedInAt: string };
 export type CheckInRequest = { eventId: string; gate: string; code: string };
 export type TicketCheckInStatus = { status: "CHECKED_IN" | "NOT_CHECKED_IN"; ticket: CheckInTicket; orderStatus: OrderStatus; checkedInAt: string | null };
+export type CheckInOutcome = "CHECKED_IN" | "TICKET_ALREADY_USED" | "INVALID_REQUEST" | "TICKET_NOT_FOUND" | "ORDER_NOT_PAID" | "WRONG_GATE" | "FORBIDDEN";
+export type CheckInHistoryItem = { id: string; code: string | null; eventId: string | null; eventName: string | null; gate: string | null; staff: { id: string; name: string }; outcome: CheckInOutcome; recordedAt: string; checkedInAt: string | null };
+export type CheckInHistoryEvent = { id: string; name: string; gates: string[] };
+export type CheckInHistoryPage = { items: CheckInHistoryItem[]; nextCursor: string | null; filterOptions: CheckInHistoryEvent[] };
+export type CheckInHistoryFilter = { eventId?: string; gate?: string; q?: string; beforeId?: string };
 
 export class ApiError extends Error {
   code: string;
@@ -108,6 +113,10 @@ export function simulatePayment(orderId: string, payload: SimulatePaymentRequest
   return request<PaymentResult>(`/api/v1/orders/${encodeURIComponent(orderId)}/simulate-payment`, signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 
+export function createSnapPayment(orderId: string, method: PaymentMethod, returnUrl: string, accessToken: string, signal?: AbortSignal) {
+  return request<{ redirectUrl: string }>(`/api/v1/orders/${encodeURIComponent(orderId)}/payments`, signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify({ method, returnUrl }) });
+}
+
 export async function listOrderTickets(orderId: string, accessToken: string, signal?: AbortSignal) {
   return (await request<{ tickets: ApiTicket[] }>(`/api/v1/orders/${encodeURIComponent(orderId)}/tickets`, signal, { headers: privateHeaders(accessToken) })).tickets;
 }
@@ -163,6 +172,34 @@ export function getStaffTicketStatus(accessToken: string, code: string, signal?:
     if (!isTicketCheckInStatus(result)) throw new ApiError("Respons status tiket tidak valid.", 0, "INVALID_RESPONSE");
     return result;
   });
+}
+
+export function getAdminCheckInHistory(accessToken: string, filters: CheckInHistoryFilter = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  for (const key of ["eventId", "gate", "q", "beforeId"] as const) {
+    const value = filters[key];
+    if (value) query.set(key, value);
+  }
+  return request<unknown>(`/api/v1/admin/check-ins${query.size ? `?${query}` : ""}`, signal, { headers: staffHeaders(accessToken) }).then((result) => {
+    if (!isCheckInHistoryPage(result)) throw new ApiError("Respons riwayat check-in tidak valid.", 0, "INVALID_RESPONSE");
+    return result;
+  });
+}
+
+function isCheckInHistoryPage(value: unknown): value is CheckInHistoryPage {
+  if (!value || typeof value !== "object") return false;
+  const page = value as Partial<CheckInHistoryPage>;
+  const outcomes: CheckInOutcome[] = ["CHECKED_IN", "TICKET_ALREADY_USED", "INVALID_REQUEST", "TICKET_NOT_FOUND", "ORDER_NOT_PAID", "WRONG_GATE", "FORBIDDEN"];
+  return Array.isArray(page.items) && (page.nextCursor === null || (typeof page.nextCursor === "string" && /^[1-9]\d*$/.test(page.nextCursor))) && Array.isArray(page.filterOptions) &&
+    page.items.every((item) => Boolean(item && typeof item.id === "string" && /^\d+$/.test(item.id) &&
+      (item.code === null || (typeof item.code === "string" && /^ET-[0-9A-F]{32}$/.test(item.code))) &&
+      (item.eventId === null || typeof item.eventId === "string") && (item.eventName === null || typeof item.eventName === "string") &&
+      (item.gate === null || typeof item.gate === "string") && typeof item.staff?.id === "string" && typeof item.staff.name === "string" &&
+      outcomes.includes(item.outcome) && typeof item.recordedAt === "string" && Number.isFinite(Date.parse(item.recordedAt)) &&
+      ((item.outcome === "CHECKED_IN" || item.outcome === "TICKET_ALREADY_USED")
+        ? typeof item.checkedInAt === "string" && Number.isFinite(Date.parse(item.checkedInAt))
+        : item.checkedInAt === null))) &&
+    page.filterOptions.every((event) => Boolean(event && typeof event.id === "string" && typeof event.name === "string" && Array.isArray(event.gates) && event.gates.every((gate) => typeof gate === "string")));
 }
 
 function isTicketCheckInStatus(value: unknown): value is TicketCheckInStatus {

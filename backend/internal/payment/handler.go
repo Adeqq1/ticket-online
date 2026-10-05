@@ -13,9 +13,11 @@ import (
 )
 
 type Handler struct {
-	repository *Repository
-	logger     *slog.Logger
-	access     *orderaccess.Access
+	repository  *Repository
+	logger      *slog.Logger
+	access      *orderaccess.Access
+	serverKey   string
+	frontendURL string
 }
 
 func NewHandler(repository *Repository, logger *slog.Logger) *Handler {
@@ -24,6 +26,10 @@ func NewHandler(repository *Repository, logger *slog.Logger) *Handler {
 
 func NewHandlerWithAccess(repository *Repository, logger *slog.Logger, access *orderaccess.Access) *Handler {
 	return &Handler{repository: repository, logger: logger, access: access}
+}
+
+func NewHandlerWithMidtrans(repository *Repository, logger *slog.Logger, access *orderaccess.Access, serverKey, frontendURL string) *Handler {
+	return &Handler{repository: repository, logger: logger, access: access, serverKey: serverKey, frontendURL: frontendURL}
 }
 
 func (h *Handler) Simulate(w http.ResponseWriter, r *http.Request) {

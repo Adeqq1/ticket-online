@@ -13,3 +13,4 @@
 .ticket-code { margin: 18px 0; overflow-wrap: anywhere; font-family: "Courier New", monospace; font-size: clamp(19px, 2.4vw, 28px); font-weight: 700; letter-spacing: .04em; }
 @media (max-width: 767px) { .pass-stub { min-height: 240px; } }
 @media print { .ticket-code { color: #fff !important; } }
+@media print { .qr-code { width: 45mm; height: 45mm; padding: 2mm; background: #fff !important; } }

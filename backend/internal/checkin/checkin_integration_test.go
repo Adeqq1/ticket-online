@@ -123,6 +123,7 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 
 	var staffIDs [2]string
 	t.Cleanup(func() {
+		_, _ = db.Exec("DELETE FROM checkin_attempts WHERE staff_id IN (?, ?)", staffIDs[0], staffIDs[1])
 		_, _ = db.Exec("DELETE FROM ticket_checkins WHERE event_id = ?", eventID)
 		_, _ = db.Exec("DELETE FROM etickets WHERE order_id = ?", orderID)
 		_, _ = db.Exec("DELETE FROM order_attendees WHERE order_id = ?", orderID)
@@ -181,6 +182,15 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 		handler.TicketStatus(response, req)
 		return response
 	}
+	callHistory := func(token, query string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/check-ins"+query, nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		response := httptest.NewRecorder()
+		handler.History(response, req)
+		return response
+	}
 	code := func(id string) string { return "ET-" + strings.ToUpper(id) }
 
 	if response := call("", code(ticketIDs[0]), eventID, gateA); response.Code != http.StatusUnauthorized || response.Header().Get("Cache-Control") != "no-store" {
@@ -231,6 +241,9 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 	}
 	if response := call(validSession.AccessToken, code(strings.Repeat("f", 32)), eventID, gateA); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown ticket status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := call(validSession.AccessToken, "bad-code", eventID, gateA); response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid code status=%d body=%s", response.Code, response.Body.String())
 	}
 	if _, err := db.ExecContext(ctx, "UPDATE orders SET status = 'PENDING' WHERE id = ?", orderID); err != nil {
 		t.Fatal(err)
@@ -306,6 +319,54 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 	}
 	if created != 1 || conflicts != 7 {
 		t.Fatalf("concurrent check-ins: created=%d conflicts=%d; want 1 and 7", created, conflicts)
+	}
+	var concurrentSuccesses, concurrentDuplicates int
+	if err := db.QueryRowContext(ctx, `SELECT SUM(outcome = 'CHECKED_IN'), SUM(outcome = 'TICKET_ALREADY_USED')
+		FROM checkin_attempts WHERE ticket_code = ?`, code(ticketIDs[2])).Scan(&concurrentSuccesses, &concurrentDuplicates); err != nil || concurrentSuccesses != 1 || concurrentDuplicates != 7 {
+		t.Fatalf("concurrent attempt audit: successes=%d duplicates=%d err=%v", concurrentSuccesses, concurrentDuplicates, err)
+	}
+	if response := callHistory(validSession.AccessToken, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("staff check-in history status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := callHistory(otherSession.AccessToken, "?eventId="); response.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate history filter status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE staff_users SET role = 'ADMIN' WHERE id = ?", otherStaff.ID); err != nil {
+		t.Fatal(err)
+	}
+	partialCode := code(ticketIDs[0])[3:13]
+	historyResponse := callHistory(otherSession.AccessToken, "?eventId="+eventID+"&gate="+strings.ReplaceAll(gateA, " ", "%20")+"&q="+partialCode)
+	var history HistoryPage
+	if historyResponse.Code != http.StatusOK || json.Unmarshal(historyResponse.Body.Bytes(), &history) != nil {
+		t.Fatalf("admin history status=%d body=%s", historyResponse.Code, historyResponse.Body.String())
+	}
+	if len(history.Items) != 2 || history.FilterOptions == nil || history.NextCursor != nil {
+		t.Fatalf("filtered history = %+v; want success and duplicate for partial code", history)
+	}
+	var successful, repeated int
+	for _, item := range history.Items {
+		if item.Code == nil || !strings.Contains(*item.Code, partialCode) || item.Staff.ID != validStaff.ID || item.EventID == nil || *item.EventID != eventID || item.Gate == nil || *item.Gate != gateA {
+			t.Fatalf("history item does not match filters: %+v", item)
+		}
+		switch item.Outcome {
+		case "CHECKED_IN":
+			successful++
+		case "TICKET_ALREADY_USED":
+			repeated++
+		}
+	}
+	if successful != 1 || repeated != 1 {
+		t.Fatalf("filtered history outcomes: checked-in=%d repeated=%d", successful, repeated)
+	}
+	noMatch := callHistory(otherSession.AccessToken, "?q=not-a-ticket")
+	if noMatch.Code != http.StatusOK || !strings.Contains(noMatch.Body.String(), `"items":[]`) {
+		t.Fatalf("literal unmatched history search status=%d body=%s", noMatch.Code, noMatch.Body.String())
+	}
+	if response := callHistory(otherSession.AccessToken, "?unknown=1"); response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown history filter status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE staff_users SET role = 'STAFF' WHERE id = ?", otherStaff.ID); err != nil {
+		t.Fatal(err)
 	}
 	var records int
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM ticket_checkins WHERE event_id = ?", eventID).Scan(&records); err != nil {

@@ -45,6 +45,6 @@ export function staffHome(role: StaffRole): string {
   return role === "ADMIN" ? "/admin/staff" : "/admin/scan";
 }
 
-export function roleMatchesPage(page: "staff" | "scan", staff: Pick<Staff, "role">): boolean {
-  return page === "staff" ? staff.role === "ADMIN" : staff.role === "STAFF";
+export function roleMatchesPage(page: "staff" | "history" | "scan", staff: Pick<Staff, "role">): boolean {
+	return page === "scan" ? staff.role === "STAFF" : staff.role === "ADMIN";
 }

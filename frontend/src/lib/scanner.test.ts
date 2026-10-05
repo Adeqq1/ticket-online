@@ -156,6 +156,37 @@ describe("scanner operations", () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+  test("recovers a check-in committed before its response was disconnected", async () => {
+    const originalFetch = globalThis.fetch;
+    let committed = false;
+    let posts = 0;
+    let statusReads = 0;
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/me")) return jsonResponse({ staff: profile() });
+      if (url.endsWith("/check-ins")) {
+        posts += 1;
+        committed = true;
+        throw new TypeError("response connection closed after server commit");
+      }
+      if (url.startsWith("/api/v1/staff/ticket-status?")) {
+        statusReads += 1;
+        expect(committed).toBe(true);
+        expect(init?.method ?? "GET").toBe("GET");
+        return jsonResponse({ status: "CHECKED_IN", ticket, orderStatus: "PAID", checkedInAt: result.checkedInAt });
+      }
+      throw new Error(`unexpected request ${url}`);
+    }) as typeof fetch;
+    const current = state();
+    try {
+      await submitScan(current, "token", assignment, code, () => {}, () => {});
+      expect(current.status).toBe("unknown");
+      await checkTicketStatus(current, "token", () => {});
+      expect(current.ticketStatus).toMatchObject({ status: "CHECKED_IN", checkedInAt: result.checkedInAt });
+      expect({ posts, statusReads }).toEqual({ posts: 1, statusReads: 1 });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   test("ignores a second submit while the first check-in is pending", async () => {
     const originalFetch = globalThis.fetch;
     let release!: (response: Response) => void;
