@@ -28,6 +28,7 @@ test("keeps order access in memory when localStorage cannot persist it", () => {
   try {
     expect(saveOrderAccess(record)).toBe(false);
     expect(getOrderAccess("order-1")).toEqual(record);
+    expect(listOrderAccess().find(({ orderId }) => orderId === "order-1")).toEqual(record);
   } finally {
     if (original) Object.defineProperty(globalThis, "localStorage", original);
     else delete (globalThis as { localStorage?: Storage }).localStorage;

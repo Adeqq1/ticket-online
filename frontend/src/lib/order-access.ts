@@ -24,12 +24,18 @@ export function removeOrderAccess(orderId: string) {
 }
 
 export function getOrderAccess(orderId: string): OrderAccess | null {
+  const inMemory = memory.get(orderId);
+  if (inMemory) return inMemory;
   const local = storage();
   try {
     const saved = parseOrderAccess(local?.getItem(key(orderId)) ?? null);
     if (saved) { memory.set(orderId, saved); return saved; }
   } catch { /* storage may be unavailable */ }
   return memory.get(orderId) ?? null;
+}
+
+export function hasPersistentOrderAccess(orderId: string) {
+  try { return Boolean(parseOrderAccess(storage()?.getItem(key(orderId)) ?? null)); } catch { return false; }
 }
 
 export function listOrderAccess(): OrderAccess[] {
@@ -40,7 +46,7 @@ export function listOrderAccess(): OrderAccess[] {
       const itemKey = local.key(index);
       if (!itemKey?.startsWith(prefix)) continue;
       const record = parseOrderAccess(local.getItem(itemKey));
-      if (record && key(record.orderId) === itemKey) records.set(record.orderId, record);
+      if (record && key(record.orderId) === itemKey && !records.has(record.orderId)) records.set(record.orderId, record);
     }
   } catch { /* storage may be unavailable */ }
   return [...records.values()];

@@ -3,13 +3,13 @@
 
   const purchaseSteps = [
     { question: "Bagaimana simulasi pembelian tiket berjalan?", answer: "Pilih konser dari katalog, buka detail acara, lalu pilih jenis tiket yang tersedia. Isi data pemesan, pilih metode pembayaran, dan tinjau kembali detail pesanan sebelum menekan tombol Buat pesanan." },
-    { question: "Apakah pembayaran di website ini benar-benar diproses?", answer: "Belum. Tiket Online saat ini adalah frontend simulasi. Pilihan QRIS, virtual account, dan GoPay hanya menggambarkan alur pembayaran yang akan tersedia pada versi produksi." },
-    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah pesanan simulasi selesai, e-ticket demo tersimpan di halaman Tiket saya pada browser yang sama. QR dan reference di halaman ini hanya visual demo dan tidak dapat digunakan untuk masuk event." }
+    { question: "Apakah pembayaran di website ini benar-benar diproses?", answer: "Tidak ada uang yang diproses. Metode QRIS, virtual account, dan GoPay hanya simulasi development, serta dinonaktifkan pada lingkungan lain." },
+    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah pembayaran dikonfirmasi server, e-ticket untuk setiap peserta tersedia di halaman Tiket Saya pada browser yang sama. Tunjukkan kode ET dan gate yang tercetak di tiket kepada petugas. Kode ini belum mendukung pemindaian QR. Login pembeli, pengiriman email, dan pemulihan lintas perangkat belum tersedia." }
   ];
 
   const paymentRules = [
-    { question: "Metode pembayaran apa saja yang tersedia?", answer: "Simulasi checkout menampilkan QRIS, virtual account, dan GoPay. Ketersediaan metode pembayaran dapat berbeda pada setiap acara di versi produksi." },
-    { question: "Kapan pesanan dianggap selesai?", answer: "Pesanan dianggap selesai setelah kamu meninjau data pemesan dan metode pembayaran, lalu mengonfirmasi pesanan. Pada simulasi ini, konfirmasi langsung membuat e-ticket tanpa transaksi uang." }
+    { question: "Metode pembayaran apa saja yang tersedia?", answer: "QRIS, virtual account, dan GoPay tersedia sebagai simulasi hanya pada lingkungan development yang mengaktifkannya. Pembayaran belum tersedia pada lingkungan lain." },
+    { question: "Kapan pesanan dianggap selesai?", answer: "Order menjadi lunas setelah server mengonfirmasi pembayaran. Server menerbitkan satu e-ticket untuk setiap peserta. Pembayaran simulasi tidak memproses transaksi uang." }
   ];
 
   const refundRules = [
@@ -21,7 +21,7 @@
   const wristbandSteps = [
     { question: "Apa yang perlu disiapkan sebelum menuju meja penukaran?", answer: "Pada versi produksi, buka e-ticket valid dan siapkan QR di layar ponsel sebelum menuju meja penukaran wristband. Untuk mencoba alur petugas, buka demo scanner di /admin/scan." },
     { question: "Bagaimana proses penukaran wristband di venue?", answer: "Pada versi produksi, tunjukkan QR valid kepada petugas untuk diverifikasi sebelum menerima wristband sesuai kategori tiket. Pada simulasi ini tidak ada pemindaian, verifikasi, atau check-in venue yang nyata." },
-    { question: "Bolehkah menggunakan screenshot QR e-ticket?", answer: "Ikuti aturan penyelenggara pada versi produksi karena screenshot mungkin tidak diterima. QR pada aplikasi ini adalah visual demo, tidak memiliki status check-in, dan tidak dapat digunakan di venue." }
+    { question: "Bolehkah menggunakan screenshot e-ticket?", answer: "Kode ET dapat disimpan atau dicetak sebagai PDF. Kode belum mendukung pemindaian QR; tunjukkan e-ticket pada browser yang menyimpan akses order." }
   ];
 </script>
 

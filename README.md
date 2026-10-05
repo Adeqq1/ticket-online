@@ -15,7 +15,7 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 
 Catalog event, reservation, order, pembayaran, dan e-ticket menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer`, nama untuk setiap tiket pada `attendees`, dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi hanya tersedia di backend development. Pembayaran berhasil menerbitkan snapshot e-ticket untuk setiap tiket dalam transaksi yang sama.
 
-Frontend saat ini masih menggunakan endpoint `/convert` dan membuat tiket demo di browser. Alur order, pembayaran, dan e-ticket database di atas perlu diuji lewat API sampai integrasi frontend selesai.
+Frontend checkout, pembayaran simulasi, dan e-ticket membaca order serta snapshot tiket dari API. Setiap peserta menerima satu kode `ET-…` dengan data gate dan snapshot acara dari server. Tiket Saya memuat order yang aksesnya tersimpan pada browser yang sama; login pembeli, email, dan pemulihan lintas perangkat belum tersedia. Snapshot demo lama tetap tersimpan, tetapi tidak dianggap tiket backend.
 
 Order `PENDING` memakai deadline reservasi, tersedia sebagai `expiresAt` pada respons checkout/detail order. Worker mengubah order yang lewat deadline menjadi `EXPIRED` dan mengembalikan stok tepat sekali; pembayaran terlambat ditolak meskipun worker belum berjalan. Deadline ini berbeda dari masa berlaku token akses.
 
@@ -82,7 +82,7 @@ Environment variable backend:
 
 `go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali. Backend terpisah juga memerlukan `ORDER_ACCESS_SECRET` yang sama setiap kali proses API dijalankan.
 
-Untuk memakai endpoint pembayaran simulasi di Docker Compose, jalankan `APP_ENV=development docker compose up --build`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah berhasil, pembayaran tidak dapat diubah dan retry mengembalikan e-ticket yang sama. Baca detail order lewat `GET /api/v1/orders/{orderID}`, daftar tiket lewat `GET /api/v1/orders/{orderID}/tickets`, atau satu tiket lewat `GET /api/v1/tickets/{ticketID}`. Ketiga endpoint tersebut dan pembayaran simulasi memerlukan token privat order dari checkout.
+Untuk memakai endpoint pembayaran simulasi di Docker Compose, aktifkan kedua batas development: `APP_ENV=development VITE_ENABLE_PAYMENT_SIMULATION=true docker compose up --build`. Frontend default menonaktifkan kontrol simulasi; backend hanya mendaftarkan endpoint pembayaran ketika `APP_ENV=development`. Endpoint `POST /api/v1/orders/{orderID}/simulate-payment` menerima `{"method":"QRIS","result":"SUCCEEDED"}`; metode yang didukung ialah `QRIS`, `VIRTUAL_ACCOUNT`, dan `GOPAY`, sedangkan hasil yang didukung ialah `SUCCEEDED` dan `FAILED`. Nominal dibaca server dari order. Pembayaran gagal dapat dicoba lagi; setelah gangguan jaringan frontend membaca status order sebelum retry. Setelah berhasil, pembayaran tidak dapat diubah dan retry mengembalikan e-ticket yang sama. Baca detail order lewat `GET /api/v1/orders/{orderID}`, daftar tiket lewat `GET /api/v1/orders/{orderID}/tickets`, atau satu tiket lewat `GET /api/v1/tickets/{ticketID}`. Ketiga endpoint tersebut dan pembayaran simulasi memerlukan token privat order dari checkout.
 
 ## Akun Petugas
 
@@ -118,7 +118,7 @@ bun run dev
 Vite mem-proxy `/api` ke `http://localhost:8080`. Untuk target lain:
 
 ```bash
-VITE_API_PROXY_TARGET=http://api:8080 bun run dev -- --host 0.0.0.0
+VITE_API_PROXY_TARGET=http://api:8080 VITE_ENABLE_PAYMENT_SIMULATION=true bun run dev -- --host 0.0.0.0
 ```
 
 ## Verification
@@ -172,4 +172,4 @@ docker compose up --build
 - Final backend image berjalan sebagai non-root user.
 - Gunakan password, DSN, dan secret berbeda untuk production melalui secret manager atau environment deployment.
 - Jangan commit `.env`, password production, generated binary, atau database volume.
-- Payment gateway, penerbitan e-ticket backend, QR code, email, login, dan refund belum menjadi fitur production.
+- Kode `ET-…` saat ini bukan QR yang dapat dipindai. Pembayaran memakai simulasi development; payment gateway asli, pengiriman email, login pembeli, pemulihan lintas perangkat, dan refund belum tersedia.

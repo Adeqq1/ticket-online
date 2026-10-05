@@ -1,47 +1,74 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { eventDate } from "../lib/concerts.ts";
-  import DemoCodeCanvas from "../components/ticket/DemoCodeCanvas.svelte";
   import Countdown from "../components/ticket/Countdown.svelte";
-  import { loadTicketSnapshot } from "../lib/tickets.ts";
-  import { getTicket, ApiError, type ApiTicket } from "../lib/api.ts";
+  import { ApiError, getTicket, type ApiTicket } from "../lib/api.ts";
   import { getOrderAccessForTicket } from "../lib/order-access.ts";
   import Toast from "../components/Toast.svelte";
+
   let { id }: { id: string } = $props();
-  const cachedTicket = $derived(loadTicketSnapshot(id));
   let ticket = $state<ApiTicket | null>(null);
   let loading = $state(true);
-  let apiError = $state("");
-  const artist = $derived(ticket?.eventArtist ?? cachedTicket?.concert.artist ?? "");
-  const venue = $derived(ticket?.eventVenue ?? cachedTicket?.concert.venue ?? "");
-  const city = $derived(ticket?.eventCity ?? cachedTicket?.concert.city ?? "");
-  const address = $derived(ticket?.eventAddress ?? cachedTicket?.concert.address ?? "");
-  const startsAt = $derived(ticket?.eventStartsAt ?? cachedTicket?.concert.startsAt ?? "");
-  const reference = $derived(ticket?.orderReference ?? cachedTicket?.reference ?? "");
-  const attendee = $derived(ticket?.attendeeName ?? cachedTicket?.attendeeName ?? "");
-  const tierName = $derived(ticket?.tierName ?? cachedTicket?.lines[0]?.tierName ?? "");
-  const gate = $derived(ticket?.gate ?? cachedTicket?.lines[0]?.gate ?? "");
-  onMount(() => {
-    const controller = new AbortController();
-    const access = getOrderAccessForTicket(id);
-    if (!access) { apiError = "Akses privat tiket tidak ditemukan di browser ini."; loading = false; return () => controller.abort(); }
-    getTicket(id, access.accessToken, controller.signal).then((result) => { ticket = result; }).catch((error) => { if (!controller.signal.aborted) apiError = error instanceof ApiError ? error.message : "E-ticket belum dapat dimuat."; }).finally(() => { if (!controller.signal.aborted) loading = false; });
-    return () => controller.abort();
-  });
-  let status = $state("Kode dan QR pada halaman ini adalah visual demo, tidak dapat digunakan untuk masuk event.");
-  let toast = $state<{ id: number; message: string; tone: "success" | "info" | "error" } | null>(null);
+  let error = $state<unknown>(null);
+  let retrying = $state(false);
+  let toast = $state<{ id: number; message: string; tone: "success" | "error" } | null>(null);
   let toastId = 0;
-  async function copyTicketLink() {
-    try { await navigator.clipboard.writeText(location.href); toast = { id: ++toastId, message: "Link tiket disalin. Tautan hanya dapat dibuka di browser ini.", tone: "success" }; }
-    catch { toast = { id: ++toastId, message: "Link tiket tidak dapat disalin otomatis.", tone: "error" }; }
+  let controller: AbortController | undefined;
+  const errorMessage = $derived(error instanceof ApiError && error.code === "ACCESS_TOKEN_EXPIRED"
+    ? "Akses tiket pada browser ini sudah kedaluwarsa."
+    : error instanceof ApiError && error.code === "TICKET_NOT_FOUND"
+      ? "E-ticket tidak ditemukan."
+      : error instanceof ApiError && error.status === 404
+        ? "Order atau e-ticket tidak ditemukan. Periksa akses yang tersimpan di browser ini."
+        : error instanceof ApiError && error.status === 400
+          ? "ID tiket tidak valid."
+          : error instanceof ApiError && error.status === 0
+            ? "Server belum dapat dihubungi. Periksa koneksi, lalu coba lagi."
+            : error instanceof Error ? error.message : "E-ticket belum dapat dimuat.");
+
+  async function load() {
+    controller?.abort();
+    controller = new AbortController();
+    loading = true;
+    error = null;
+    const access = getOrderAccessForTicket(id);
+    if (!access) {
+      error = new Error("Akses privat tiket tidak ditemukan di browser ini.");
+      loading = false;
+      return;
+    }
+    try { ticket = await getTicket(id, access.accessToken, controller.signal); }
+    catch (value) { if (!controller.signal.aborted) error = value; }
+    finally { if (!controller.signal.aborted) loading = false; }
+  }
+
+  onMount(() => { void load(); return () => controller?.abort(); });
+
+  async function copyCode() {
+    if (!ticket) return;
+    try {
+      await navigator.clipboard.writeText(ticket.code);
+      toast = { id: ++toastId, message: "Kode e-ticket disalin.", tone: "success" };
+    } catch { toast = { id: ++toastId, message: "Kode tidak dapat disalin otomatis. Pilih dan salin kodenya secara manual.", tone: "error" }; }
   }
 </script>
 
-<svelte:head><title>{artist ? `${artist} | E-Ticket Tiket Online` : "E-ticket | Tiket Online"}</title><meta name="description" content={artist ? `E-ticket digital untuk konser ${artist}.` : "E-ticket digital Tiket Online."} /><meta name="robots" content="noindex" /></svelte:head>
+<svelte:head><title>{ticket ? `${ticket.eventArtist} | E-Ticket Tiket Online` : "E-ticket | Tiket Online"}</title><meta name="description" content={ticket ? `E-ticket digital untuk konser ${ticket.eventArtist}.` : "E-ticket digital Tiket Online."} /><meta name="robots" content="noindex" /></svelte:head>
 {#if loading}
   <p class="shell" role="status">Memuat e-ticket...</p>
-{:else if !cachedTicket && !ticket}
-  <section class="ticket-missing shell"><p class="ticket-kicker">E-ticket tidak tersedia</p><h1>Tiket tidak ditemukan.</h1><p>Tiket demo ini mungkin sudah dihapus dari penyimpanan browser.</p><a class="button" href="/tiket-saya">Buka dompet tiket</a></section>
+{:else if !ticket}
+  <section class="ticket-missing shell"><p class="ticket-kicker">E-ticket belum tersedia</p><h1>Tiket tidak dapat dimuat.</h1><p role="status">{errorMessage}</p>{#if error instanceof ApiError || error instanceof Error}<button class="button" type="button" disabled={retrying} onclick={async () => { retrying = true; await load(); retrying = false; }}>{retrying ? "Memuat..." : "Coba lagi"}</button>{/if}<a class="button button-secondary" href="/tiket-saya">Buka Tiket Saya</a></section>
 {:else}
-   <section class="ticket-page shell"><header><p class="ticket-kicker">E-ticket digital</p><h1>Tiketmu sudah siap.</h1><p>Gunakan reference di bawah sebagai bukti pembelian.</p></header>{#if apiError}<p class="success-note" role="status">{apiError} Menampilkan salinan yang tersimpan di browser.</p>{/if}<article class="boarding-pass" aria-labelledby="ticket-title"><section class="pass-main"><div class="pass-top"><span class="pass-label">Tiket Online</span><span class="pass-status">E-ticket</span></div><h2 id="ticket-title">{artist}</h2><p class="pass-venue">{venue}, {city}</p><div class="pass-grid"><div class="pass-row"><span>Pengunjung</span><b>{attendee}</b></div><div class="pass-row"><span>Tanggal event</span><b>{eventDate(startsAt)}</b></div><div class="pass-row"><span>Lokasi</span><b>{venue}, {city}</b></div><div class="pass-row"><span>Alamat</span><b>{address}</b></div></div><div class="ticket-lines"><div class="ticket-line"><span>{tierName}</span><b>{gate}</b></div></div></section><aside class="pass-stub"><div><DemoCodeCanvas reference={reference} /><div class="barcode" aria-hidden="true"></div><small>Reference</small><p class="ticket-reference">{reference}</p></div><Countdown startsAt={startsAt} /></aside></article><div class="ticket-actions"><button class="button" type="button" onclick={() => window.print()}>Cetak / Simpan PDF</button><button class="button button-secondary" type="button" onclick={copyTicketLink}>Salin link tiket</button><button class="button button-secondary" type="button" onclick={() => status = "Simulasi: e-ticket akan dikirim ke email pemesan."}>Kirim ke email</button></div><p class="ticket-caption" aria-live="polite">{status}</p>{#if toast}<Toast id={toast.id} message={toast.message} tone={toast.tone} onDismiss={() => toast = null} />{/if}</section>
+  <section class="ticket-page shell">
+    <header><p class="ticket-kicker">E-ticket digital</p><h1>Tiketmu sudah siap.</h1><p>Tunjukkan kode e-ticket ini kepada petugas di gate yang tertera.</p></header>
+    <article class="boarding-pass" aria-labelledby="ticket-title">
+      <section class="pass-main"><div class="pass-top"><span class="pass-label">Tiket Online</span><span class="pass-status">E-ticket</span></div><h2 id="ticket-title">{ticket.eventArtist}</h2><p class="pass-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
+        <div class="pass-grid"><div class="pass-row"><span>Pengunjung</span><b>{ticket.attendeeName}</b></div><div class="pass-row"><span>Tanggal event</span><b>{eventDate(ticket.eventStartsAt)}</b></div><div class="pass-row"><span>Lokasi</span><b>{ticket.eventVenue}, {ticket.eventCity}</b></div><div class="pass-row"><span>Alamat</span><b>{ticket.eventAddress}</b></div><div class="pass-row"><span>Jenis tiket</span><b>{ticket.tierName}</b></div><div class="pass-row"><span>Gate</span><b>{ticket.gate}</b></div><div class="pass-row"><span>Reference pesanan</span><b>{ticket.orderReference}</b></div><div class="pass-row"><span>Diterbitkan</span><b>{eventDate(ticket.issuedAt)}</b></div></div>
+      </section>
+      <aside class="pass-stub"><div><span class="pass-label">Kode e-ticket</span><p class="ticket-code">{ticket.code}</p><button class="button button-secondary" type="button" onclick={copyCode}>Salin kode</button></div><Countdown startsAt={ticket.eventStartsAt} /></aside>
+    </article>
+    <div class="ticket-actions"><button class="button" type="button" onclick={() => window.print()}>Cetak / Simpan PDF</button><a class="button button-secondary" href="/tiket-saya">Tiket Saya</a></div>
+    <p class="ticket-caption">Akses tiket berlaku di browser yang sama. Kode ini belum mendukung pemindaian QR.</p>
+    {#if toast}<Toast id={toast.id} message={toast.message} tone={toast.tone} onDismiss={() => toast = null} />{/if}
+  </section>
 {/if}
