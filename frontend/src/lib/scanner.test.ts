@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import jsQR from "jsqr";
 import qrcode from "qrcode-generator";
 import type { Staff } from "./api.ts";
-import { normalizeScanCode, parseCameraScanCode, submitScan, type ScannerState } from "./scanner.ts";
+import { checkTicketStatus, continueToNextScan, normalizeScanCode, parseCameraScanCode, submitScan, type ScannerState } from "./scanner.ts";
 
 const assignment = { eventId: "nusa-malam", gate: "Gate B" };
 const code = `ET-${"A".repeat(32)}`;
-const state = (): ScannerState => ({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan" });
+const state = (): ScannerState => ({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan", locked: false, lastAttempt: null, statusChecking: false, ticketStatus: null, statusCheckError: "" });
 const profile = (assignments = [assignment]): Staff => ({ id: "b".repeat(32), name: "Petugas", email: "staff@example.com", role: "STAFF", active: true, assignments });
 const ticket = { id: "a".repeat(32), code, attendeeName: "Peserta", tierName: "Festival", eventId: assignment.eventId, gate: assignment.gate };
 const result = { status: "CHECKED_IN", ticket, checkedInAt: "2026-10-05T12:00:00Z" };
@@ -73,6 +73,48 @@ describe("scanner operations", () => {
       expect(current.resultDetail).toContain("sudah berubah");
       expect(calls).toEqual(["/api/v1/staff/me"]);
     } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("locks a completed attempt until the operator starts the next scan", async () => {
+    const originalFetch = globalThis.fetch;
+    let posts = 0;
+    globalThis.fetch = (async (input) => String(input).endsWith("/me") ? jsonResponse({ staff: profile() }) : (posts += 1, jsonResponse(result, 201))) as typeof fetch;
+    const current = state();
+    try {
+      await submitScan(current, "token", assignment, code, () => {}, () => {});
+      await submitScan(current, "token", assignment, code, () => {}, () => {});
+      expect(posts).toBe(1);
+      expect(current.locked).toBe(true);
+      expect(continueToNextScan(current, false)).toBe(true);
+      expect(current).toMatchObject({ locked: false, status: "idle", lastAttempt: null });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("checks the last unknown attempt without sending another check-in", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET" });
+      return jsonResponse({ status: "CHECKED_IN", ticket, orderStatus: "PAID", checkedInAt: result.checkedInAt });
+    }) as typeof fetch;
+    const current = state();
+    current.locked = true;
+    current.status = "unknown";
+    current.lastAttempt = { ...assignment, code };
+    try {
+      await checkTicketStatus(current, "token", () => {});
+      expect(current.ticketStatus).toMatchObject({ status: "CHECKED_IN", checkedInAt: result.checkedInAt });
+      expect(continueToNextScan(current, false)).toBe(true);
+      expect(calls).toEqual([{ url: `/api/v1/staff/ticket-status?code=${code}`, method: "GET" }]);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("requires handling confirmation while an unknown result remains unresolved", () => {
+    const current = state();
+    current.locked = true;
+    current.status = "unknown";
+    expect(continueToNextScan(current, false)).toBe(false);
+    expect(continueToNextScan(current, true)).toBe(true);
   });
 
   test("maps server rejection codes to the gate result", async () => {

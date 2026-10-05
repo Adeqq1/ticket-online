@@ -47,10 +47,25 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, result)
 }
 
+func (h *Handler) TicketStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	token, ok := orderaccess.Bearer(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Autentikasi petugas diperlukan")
+		return
+	}
+	result, err := h.service.GetTicketStatus(r.Context(), token, r.URL.Query().Get("code"))
+	if err != nil {
+		h.respondError(w, r, err, Result{})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error, result Result) {
 	switch {
 	case errors.Is(err, ErrInvalidRequest):
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Data check-in tidak valid")
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Kode atau data check-in tidak valid")
 	case errors.Is(err, staffauth.ErrUnauthorized):
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Sesi petugas tidak valid atau sudah berakhir")
 	case errors.Is(err, staffauth.ErrForbidden):

@@ -42,6 +42,13 @@ type Result struct {
 	CheckedInAt time.Time `json:"checkedInAt"`
 }
 
+type TicketStatus struct {
+	Status      string     `json:"status"`
+	Ticket      Ticket     `json:"ticket"`
+	OrderStatus string     `json:"orderStatus"`
+	CheckedInAt *time.Time `json:"checkedInAt"`
+}
+
 type Service struct {
 	db    *sql.DB
 	staff *staffauth.Service
@@ -56,13 +63,82 @@ func Normalize(request Request) (Request, error) {
 	request.Gate = strings.TrimSpace(request.Gate)
 	request.Code = strings.ToUpper(strings.TrimSpace(request.Code))
 	if request.EventID == "" || len(request.EventID) > 64 || request.Gate == "" || len(request.Gate) > 100 ||
-		len(request.Code) != 35 || !strings.HasPrefix(request.Code, "ET-") {
+		request.Code == "" {
 		return Request{}, ErrInvalidRequest
 	}
-	if _, err := hex.DecodeString(request.Code[3:]); err != nil {
+	code, err := NormalizeTicketCode(request.Code)
+	if err != nil {
 		return Request{}, ErrInvalidRequest
 	}
+	request.Code = code
 	return request, nil
+}
+
+func NormalizeTicketCode(code string) (string, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if len(code) != 35 || !strings.HasPrefix(code, "ET-") {
+		return "", ErrInvalidRequest
+	}
+	if _, err := hex.DecodeString(code[3:]); err != nil {
+		return "", ErrInvalidRequest
+	}
+	return code, nil
+}
+
+func (s *Service) GetTicketStatus(ctx context.Context, token, code string) (TicketStatus, error) {
+	code, err := NormalizeTicketCode(code)
+	if err != nil {
+		return TicketStatus{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return TicketStatus{}, fmt.Errorf("begin ticket status: %w", err)
+	}
+	defer tx.Rollback()
+	principal, err := s.staff.AuthenticateTx(ctx, tx, token)
+	if err != nil {
+		return TicketStatus{}, err
+	}
+	ticketID := strings.ToLower(code[3:])
+	var orderID string
+	if err := tx.QueryRowContext(ctx, "SELECT order_id FROM etickets WHERE id = ?", ticketID).Scan(&orderID); errors.Is(err, sql.ErrNoRows) {
+		return TicketStatus{}, ErrTicketNotFound
+	} else if err != nil {
+		return TicketStatus{}, fmt.Errorf("find ticket status order: %w", err)
+	}
+	var orderStatus, eventID string
+	if err := tx.QueryRowContext(ctx, `SELECT o.status, r.event_id FROM orders o
+		JOIN reservations r ON r.id = o.reservation_id WHERE o.id = ? FOR SHARE`, orderID).Scan(&orderStatus, &eventID); errors.Is(err, sql.ErrNoRows) {
+		return TicketStatus{}, ErrTicketNotFound
+	} else if err != nil {
+		return TicketStatus{}, fmt.Errorf("lock ticket status order: %w", err)
+	}
+	var snapshot []byte
+	if err := tx.QueryRowContext(ctx, "SELECT snapshot FROM etickets WHERE id = ? FOR SHARE", ticketID).Scan(&snapshot); errors.Is(err, sql.ErrNoRows) {
+		return TicketStatus{}, ErrTicketNotFound
+	} else if err != nil {
+		return TicketStatus{}, fmt.Errorf("lock ticket status snapshot: %w", err)
+	}
+	var ticket Ticket
+	if err := json.Unmarshal(snapshot, &ticket); err != nil {
+		return TicketStatus{}, fmt.Errorf("decode ticket status snapshot: %w", err)
+	}
+	if ticket.ID != ticketID || ticket.EventID != eventID {
+		return TicketStatus{}, ErrTicketNotFound
+	}
+	if err := s.staff.AuthorizeTicketStatusTx(ctx, tx, principal, eventID, ticket.Gate); err != nil {
+		return TicketStatus{}, err
+	}
+	result := TicketStatus{Status: "NOT_CHECKED_IN", Ticket: ticket, OrderStatus: orderStatus}
+	var checkedInAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, "SELECT checked_in_at FROM ticket_checkins WHERE ticket_id = ?", ticketID).Scan(&checkedInAt); err == nil {
+		result.Status = "CHECKED_IN"
+		checkedInAtUTC := checkedInAt.Time.UTC()
+		result.CheckedInAt = &checkedInAtUTC
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return TicketStatus{}, fmt.Errorf("find ticket status check-in: %w", err)
+	}
+	return result, nil
 }
 
 func (s *Service) CheckIn(ctx context.Context, token string, request Request) (Result, error) {

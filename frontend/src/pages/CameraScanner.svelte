@@ -2,7 +2,10 @@
   import { onDestroy, onMount } from "svelte";
   import { parseCameraScanCode } from "../lib/scanner.ts";
 
-  let { enabled, busy, onCode }: { enabled: boolean; busy: boolean; onCode: (code: string) => void } = $props();
+  let { enabled, busy, locked, resumeCamera, canContinue, onNext, onCode }: {
+    enabled: boolean; busy: boolean; locked: boolean; resumeCamera: boolean; canContinue: boolean;
+    onNext: () => boolean; onCode: (code: string) => void;
+  } = $props();
   let video: HTMLVideoElement | undefined;
   let stream: MediaStream | undefined;
   let generation = 0;
@@ -33,8 +36,8 @@
     return "Kamera tidak dapat dimulai. Periksa izin kamera atau masukkan kode secara manual.";
   }
 
-  async function startCamera() {
-    if (!enabled || busy || starting || active) return;
+  async function startCamera(afterNext = false) {
+    if (!enabled || busy || locked && !afterNext || starting || active) return;
     stopCamera();
     const current = generation;
     starting = true;
@@ -53,10 +56,11 @@
       if (current !== generation) { for (const track of nextStream.getTracks()) track.stop(); return; }
       stream = nextStream;
       const { default: jsQR } = await import("jsqr");
-      if (current !== generation || !video) { stopCamera(); return; }
+      if (current !== generation) { for (const track of nextStream.getTracks()) track.stop(); return; }
+      if (!video) { stopCamera(); return; }
       video.srcObject = nextStream;
       await video.play();
-      if (current !== generation) { stopCamera(); return; }
+      if (current !== generation) { for (const track of nextStream.getTracks()) track.stop(); return; }
       starting = false;
       active = true;
       status = "Arahkan kamera ke QR e-ticket.";
@@ -89,6 +93,11 @@
     }
   }
 
+  function scanNext() {
+    if (!canContinue || !onNext()) return;
+    void startCamera(true);
+  }
+
   $effect(() => { if (!enabled || busy) stopCamera(); });
 
   function stopForPageExit() { stopCamera("Kamera dihentikan. Tekan tombol untuk memulai pemindaian lagi."); }
@@ -110,8 +119,9 @@
   <div class="camera-scanner-heading"><h3 id="camera-title">Scan dengan kamera</h3><span>QR diproses di perangkat ini</span></div>
   <video bind:this={video} muted playsinline aria-label="Pratinjau kamera untuk memindai QR e-ticket" class:camera-active={active}></video>
   <div class="camera-scanner-controls">
-    {#if active || starting}<button class="staff-text-button" type="button" onclick={() => stopCamera("Kamera dihentikan.")}>Hentikan kamera</button>
-    {:else}<button class="scan-submit camera-start" type="button" disabled={!enabled || busy} onclick={startCamera}>{busy ? "Memverifikasi…" : "Aktifkan kamera"}</button>{/if}
+    {#if locked && resumeCamera}<button class="scan-submit camera-start" type="button" disabled={!canContinue} onclick={scanNext}>Scan berikutnya</button>
+    {:else if active || starting}<button class="staff-text-button" type="button" onclick={() => stopCamera("Kamera dihentikan.")}>Hentikan kamera</button>
+    {:else}<button class="scan-submit camera-start" type="button" disabled={!enabled || busy || locked} onclick={() => startCamera()}>{busy ? "Memverifikasi…" : "Aktifkan kamera"}</button>{/if}
     <p role="status" aria-live="polite">{status}</p>
   </div>
 </section>

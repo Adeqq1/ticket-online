@@ -32,6 +32,7 @@ func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL t
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	checkinHandler := checkin.NewHandler(checkin.NewService(db, staffService), logger)
 	mux.HandleFunc("POST /api/v1/staff/check-ins", checkinHandler.CheckIn)
+	mux.HandleFunc("GET /api/v1/staff/ticket-status", checkinHandler.TicketStatus)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})

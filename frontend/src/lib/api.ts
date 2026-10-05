@@ -30,6 +30,7 @@ export type UpdateStaffRequest = { name?: string; active?: boolean };
 export type CheckInTicket = { id: string; code: string; attendeeName: string; tierName: string; eventId: string; gate: string };
 export type CheckInResult = { status: "CHECKED_IN"; ticket: CheckInTicket; checkedInAt: string };
 export type CheckInRequest = { eventId: string; gate: string; code: string };
+export type TicketCheckInStatus = { status: "CHECKED_IN" | "NOT_CHECKED_IN"; ticket: CheckInTicket; orderStatus: OrderStatus; checkedInAt: string | null };
 
 export class ApiError extends Error {
   code: string;
@@ -155,6 +156,27 @@ export function checkInTicket(accessToken: string, payload: CheckInRequest, sign
     if (!isCheckInResult(result, payload)) throw new ApiError("Respons check-in tidak lengkap; hasil belum diketahui.", 0, "UNKNOWN_OUTCOME");
     return result;
   });
+}
+
+export function getStaffTicketStatus(accessToken: string, code: string, signal?: AbortSignal) {
+  return request<unknown>(`/api/v1/staff/ticket-status?code=${encodeURIComponent(code)}`, signal, { headers: staffHeaders(accessToken) }).then((result) => {
+    if (!isTicketCheckInStatus(result)) throw new ApiError("Respons status tiket tidak valid.", 0, "INVALID_RESPONSE");
+    return result;
+  });
+}
+
+function isTicketCheckInStatus(value: unknown): value is TicketCheckInStatus {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Partial<TicketCheckInStatus>;
+  const ticket = result.ticket;
+  if (!ticket || typeof ticket !== "object" || !["PENDING", "PAID", "CANCELLED", "EXPIRED"].includes(result.orderStatus ?? "")) return false;
+  const checkedIn = result.status === "CHECKED_IN";
+  if ((!checkedIn && result.status !== "NOT_CHECKED_IN") || (checkedIn && (typeof result.checkedInAt !== "string" || !Number.isFinite(Date.parse(result.checkedInAt)) || result.orderStatus !== "PAID")) || (!checkedIn && result.checkedInAt !== null)) return false;
+  const candidate = ticket as Partial<CheckInTicket>;
+  return typeof candidate.id === "string" && /^[0-9a-f]{32}$/.test(candidate.id) && typeof candidate.code === "string" &&
+    candidate.code === `ET-${candidate.id.toUpperCase()}` && typeof candidate.attendeeName === "string" && Boolean(candidate.attendeeName.trim()) &&
+    typeof candidate.tierName === "string" && Boolean(candidate.tierName.trim()) && typeof candidate.eventId === "string" &&
+    typeof candidate.gate === "string" && Boolean(candidate.gate.trim());
 }
 
 function isCheckInResult(value: unknown, request: CheckInRequest): value is CheckInResult {

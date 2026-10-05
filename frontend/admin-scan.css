@@ -25,3 +25,10 @@
 .camera-scanner-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
 .camera-scanner-controls p { flex: 1 1 220px; margin: 0; }
 .camera-scanner .camera-start { min-height: 44px; }
+.next-scan { min-height: 44px; margin-top: 16px; }
+.scan-status-check { display: grid; gap: 10px; margin-top: 20px; padding: 16px; border: 1px solid var(--scan-red); background: #1b1716; }
+.scan-status-check h3, .scan-status-check p { margin: 0; }
+.scan-status-check h3 { font-size: 15px; }
+.scan-status-check p { color: var(--scan-muted); font-size: 12px; line-height: 1.5; }
+.scan-status-check time { color: var(--scan-text); font-weight: 700; }
+.scan-status-check .staff-text-button { justify-self: start; }
