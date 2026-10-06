@@ -111,3 +111,21 @@
 .event-lock-note { display: block; margin-top: -8px; }
 @media (max-width: 900px) { .event-admin-grid { grid-template-columns: 1fr; } }
 @media (max-width: 540px) { .event-form-row { grid-template-columns: 1fr; } }
+
+.order-filter-form { display: grid; grid-template-columns: 1.2fr 1fr .85fr 1fr 1fr auto; align-items: end; gap: 12px; }
+.order-filter-form label { display: grid; gap: 7px; min-width: 0; color: var(--scan-muted); font-size: 12px; }
+.order-filter-form input, .order-filter-form select { width: 100%; min-width: 0; min-height: 44px; padding: 0 10px; border: 1px solid var(--scan-line); border-radius: 0; background: #111918; color: var(--scan-text); font: 13px Arial, Helvetica, sans-serif; }
+.order-filter-form input:focus-visible, .order-filter-form select:focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 2px; }
+.order-filter-form .history-filter-actions { display: flex; gap: 8px; }
+.order-load-more { display: block; margin: 18px auto 0; }
+.order-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.order-detail-grid h3 { margin: 0 0 10px; font-size: 15px; }
+.order-detail-grid dl { display: grid; grid-template-columns: minmax(100px, .7fr) minmax(0, 1.3fr); gap: 8px 14px; margin: 0 0 20px; font-size: 13px; }
+.order-detail-grid dt { color: var(--scan-muted); }
+.order-detail-grid dd { margin: 0; overflow-wrap: anywhere; }
+.order-detail-grid a { color: var(--scan-lime); }
+.order-detail-list { display: grid; gap: 8px; margin: 0 0 20px; padding: 0; list-style: none; }
+.order-detail-list li { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--scan-line); font-size: 12px; overflow-wrap: anywhere; }
+.order-detail-list code { color: var(--scan-lime); }
+@media (max-width: 1100px) { .order-filter-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }.order-filter-form .history-filter-actions { grid-column: 1 / -1; } }
+@media (max-width: 540px) { .order-filter-form { grid-template-columns: 1fr; }.order-filter-form .history-filter-actions { grid-column: auto; }.order-detail-grid { grid-template-columns: 1fr; }.order-detail-grid dl { grid-template-columns: minmax(90px, .65fr) minmax(0, 1.35fr); } }

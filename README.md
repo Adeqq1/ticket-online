@@ -197,6 +197,49 @@ docker compose down -v
 docker compose up --build
 ```
 
+## Staging, Monitoring, and Restore Drill
+
+Staging runs on a VPS with Docker Compose, Caddy-issued HTTPS, a dedicated MySQL volume, Midtrans sandbox keys, and an isolated SMTP test account. Keep production credentials and customer data out of this environment. Copy `.env.staging.example` to the ignored `.env.staging`, replace every placeholder, and create `.secrets/mysql-backup.cnf` with mode `0600`:
+
+```ini
+[client]
+user=ticket_backup
+password=THE_STAGING_DB_BACKUP_PASSWORD
+host=127.0.0.1
+```
+
+On first database initialization, Compose creates the read-only `ticket_backup` account using `STAGING_DB_BACKUP_PASSWORD`. Create the account before the first backup if the existing DB volume predates this setup. Use unique random passwords, a base64 encoding of 32 random bytes for `ORDER_ACCESS_SECRET`, and a real domain whose DNS points to the VPS. Allow inbound TCP 80/443 and outbound access to Midtrans sandbox, the SMTP sandbox, and the backup bucket. Configure the S3-compatible bucket with versioning and a 14-day expiration rule scoped to the full staging backup prefix; `deploy/staging-s3-lifecycle.json` is a template. The bucket credentials must only permit that prefix. Store the age private identity separately from the VPS and bucket.
+
+Commit the release before building: the image script requires a clean worktree and embeds the commit revision. Transfer the image artifact, then load it on the VPS. Run commands from the repository root; `AWS_PROFILE`, `S3_URI`, and `AGE_RECIPIENT` are shell variables used by the scripts, so export them in the operator shell (the example file is for Compose interpolation):
+
+```bash
+./scripts/staging-image.sh
+# transfer out/ticket-online-api-<commit>.tar to the VPS
+docker image load -i out/ticket-online-api-<commit>.tar
+set -a; source .env.staging; set +a
+export AWS_PROFILE S3_URI AGE_RECIPIENT
+export STAGING_IMAGE="ticket-online-api:$(git rev-parse HEAD)"
+./scripts/staging-deploy.sh
+```
+
+Set up a host firewall and Docker, point the staging DNS record to the VPS, then run the deploy script. It validates Compose configuration, starts/waits for MySQL, creates an encrypted backup before an existing API is stopped, applies migrations, starts API and HTTPS, and checks `/api/v1/ready`. First install has no prior application data to back up. Caddy obtains and renews the HTTPS certificate. Retain the previous image tag until the new release passes the staging flow.
+
+The ADMIN page `/admin/operations` reports recent API 5xx responses, failed and delayed ticket email, open payment reconciliation cases, and worker heartbeat/failure counts. Database-backed metrics refresh every minute; stale data returns `503`. API request errors, worker failures, and changes in alert state are also written to structured container logs. Configure host-level log collection/retention and an external uptime check for `/api/v1/ready`; this repository does not provision a hosted monitoring service or page an operator.
+
+Run the complete staging acceptance flow using a sandbox buyer and mailbox: publish a test concert, reserve and check out, complete a Midtrans sandbox payment, confirm the ticket email and ticket recovery link, open the ticket, then check it in with the assigned scanner. Also run the MySQL integration suite against a disposable test database to verify last-stock contention, payment versus expiry, repeated webhooks, and simultaneous scans. Keep evidence and timestamps in the deployment record. Do not use live customer or payment data.
+
+For a backup, install AWS CLI, `age`, Docker Compose, and `gzip`; configure `AWS_PROFILE` for the dedicated bucket and provide `S3_URI` plus `AGE_RECIPIENT`. The script stores an encrypted SQL dump, checksum, image digest, source revision, and schema version. It uses the read-only MySQL account and bucket-side encryption. The age recipient encrypts the dump before upload. Uploads are retained for 14 days by the bucket lifecycle rule. Current migrations contain no routines, events, or triggers, so the dump explicitly skips those objects to keep the backup account read-only; if a migration adds one, update its backup flags/grants and test a full dump/restore round trip together.
+
+To practice restore, copy `.env.staging.restore.example` to `.env.staging.restore`, replace its passwords, and create `.secrets/mysql-restore.cnf` mode `0600` with client credentials for `ticket_restore` on `127.0.0.1`. Set shell variables `RESTORE_PROJECT_NAME` (a fresh name beginning `ticket-online-staging-restore-`), `S3_URI`, `AWS_PROFILE`, and `AGE_IDENTITY_FILE` (path to the off-host private age identity); optionally set `S3_ENDPOINT_URL`. Then pass the backup's timestamped name without extension:
+
+```bash
+./scripts/staging-restore.sh ticket-online-staging-YYYYMMDDTHHMMSSZ
+```
+
+The restore script verifies SHA-256 before decryption and imports into a new Compose project and volume, isolated from the staging DB; its only published database port is `127.0.0.1:13307`. Inspect migration version, table counts, order/ticket relations, and sample ticket snapshots through the isolated container. Record elapsed time and compare to the 60-minute restore target, then remove the restore project and volume after evidence is captured. Never point the restore script at the live staging project or volume.
+
+The staging target is RPO 24 hours with a restore exercise under 60 minutes. Schedule backups at least daily outside the repository, monitor their success, and keep the decryption key off-host. Actual HTTPS issuance, provider sandbox credentials, SMTP delivery, backup bucket policy, and VPS restore acceptance must be verified in the provisioned environment; local repo checks do not establish those external facts.
+
 ## Production Notes
 
 - Production image backend menyajikan API dan SPA fallback dari `STATIC_DIR`.

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 )
 
@@ -50,7 +51,9 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		s.process(ctx)
+		operations.Process.Begin("email", time.Now())
+		err := s.process(ctx)
+		operations.Process.Finish("email", time.Now(), err)
 		select {
 		case <-ctx.Done():
 			return
@@ -59,46 +62,51 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (s *Service) process(ctx context.Context) {
+func (s *Service) process(ctx context.Context) error {
 	if err := s.enqueuePaid(ctx); err != nil && ctx.Err() == nil {
 		s.logger.ErrorContext(ctx, "reconcile paid order email queue", "error", err)
-		return
+		return err
 	}
+	var failures []error
 	if _, err := s.db.ExecContext(ctx, `UPDATE email_queue SET status = 'FAILED', lease_until = NULL,
 		claim_token = NULL, last_error = 'pengiriman berhenti sebelum selesai', updated_at = UTC_TIMESTAMP(6)
 		WHERE status = 'PROCESSING' AND attempts >= ? AND lease_until <= UTC_TIMESTAMP(6)`, maxAttempts); err != nil && ctx.Err() == nil {
 		s.logger.ErrorContext(ctx, "expire exhausted email claims", "error", err)
-		return
+		failures = append(failures, err)
 	}
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM rate_limits WHERE reset_at < UTC_TIMESTAMP(6) LIMIT 1000"); err != nil && ctx.Err() == nil {
 		s.logger.ErrorContext(ctx, "delete expired rate limit buckets", "error", err)
+		failures = append(failures, err)
 	}
 	if err := s.expireRecovery(ctx); err != nil && ctx.Err() == nil {
 		s.logger.ErrorContext(ctx, "expire recovery email jobs", "error", err)
+		failures = append(failures, err)
 	}
 	if s.config.Host == "" || ctx.Err() != nil {
-		return
+		return errors.Join(failures...)
 	}
 	for range 20 {
 		if ctx.Err() != nil {
-			return
+			return errors.Join(failures...)
 		}
 		job, found, err := s.claim(ctx)
 		if err != nil {
 			s.logger.ErrorContext(ctx, "claim order email", "error", err)
-			return
+			return errors.Join(append(failures, err)...)
 		}
 		if !found {
-			return
+			return errors.Join(failures...)
 		}
 		if err := s.send(ctx, job); err != nil {
 			if ctx.Err() == nil {
 				s.logger.WarnContext(ctx, "email failed", "job_id", job.id, "kind", job.kind, "attempt", job.attempts, "error", err)
 			}
+			failures = append(failures, err)
 			continue
 		}
 		s.logger.InfoContext(ctx, "email sent", "job_id", job.id, "kind", job.kind, "attempt", job.attempts)
 	}
+	return errors.Join(failures...)
 }
 
 func (s *Service) enqueuePaid(ctx context.Context) error {

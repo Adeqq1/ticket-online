@@ -1,0 +1,23 @@
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ticket_online_staging_restore
+      MYSQL_USER: ${RESTORE_DB_USER:?Set RESTORE_DB_USER}
+      MYSQL_PASSWORD: ${RESTORE_DB_PASSWORD:?Set RESTORE_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${RESTORE_DB_ROOT_PASSWORD:?Set RESTORE_DB_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:13307:3306"
+    volumes:
+      - restore_data:/var/lib/mysql
+      - ./.secrets/mysql-restore.cnf:/run/secrets/restore.cnf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  restore_data:

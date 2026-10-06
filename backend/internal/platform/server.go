@@ -13,9 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/adminissues"
+	"github.com/Adeqq1/ticket-online/backend/internal/adminorders"
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkin"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
+	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
@@ -24,23 +27,34 @@ import (
 )
 
 func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "")
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "", nil)
 }
 
 func NewHandlerWithPaymentConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, nil, trustedProxies...)
 }
 
-func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, trustedProxies ...netip.Prefix) http.Handler {
+func NewHandlerWithOperations(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, metrics, trustedProxies...)
+}
+
+func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
 	mux := http.NewServeMux()
 	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
 	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access)
-	paymentHandler := payment.NewHandlerWithMidtrans(payment.NewRepository(db), logger, access, midtransKey, frontendURL)
+	paymentRepository := payment.NewRepository(db)
+	paymentHandler := payment.NewHandlerWithMidtrans(paymentRepository, logger, access, midtransKey, frontendURL)
 	staffService := staffauth.New(db)
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
+	adminorders.NewHandler(adminorders.NewService(db, staffService), logger).Register(mux)
+	adminissues.NewHandler(adminissues.NewService(db, staffService, access, paymentRepository, midtransKey), logger).Register(mux)
+	if metrics == nil {
+		metrics = operations.NewService(db, staffService, operations.Process)
+	}
+	metrics.Register(mux)
 	recovery.NewHandler(db, access, logger, trustedProxies...).Register(mux)
 	checkinHandler := checkin.NewHandler(checkin.NewService(db, staffService), logger)
 	mux.HandleFunc("POST /api/v1/staff/check-ins", checkinHandler.CheckIn)
@@ -75,7 +89,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 		mux.HandleFunc("POST /api/v1/payments/midtrans/notification", paymentHandler.MidtransNotification)
 	}
 	mux.HandleFunc("/", staticHandler(staticDir))
-	return loggingMiddleware(logger, mux)
+	return loggingMiddleware(logger, mux, operations.Process)
 }
 
 func staticHandler(staticDir string) http.HandlerFunc {
@@ -109,7 +123,27 @@ func NewHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-func loggingMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusRecorder) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *statusRecorder) Write(value []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(value)
+}
+func (w *statusRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func loggingMiddleware(logger *slog.Logger, next http.Handler, tracker *operations.Tracker) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
 		if requestID == "" {
@@ -122,7 +156,13 @@ func loggingMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Request-ID", requestID)
 		started := time.Now()
-		next.ServeHTTP(w, r)
-		logger.InfoContext(context.Background(), "http request", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "duration", time.Since(started).String())
+		recorder := &statusRecorder{ResponseWriter: w}
+		next.ServeHTTP(recorder, r)
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		tracker.Request(status, time.Now().UTC())
+		logger.InfoContext(context.Background(), "http request", "request_id", requestID, "method", r.Method, "path", r.URL.Path, "status", status, "duration", time.Since(started).String())
 	})
 }

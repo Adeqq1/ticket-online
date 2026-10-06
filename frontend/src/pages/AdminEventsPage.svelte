@@ -85,7 +85,7 @@
   <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut || saving} onclick={onLogout}>Keluar</button></header>
   <main id="event-admin-content" class="staff-admin-content">
     <div class="staff-admin-heading"><div><p class="scan-kicker">KATALOG EVENT <span>•</span> ADMIN</p><h1>Kelola konser.</h1><p>Atur informasi, jadwal, lineup, poster, dan publikasi konser.</p></div><button class="staff-secondary-button" type="button" disabled={saving} onclick={startNew}>Tambah konser</button></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a aria-current="page" href="/admin/events">Konser</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+    <nav class="admin-tool-nav" aria-label="Administrasi event"><a aria-current="page" href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
 
     <div class="staff-admin-grid event-admin-grid">
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
