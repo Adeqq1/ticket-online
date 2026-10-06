@@ -1,4 +1,4 @@
-import type { OrderAccess } from "./order-access.ts";
+import { hasCheckoutMetadata, type OrderAccess } from "./order-access.ts";
 import type { StoredReservation } from "./reservation.ts";
 
 export function findOrderForActiveReservation(
@@ -7,5 +7,5 @@ export function findOrderForActiveReservation(
   basketKey: string,
 ) {
   if (!reservation?.reservationId) return null;
-  return orders.find((order) => order.reservationId === reservation.reservationId && order.basketKey === basketKey) ?? null;
+  return orders.filter(hasCheckoutMetadata).find((order) => order.reservationId === reservation.reservationId && order.basketKey === basketKey) ?? null;
 }

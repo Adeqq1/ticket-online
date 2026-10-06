@@ -5,6 +5,8 @@ export type Route =
   | { name: "checkout"; id: string }
   | { name: "ticket"; id: string }
   | { name: "my-tickets" }
+  | { name: "ticket-recovery" }
+  | { name: "order"; id: string }
   | { name: "guide" }
   | { name: "admin-login" }
   | { name: "admin-staff" }
@@ -17,12 +19,13 @@ export function matchRoute(pathname: string): Route {
   if (path === "/") return { name: "home" };
   if (path === "/konser") return { name: "concerts" };
   if (path === "/tiket-saya") return { name: "my-tickets" };
+  if (path === "/pulihkan-tiket") return { name: "ticket-recovery" };
   if (path === "/panduan") return { name: "guide" };
   if (path === "/admin/login") return { name: "admin-login" };
   if (path === "/admin/staff") return { name: "admin-staff" };
   if (path === "/admin/check-ins") return { name: "admin-check-ins" };
   if (path === "/admin/scan") return { name: "admin-scan" };
-  for (const [prefix, name] of [["/konser/", "concert-detail"], ["/checkout/", "checkout"], ["/tiket/", "ticket"]] as const) {
+  for (const [prefix, name] of [["/konser/", "concert-detail"], ["/checkout/", "checkout"], ["/tiket/", "ticket"], ["/pesanan/", "order"]] as const) {
     if (!path.startsWith(prefix)) continue;
     const encoded = path.slice(prefix.length);
     if (!encoded || encoded.includes("/")) return { name: "not-found" };

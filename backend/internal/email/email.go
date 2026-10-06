@@ -70,6 +70,12 @@ func (s *Service) process(ctx context.Context) {
 		s.logger.ErrorContext(ctx, "expire exhausted email claims", "error", err)
 		return
 	}
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM rate_limits WHERE reset_at < UTC_TIMESTAMP(6) LIMIT 1000"); err != nil && ctx.Err() == nil {
+		s.logger.ErrorContext(ctx, "delete expired rate limit buckets", "error", err)
+	}
+	if err := s.expireRecovery(ctx); err != nil && ctx.Err() == nil {
+		s.logger.ErrorContext(ctx, "expire recovery email jobs", "error", err)
+	}
 	if s.config.Host == "" || ctx.Err() != nil {
 		return
 	}
@@ -87,18 +93,18 @@ func (s *Service) process(ctx context.Context) {
 		}
 		if err := s.send(ctx, job); err != nil {
 			if ctx.Err() == nil {
-				s.logger.WarnContext(ctx, "order email failed", "order_id", job.orderID, "attempt", job.attempts, "error", err)
+				s.logger.WarnContext(ctx, "email failed", "job_id", job.id, "kind", job.kind, "attempt", job.attempts, "error", err)
 			}
 			continue
 		}
-		s.logger.InfoContext(ctx, "order email sent", "order_id", job.orderID, "attempt", job.attempts)
+		s.logger.InfoContext(ctx, "email sent", "job_id", job.id, "kind", job.kind, "attempt", job.attempts)
 	}
 }
 
 func (s *Service) enqueuePaid(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `INSERT IGNORE INTO email_queue
-		(order_id, recipient, status, attempts, next_attempt_at, last_error, created_at, updated_at)
-		SELECT o.id, b.email, 'PENDING', 0, UTC_TIMESTAMP(6), '', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+		(id, kind, dedupe_key, order_id, recipient, status, attempts, next_attempt_at, last_error, created_at, updated_at)
+		SELECT o.id, 'TICKETS', CONCAT('tickets:', o.id), o.id, b.email, 'PENDING', 0, UTC_TIMESTAMP(6), '', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
 		FROM orders o
 		JOIN payments p ON p.order_id = o.id AND p.status = 'SUCCEEDED' AND p.paid_at >= (
 			SELECT applied_at FROM schema_migrations WHERE version = 13
@@ -107,7 +113,7 @@ func (s *Service) enqueuePaid(ctx context.Context) error {
 		JOIN (SELECT order_id, COUNT(*) AS issued FROM etickets GROUP BY order_id) e ON e.order_id = o.id
 		JOIN (SELECT order_id, SUM(quantity) AS expected FROM order_items GROUP BY order_id) i ON i.order_id = o.id
 		WHERE o.status = 'PAID' AND e.issued = i.expected
-		AND NOT EXISTS (SELECT 1 FROM email_queue q WHERE q.order_id = o.id)`)
+		AND NOT EXISTS (SELECT 1 FROM email_queue q WHERE q.dedupe_key = CONCAT('tickets:', o.id))`)
 	if err != nil {
 		return fmt.Errorf("insert newly paid orders into email queue: %w", err)
 	}
@@ -115,8 +121,8 @@ func (s *Service) enqueuePaid(ctx context.Context) error {
 }
 
 type job struct {
-	orderID, recipient, claimToken string
-	attempts                       int
+	id, kind, orderID, requestID, recipient, claimToken string
+	attempts                                            int
 }
 
 func (s *Service) claim(ctx context.Context) (job, bool, error) {
@@ -126,16 +132,18 @@ func (s *Service) claim(ctx context.Context) (job, bool, error) {
 	}
 	defer tx.Rollback()
 	var result job
-	err = tx.QueryRowContext(ctx, `SELECT order_id, recipient, attempts
+	var orderID, requestID sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT id, kind, order_id, recovery_request_id, recipient, attempts
 		FROM email_queue WHERE attempts < ? AND ((status = 'PENDING' AND next_attempt_at <= UTC_TIMESTAMP(6))
 		OR (status = 'PROCESSING' AND lease_until <= UTC_TIMESTAMP(6)))
-		ORDER BY next_attempt_at, order_id LIMIT 1 FOR UPDATE SKIP LOCKED`, maxAttempts).Scan(&result.orderID, &result.recipient, &result.attempts)
+		ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, maxAttempts).Scan(&result.id, &result.kind, &orderID, &requestID, &result.recipient, &result.attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return job{}, false, tx.Commit()
 	}
 	if err != nil {
 		return job{}, false, fmt.Errorf("select email job: %w", err)
 	}
+	result.orderID, result.requestID = orderID.String, requestID.String
 	token, err := randomID()
 	if err != nil {
 		return job{}, false, err
@@ -144,7 +152,7 @@ func (s *Service) claim(ctx context.Context) (job, bool, error) {
 	result.claimToken = token
 	if _, err := tx.ExecContext(ctx, `UPDATE email_queue SET status = 'PROCESSING', attempts = ?,
 		lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), claim_token = ?, updated_at = UTC_TIMESTAMP(6)
-		WHERE order_id = ?`, result.attempts, int(leaseTime.Seconds()), token, result.orderID); err != nil {
+		WHERE id = ?`, result.attempts, int(leaseTime.Seconds()), token, result.id); err != nil {
 		return job{}, false, fmt.Errorf("update email claim: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -175,6 +183,9 @@ type ticket struct {
 }
 
 func (s *Service) send(ctx context.Context, current job) error {
+	if current.kind == "RECOVERY" {
+		return s.sendRecovery(ctx, current)
+	}
 	if !mailbox(current.recipient) {
 		return s.finishFailure(ctx, current, "alamat penerima tidak valid")
 	}
@@ -244,12 +255,20 @@ func (s *Service) send(ctx context.Context, current job) error {
 	for i := range tickets {
 		tickets[i].link = s.config.FrontendURL + "/tiket/" + url.PathEscape(tickets[i].ID) + "#access_token=" + url.QueryEscape(access)
 	}
-	if err := s.deliver(ctx, current, summary, items, tickets); err != nil {
+	body, from, to, err := renderMessage(s.config, current, summary, items, tickets)
+	if err != nil {
 		return s.retry(ctx, current, err.Error())
 	}
+	if err := s.deliver(ctx, body, from, to); err != nil {
+		return s.retry(ctx, current, err.Error())
+	}
+	return s.markSent(ctx, current)
+}
+
+func (s *Service) markSent(ctx context.Context, current job) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE email_queue SET status = 'SENT', sent_at = UTC_TIMESTAMP(6),
 		lease_until = NULL, claim_token = NULL, last_error = '', updated_at = UTC_TIMESTAMP(6)
-		WHERE order_id = ? AND status = 'PROCESSING' AND claim_token = ?`, current.orderID, current.claimToken)
+		WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?`, current.id, current.claimToken)
 	if err != nil {
 		return fmt.Errorf("record sent email: %w", err)
 	}
@@ -270,7 +289,7 @@ func (s *Service) retry(ctx context.Context, current job, reason string) error {
 	}
 	_, err := s.db.ExecContext(ctx, `UPDATE email_queue SET status = ?, next_attempt_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND),
 		lease_until = NULL, claim_token = NULL, last_error = ?, updated_at = UTC_TIMESTAMP(6)
-		WHERE order_id = ? AND status = 'PROCESSING' AND claim_token = ?`, status, int(delay.Seconds()), truncate(reason, 512), current.orderID, current.claimToken)
+		WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?`, status, int(delay.Seconds()), truncate(reason, 512), current.id, current.claimToken)
 	if err != nil {
 		return fmt.Errorf("record email failure: %w", err)
 	}
@@ -280,7 +299,7 @@ func (s *Service) retry(ctx context.Context, current job, reason string) error {
 func (s *Service) finishFailure(ctx context.Context, current job, reason string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE email_queue SET status = 'FAILED', lease_until = NULL,
 		claim_token = NULL, last_error = ?, updated_at = UTC_TIMESTAMP(6)
-		WHERE order_id = ? AND status = 'PROCESSING' AND claim_token = ?`, truncate(reason, 512), current.orderID, current.claimToken)
+		WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?`, truncate(reason, 512), current.id, current.claimToken)
 	if err != nil {
 		return fmt.Errorf("record permanent email failure: %w", err)
 	}
@@ -353,9 +372,10 @@ func smtpHost(host string) bool {
 
 func subject(value string) string { return mime.QEncoding.Encode("UTF-8", value) }
 
-func messageID(orderID, frontendURL string) string {
+// messageID is unique per delivery attempt; mail clients may hide a resend that reuses an earlier Message-ID.
+func messageID(jobID, claimToken, frontendURL string) string {
 	parsed, _ := url.Parse(frontendURL)
-	return "<ticket-order-" + orderID + "@" + parsed.Hostname() + ">"
+	return "<ticket-" + jobID + "-" + claimToken + "@" + parsed.Hostname() + ">"
 }
 
 func cleanError(err error, phase string) error {
@@ -365,11 +385,7 @@ func cleanError(err error, phase string) error {
 	return fmt.Errorf("SMTP %s gagal", phase)
 }
 
-func (s *Service) deliver(ctx context.Context, current job, summary orderSummary, items []line, tickets []ticket) error {
-	body, from, to, err := renderMessage(s.config, current, summary, items, tickets)
-	if err != nil {
-		return err
-	}
+func (s *Service) deliver(ctx context.Context, body []byte, from, to string) error {
 	endpoint := net.JoinHostPort(s.config.Host, strconv.Itoa(s.config.Port))
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	connection, err := dialer.DialContext(ctx, "tcp", endpoint)
@@ -449,14 +465,6 @@ func (s *Service) deliver(ctx context.Context, current job, summary orderSummary
 }
 
 func renderMessage(config Config, current job, summary orderSummary, items []line, tickets []ticket) ([]byte, string, string, error) {
-	from, err := formatAddress(config.From)
-	if err != nil || !safeURL(config.FrontendURL) || !smtpHost(config.Host) {
-		return nil, "", "", errors.New("konfigurasi pengiriman email tidak valid")
-	}
-	to, err := formatAddress(current.recipient)
-	if err != nil {
-		return nil, "", "", errors.New("alamat penerima tidak valid")
-	}
 	date := eventTime(summary.startsAt)
 	var plain strings.Builder
 	fmt.Fprintf(&plain, "Halo %s,\n\nPembayaran pesanan %s berhasil. Berikut ringkasan tiketmu.\n\n%s\n%s\n%s\n%s\n%s\n\nRincian pesanan:\n", summary.buyer, summary.reference, summary.artist, summary.venue, summary.address, summary.city, date)
@@ -479,16 +487,28 @@ func renderMessage(config Config, current job, summary orderSummary, items []lin
 		fmt.Fprintf(&html, "<li>%s — %s, Gate %s · Kode %s · <a href=\"%s\">Buka e-ticket</a></li>", escaped(value.AttendeeName), escaped(value.TierName), escaped(value.Gate), escaped(value.Code), escaped(value.link))
 	}
 	fmt.Fprintln(&html, "</ul><p>Tunjukkan QR atau kode e-ticket kepada petugas di gate.</p></body></html>")
+	return compose(config, current, "E-ticket pesanan "+summary.reference, plain.String(), html.String())
+}
 
+// compose validates the envelope and wraps plain and HTML bodies in one multipart/alternative message.
+func compose(config Config, current job, subjectText, plain, html string) ([]byte, string, string, error) {
+	from, err := formatAddress(config.From)
+	if err != nil || !safeURL(config.FrontendURL) || !smtpHost(config.Host) {
+		return nil, "", "", errors.New("konfigurasi pengiriman email tidak valid")
+	}
+	to, err := formatAddress(current.recipient)
+	if err != nil {
+		return nil, "", "", errors.New("alamat penerima tidak valid")
+	}
 	var body strings.Builder
 	multipartWriter := multipart.NewWriter(&body)
 	var headers strings.Builder
 	fmt.Fprintf(&headers, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n",
-		(&mail.Address{Address: from}).String(), (&mail.Address{Address: to}).String(), subject("E-ticket pesanan "+summary.reference), time.Now().UTC().Format(time.RFC1123Z), messageID(current.orderID, config.FrontendURL), multipartWriter.Boundary())
+		(&mail.Address{Address: from}).String(), (&mail.Address{Address: to}).String(), subject(subjectText), time.Now().UTC().Format(time.RFC1123Z), messageID(current.id, current.claimToken, config.FrontendURL), multipartWriter.Boundary())
 	if _, err := body.WriteString(headers.String()); err != nil {
 		return nil, "", "", errors.New("pesan email tidak dapat dibuat")
 	}
-	for _, part := range []struct{ contentType, value string }{{"text/plain; charset=utf-8", plain.String()}, {"text/html; charset=utf-8", html.String()}} {
+	for _, part := range []struct{ contentType, value string }{{"text/plain; charset=utf-8", plain}, {"text/html; charset=utf-8", html}} {
 		partHeaders := make(textproto.MIMEHeader)
 		partHeaders.Set("Content-Type", part.contentType)
 		partHeaders.Set("Content-Transfer-Encoding", "quoted-printable")

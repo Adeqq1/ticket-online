@@ -17,6 +17,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
+	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
@@ -38,6 +39,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	paymentHandler := payment.NewHandlerWithMidtrans(payment.NewRepository(db), logger, access, midtransKey, frontendURL)
 	staffService := staffauth.New(db)
 	staffauth.NewHandler(staffService, logger).Register(mux)
+	recovery.NewHandler(db, access, logger).Register(mux)
 	checkinHandler := checkin.NewHandler(checkin.NewService(db, staffService), logger)
 	mux.HandleFunc("POST /api/v1/staff/check-ins", checkinHandler.CheckIn)
 	mux.HandleFunc("GET /api/v1/staff/ticket-status", checkinHandler.TicketStatus)

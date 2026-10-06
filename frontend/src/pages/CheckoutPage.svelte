@@ -4,7 +4,7 @@
   import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, voucherDiscount, type Buyer } from "../lib/checkout.ts";
-  import { hasPersistentOrderAccess, listOrderAccess, saveOrderAccess, type OrderAccess } from "../lib/order-access.ts";
+  import { hasPersistentOrderAccess, listOrderAccess, saveOrderAccess, type CheckoutOrderAccess } from "../lib/order-access.ts";
   import { findOrderForActiveReservation } from "../lib/checkout-recovery.ts";
   import Toast from "../components/Toast.svelte";
   import { concertTerms } from "../lib/terms.ts";
@@ -17,7 +17,7 @@
   let reservation = $state<Reservation | undefined>();
   let reservationError = $state("");
   let creatingReservation = $state(false);
-  let activeOrder = $state<OrderBase | undefined>(); let orderAccess = $state<OrderAccess | null>(null); let paymentStatus = $state(""); let checkoutUncertain = $state(false); let paymentUncertain = $state(false); let pendingCheckoutPayload = $state<CreateOrderRequest | null>(null); let restartCheckoutRequired = $state(false);
+  let activeOrder = $state<OrderBase | undefined>(); let orderAccess = $state<CheckoutOrderAccess | null>(null); let paymentStatus = $state(""); let checkoutUncertain = $state(false); let paymentUncertain = $state(false); let pendingCheckoutPayload = $state<CreateOrderRequest | null>(null); let restartCheckoutRequired = $state(false);
   let issuedTickets = $state<ApiTicket[]>([]);
   const subtotal = $derived(activeOrder?.subtotal ?? reservation?.subtotal ?? 0);
   let step = $state(1); let payment = $state<PaymentMethod | "">(""); let voucherInput = $state(""); let voucher = $state(""); let completed = $state(false); let ticketIds = $state<string[]>([]); let reference = $state(""); let storageFailed = $state(false);
@@ -90,7 +90,7 @@
     else { storageFailed = true; showToast("Akses pesanan hanya tersimpan selama halaman ini terbuka.", "error"); }
     return saved;
   }
-  async function restoreOrder(detail: OrderDetail, access: OrderAccess, signal?: AbortSignal) {
+  async function restoreOrder(detail: OrderDetail, access: CheckoutOrderAccess, signal?: AbortSignal) {
     if (!concert) return;
     checkoutUncertain = false;
     pendingCheckoutPayload = null;

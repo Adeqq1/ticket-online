@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,6 +47,17 @@ func (a *Access) Token(orderID string) string {
 	mac := hmac.New(sha256.New, a.secret)
 	_, _ = mac.Write([]byte("ticket-online/order-access/v1:" + orderID))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// Digest returns a hex HMAC for values that must be matched without being stored, such as limiter identities.
+func (a *Access) Digest(purpose string, values ...string) string {
+	mac := hmac.New(sha256.New, a.secret)
+	_, _ = mac.Write([]byte("ticket-online/" + purpose + "/v1"))
+	for _, value := range values {
+		_, _ = mac.Write([]byte{0})
+		_, _ = mac.Write([]byte(value))
+	}
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (a *Access) Issue(ctx context.Context, orderID string) (string, time.Time, error) {

@@ -10,8 +10,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 13 {
-		t.Fatalf("migration count = %d, want 13", len(items))
+	if len(items) != 14 {
+		t.Fatalf("migration count = %d, want 14", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -23,6 +23,9 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	}
 	if !strings.Contains(string(items[12].data), "CREATE TABLE IF NOT EXISTS email_queue") {
 		t.Fatal("email queue migration was not loaded")
+	}
+	if !strings.Contains(string(items[13].data), "CREATE TABLE IF NOT EXISTS recovery_tokens") {
+		t.Fatal("ticket recovery migration was not loaded")
 	}
 }
 
