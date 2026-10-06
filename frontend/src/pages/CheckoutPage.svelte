@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { createOrder, createReservation, createSnapPayment, getEvent, getOrder, getReservation, listOrderTickets, simulatePayment, ApiError, type ApiTicket, type CreateOrderRequest, type OrderBase, type OrderDetail, type OrderResponse, type PaymentMethod, type Reservation } from "../lib/api.ts";
+  import { createOrder, createReservation, createSnapPayment, getEvent, getReservationEvent, getOrder, getReservation, listOrderTickets, simulatePayment, ApiError, type ApiTicket, type CreateOrderRequest, type OrderBase, type OrderDetail, type OrderResponse, type PaymentMethod, type Reservation } from "../lib/api.ts";
   import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, voucherDiscount, type Buyer } from "../lib/checkout.ts";
@@ -33,6 +33,18 @@
   const completionKey = $derived(`${reservationKey}:completed`);
   const checkoutAttemptKey = $derived(`${reservationKey}:checkout-attempt`);
   const simulationEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATION === "true";
+  function savedReservationForEvent(): StoredReservation | null {
+    try {
+      const prefix = `ticket-online:reservation:${encodeURIComponent(id)}:`;
+      for (let index = 0; index < sessionStorage.length; index++) {
+        const key = sessionStorage.key(index);
+        if (!key?.startsWith(prefix)) continue;
+        const saved = parseStoredReservation(sessionStorage.getItem(key));
+        if (saved?.eventId === id && saved.reservationId) return saved;
+      }
+    } catch { /* browser storage may be unavailable */ }
+    return null;
+  }
   async function goToStep(next: number) { step = next; await tick(); const name = next === 1 ? "buyer" : next === 2 ? "payment" : "confirmation"; const heading = document.querySelector<HTMLElement>(`#${name}-title`); heading?.focus(); heading?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }
   function validate(name: keyof Buyer) {
     const value = buyer[name].trim(); buyer[name] = value;
@@ -305,7 +317,20 @@
   onMount(() => {
     const controller = new AbortController();
     let cleanupReservation: (() => void) | undefined;
-    getEvent(id, controller.signal).then(async (event) => { if (!controller.signal.aborted) { concert = event; loading = false; cleanupReservation = await setupReservation(controller.signal); } }).catch((value) => { if (!controller.signal.aborted) { loadError = value instanceof ApiError && value.code === "EVENT_NOT_FOUND" ? "not-found" : value instanceof ApiError ? value.message : "Checkout belum dapat dimuat."; loading = false; } });
+    (async () => {
+      try {
+        let event: Concert;
+        try { event = await getEvent(id, controller.signal); }
+        catch (cause) {
+          const saved = cause instanceof ApiError && cause.code === "EVENT_NOT_FOUND" ? savedReservationForEvent() : null;
+          if (!saved?.reservationId) throw cause;
+          event = await getReservationEvent(saved.reservationId, saved.idempotencyKey, controller.signal);
+        }
+        if (!controller.signal.aborted) { concert = event; loading = false; cleanupReservation = await setupReservation(controller.signal); }
+      } catch (value) {
+        if (!controller.signal.aborted) { loadError = value instanceof ApiError && value.code === "EVENT_NOT_FOUND" ? "not-found" : value instanceof ApiError ? value.message : "Checkout belum dapat dimuat."; loading = false; }
+      }
+    })();
     return () => { controller.abort(); cleanupReservation?.(); };
   });
 </script>

@@ -125,6 +125,13 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 15 {
+		if err := resumeEventPublication(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -143,6 +150,24 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		return fmt.Errorf("commit migration %s: %w", item.name, err)
 	}
 	return nil
+}
+
+func resumeEventPublication(ctx context.Context, db *sql.Conn) error {
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'events' AND COLUMN_NAME = 'publication_status')`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE events ADD COLUMN publication_status ENUM('DRAFT', 'PUBLISHED', 'ARCHIVED') NOT NULL DEFAULT 'PUBLISHED'"); err != nil {
+			return err
+		}
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE events SET publication_status = 'PUBLISHED'"); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, "ALTER TABLE events ALTER COLUMN publication_status SET DEFAULT 'DRAFT'")
+	return err
 }
 
 // ponytail: only upgrade 014 needs schema-aware recovery; extend per-upgrade when another non-atomic DDL upgrade is introduced.

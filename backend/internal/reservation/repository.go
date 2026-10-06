@@ -57,11 +57,14 @@ func (r *Repository) Create(ctx context.Context, request Request, idempotencyKey
 		return Reservation{}, fmt.Errorf("check idempotency: %w", err)
 	}
 
-	var eventArtist string
-	if err := tx.QueryRowContext(ctx, "SELECT artist FROM events WHERE id = ?", request.EventID).Scan(&eventArtist); errors.Is(err, sql.ErrNoRows) {
+	var eventArtist, publicationStatus string
+	if err := tx.QueryRowContext(ctx, "SELECT artist, publication_status FROM events WHERE id = ? FOR SHARE", request.EventID).Scan(&eventArtist, &publicationStatus); errors.Is(err, sql.ErrNoRows) {
 		return Reservation{}, ErrEventNotFound
 	} else if err != nil {
 		return Reservation{}, fmt.Errorf("check event: %w", err)
+	}
+	if publicationStatus != "PUBLISHED" {
+		return Reservation{}, ErrEventNotFound
 	}
 	items := append([]ItemRequest(nil), request.Items...)
 	sort.Slice(items, func(i, j int) bool { return items[i].TierID < items[j].TierID })

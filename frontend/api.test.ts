@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { ApiError, checkInTicket, createOrder, createStaff, getAdminCheckInHistory, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, replaceStaffAssignments, resetStaffPassword, simulatePayment, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
+import { ApiError, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminCheckInHistory, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, replaceStaffAssignments, resetStaffPassword, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
-  startsAt: "2027-08-24T12:30:00Z", genre: "Indie", status: "Early Bird", image: "https://example.com/nusa.jpg",
+  startsAt: "2027-08-24T12:30:00Z", genre: "Indie", status: "Early Bird", publicationStatus: "PUBLISHED", scheduleLocked: false, image: "https://example.com/nusa.jpg",
   description: "Deskripsi", lineup: ["Nusa Malam"], price: 225000,
   zones: [{ id: "festival", name: "Festival", description: "Area umum" }],
   ticketTiers: [{ id: "festival", name: "Festival", zoneId: "festival", price: 225000, availableQuantity: 42, maxPerOrder: 6, benefit: "Area berdiri", gate: "Gate B", seating: "free-standing" }],
@@ -14,6 +14,23 @@ test("maps API catalog DTO to the frontend concert model", () => {
   expect(concert.date).toContain("Selasa, 24 Agustus 2027");
   expect(concert.ticketTiers[0]).toMatchObject({ stock: 42, maxPerOrder: 6, price: 225000 });
   expect(concert.ticketTiers[0]?.seating).toBe("free-standing");
+});
+
+test("admin event APIs use the private admin routes and preserve publication status", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify(calls.length === 1 ? { events: [apiEvent] } : apiEvent), { status: calls.length === 2 ? 201 : 200 });
+  }) as typeof fetch;
+  try {
+    expect(await getAdminEvents("staff-token")).toHaveLength(1);
+    await createAdminEvent("staff-token", { ...apiEvent, startsAt: "2027-08-24T12:30:00Z" });
+    await updateAdminEvent("staff-token", apiEvent.id, { ...apiEvent, startsAt: "2027-08-24T12:30:00Z" });
+    expect(calls.map((call) => call.url)).toEqual(["/api/v1/admin/events", "/api/v1/admin/events", "/api/v1/admin/events/nusa-malam"]);
+    expect(calls.every((call) => new Headers(call.init?.headers).get("Authorization") === "Bearer staff-token")).toBe(true);
+    expect(JSON.parse(String(calls[1]?.init?.body)).publicationStatus).toBe("PUBLISHED");
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("parses backend error responses without treating them as success", async () => {

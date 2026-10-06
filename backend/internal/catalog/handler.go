@@ -9,20 +9,22 @@ import (
 )
 
 type Event struct {
-	ID          string       `json:"id"`
-	Artist      string       `json:"artist"`
-	City        string       `json:"city"`
-	Venue       string       `json:"venue"`
-	Address     string       `json:"address"`
-	StartsAt    string       `json:"startsAt"`
-	Genre       string       `json:"genre"`
-	Status      string       `json:"status"`
-	Image       string       `json:"image"`
-	Description string       `json:"description"`
-	Lineup      []string     `json:"lineup"`
-	Price       uint64       `json:"price"`
-	Zones       []Zone       `json:"zones"`
-	TicketTiers []TicketTier `json:"ticketTiers"`
+	ID                string       `json:"id"`
+	Artist            string       `json:"artist"`
+	City              string       `json:"city"`
+	Venue             string       `json:"venue"`
+	Address           string       `json:"address"`
+	StartsAt          string       `json:"startsAt"`
+	Genre             string       `json:"genre"`
+	Status            string       `json:"status"`
+	PublicationStatus string       `json:"publicationStatus"`
+	Image             string       `json:"image"`
+	Description       string       `json:"description"`
+	Lineup            []string     `json:"lineup"`
+	Price             uint64       `json:"price"`
+	Zones             []Zone       `json:"zones"`
+	TicketTiers       []TicketTier `json:"ticketTiers"`
+	ScheduleLocked    bool         `json:"scheduleLocked"`
 }
 
 type Zone struct {
@@ -68,6 +70,26 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event, err := h.service.GetEvent(r.Context(), id)
+	if errors.Is(err, ErrEventNotFound) {
+		writeError(w, http.StatusNotFound, "EVENT_NOT_FOUND", "Event tidak ditemukan")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, event)
+}
+
+func (h *Handler) ReservationDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	id := strings.TrimSpace(r.PathValue("reservationID"))
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(id) != 32 || len(key) < 16 || len(key) > 100 {
+		writeError(w, http.StatusNotFound, "EVENT_NOT_FOUND", "Event tidak ditemukan")
+		return
+	}
+	event, err := h.service.repository.ReservationEvent(r.Context(), id, key)
 	if errors.Is(err, ErrEventNotFound) {
 		writeError(w, http.StatusNotFound, "EVENT_NOT_FOUND", "Event tidak ditemukan")
 		return
