@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -69,7 +70,7 @@ func TestAdminLifecycleLocksAuditsArchivesAndPreservesReservationSnapshot(t *tes
 
 	eventID := "admin-test-" + suffix[:12]
 	actor := AdminActor{ID: "00000000000000000000000000000001", Name: "Admin Integration"}
-	now := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	now := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second).Add(123456 * time.Microsecond)
 	input := EventInput{ID: eventID, Artist: "Admin Test", City: "Jakarta", Venue: "Venue A", Address: "Address A", StartsAt: &now, Genre: "Pop", Status: "PRESALE", PublicationStatus: "DRAFT", Image: "https://example.test/poster.jpg", Description: "Test", Lineup: []string{"Admin Test"}}
 	repo := NewRepository(db)
 	if err := repo.CreateEvent(ctx, input, actor); err != nil {
@@ -105,16 +106,31 @@ func TestAdminLifecycleLocksAuditsArchivesAndPreservesReservationSnapshot(t *tes
 	}
 
 	reservations := reservation.NewRepository(db, 15*time.Minute)
-	held, err := reservations.Create(ctx, reservation.Request{EventID: eventID, Items: []reservation.ItemRequest{{TierID: "general", Quantity: 1}}}, "admin-lifecycle-"+suffix)
+	held, err := reservations.Create(ctx, reservation.Request{EventID: eventID, Items: []reservation.ItemRequest{{TierID: "general", Quantity: 4}}}, "admin-lifecycle-"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.SaveTier(ctx, eventID, TierInput{ID: tier.ID, Name: tier.Name, ZoneID: tier.ZoneID, Price: 20000, Capacity: tier.Capacity, MaxPerOrder: tier.MaxPerOrder, Benefit: tier.Benefit, Gate: tier.Gate, Seating: tier.Seating}, false, actor); err != nil {
+	if err := repo.SaveTier(ctx, eventID, TierInput{ID: tier.ID, Name: tier.Name, ZoneID: tier.ZoneID, Price: 20000, Capacity: 12, MaxPerOrder: 2, Benefit: tier.Benefit, Gate: tier.Gate, Seating: tier.Seating}, false, actor); err != nil {
 		t.Fatal(err)
 	}
-	if held.Items[0].UnitPrice != 10000 {
+	if held.Items[0].UnitPrice != 10000 || held.Items[0].Quantity != 4 {
 		t.Fatalf("held unit price = %d, want original price", held.Items[0].UnitPrice)
 	}
+	adminEvent, err := repo.adminDetail(ctx, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startsAtFromAPI, err := time.Parse(time.RFC3339Nano, adminEvent.StartsAt)
+	if err != nil || !startsAtFromAPI.Equal(now) {
+		t.Fatalf("admin startsAt = %q (%v), want %s", adminEvent.StartsAt, err, now.Format(time.RFC3339Nano))
+	}
+	metadataOnly := input
+	metadataOnly.Description = "Metadata updated after reservation"
+	metadataOnly.StartsAt = &startsAtFromAPI
+	if err := repo.UpdateEvent(ctx, eventID, metadataOnly, actor); err != nil {
+		t.Fatalf("metadata update with API schedule snapshot: %v", err)
+	}
+	assertTierAuditAvailability(t, ctx, db, eventID, 8)
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var concurrent sync.WaitGroup
@@ -123,7 +139,7 @@ func TestAdminLifecycleLocksAuditsArchivesAndPreservesReservationSnapshot(t *tes
 	go func() {
 		defer concurrent.Done()
 		<-start
-		results <- repo.SaveTier(ctx, eventID, TierInput{ID: tier.ID, Name: tier.Name, ZoneID: tier.ZoneID, Price: 20000, Capacity: 2, MaxPerOrder: tier.MaxPerOrder, Benefit: tier.Benefit, Gate: tier.Gate, Seating: tier.Seating}, false, actor)
+		results <- repo.SaveTier(ctx, eventID, TierInput{ID: tier.ID, Name: tier.Name, ZoneID: tier.ZoneID, Price: 20000, Capacity: 5, MaxPerOrder: 2, Benefit: tier.Benefit, Gate: tier.Gate, Seating: tier.Seating}, false, actor)
 	}()
 	go func() {
 		defer concurrent.Done()
@@ -146,13 +162,25 @@ func TestAdminLifecycleLocksAuditsArchivesAndPreservesReservationSnapshot(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.TicketTiers) != 1 || detail.TicketTiers[0].Capacity != 2 || detail.TicketTiers[0].BoundQuantity != 2 || detail.TicketTiers[0].AvailableQuantity != 0 {
+	if len(detail.TicketTiers) != 1 || detail.TicketTiers[0].Capacity != 5 || detail.TicketTiers[0].BoundQuantity != 5 || detail.TicketTiers[0].AvailableQuantity != 0 {
 		t.Fatalf("concurrent capacity result = %+v", detail.TicketTiers)
+	}
+	assertTierAuditAvailability(t, ctx, db, eventID, 0)
+	var auditCountBefore int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_audit_log WHERE object_id = ?`, eventID+"/general").Scan(&auditCountBefore); err != nil {
+		t.Fatal(err)
 	}
 	tooSmall := tier
 	tooSmall.Capacity = 0
 	if err := repo.SaveTier(ctx, eventID, tooSmall, false, actor); !errors.Is(err, ErrCapacityBelowBound) {
 		t.Fatalf("capacity error = %v, want ErrCapacityBelowBound", err)
+	}
+	var auditCountAfter int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_audit_log WHERE object_id = ?`, eventID+"/general").Scan(&auditCountAfter); err != nil {
+		t.Fatal(err)
+	}
+	if auditCountAfter != auditCountBefore {
+		t.Fatalf("rejected capacity update wrote an audit entry: before=%d after=%d", auditCountBefore, auditCountAfter)
 	}
 	changedGate := tier
 	changedGate.Gate = "Gate B"
@@ -160,25 +188,25 @@ func TestAdminLifecycleLocksAuditsArchivesAndPreservesReservationSnapshot(t *tes
 		t.Fatalf("gate error = %v, want ErrGateLocked", err)
 	}
 
-	changedLocation := input
+	changedLocation := metadataOnly
 	changedLocation.Venue = "Venue B"
 	if err := repo.UpdateEvent(ctx, eventID, changedLocation, actor); !errors.Is(err, ErrLocationLocked) {
 		t.Fatalf("location error = %v, want ErrLocationLocked", err)
 	}
-	changedSchedule := input
+	changedSchedule := metadataOnly
 	later := now.Add(time.Hour)
 	changedSchedule.StartsAt = &later
 	if err := repo.UpdateEvent(ctx, eventID, changedSchedule, actor); !errors.Is(err, ErrScheduleLocked) {
 		t.Fatalf("schedule error = %v, want ErrScheduleLocked", err)
 	}
-	orderRequest := checkout.Request{Buyer: checkout.Buyer{Name: "Buyer Test", Email: "buyer@example.test", Phone: "081234567890", Identity: "123456789012"}, Attendees: []checkout.Attendees{{TierID: "general", Names: []string{"Attendee One"}}}}
+	orderRequest := checkout.Request{Buyer: checkout.Buyer{Name: "Buyer Test", Email: "buyer@example.test", Phone: "081234567890", Identity: "123456789012"}, Attendees: []checkout.Attendees{{TierID: "general", Names: []string{"Attendee One", "Attendee Two", "Attendee Three", "Attendee Four"}}}}
 	order, _, err := checkout.NewRepository(db).Create(ctx, held.ID, "admin-lifecycle-"+suffix, orderRequest)
 	if err != nil {
 		t.Fatalf("create pending order before archive: %v", err)
 	}
 
-	input.PublicationStatus = "ARCHIVED"
-	if err := repo.UpdateEvent(ctx, eventID, input, actor); err != nil {
+	metadataOnly.PublicationStatus = "ARCHIVED"
+	if err := repo.UpdateEvent(ctx, eventID, metadataOnly, actor); err != nil {
 		t.Fatalf("archive event: %v", err)
 	}
 	if _, err := repo.GetEvent(ctx, eventID); !errors.Is(err, ErrEventNotFound) {
@@ -205,6 +233,25 @@ func TestAdminLifecycleLocksAuditsArchivesAndPreservesReservationSnapshot(t *tes
 	}
 	if auditCount < 5 {
 		t.Fatalf("audit entries = %d, want at least 5", auditCount)
+	}
+}
+
+func assertTierAuditAvailability(t *testing.T, ctx context.Context, db *sql.DB, objectID string, want uint64) {
+	t.Helper()
+	var raw string
+	var stored uint64
+	err := db.QueryRowContext(ctx, `SELECT JSON_UNQUOTE(JSON_EXTRACT(a.after_json, '$.availableQuantity')), t.available_quantity
+		FROM admin_audit_log a JOIN ticket_tiers t ON t.event_id = ? AND t.slug = 'general'
+		WHERE a.object_id = ? AND a.object_type = 'TICKET_TIER' ORDER BY a.id DESC LIMIT 1`, objectID, objectID+"/general").Scan(&raw, &stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audited, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		t.Fatalf("invalid audited availableQuantity %q: %v", raw, err)
+	}
+	if audited != want || stored != want {
+		t.Fatalf("audited/database available quantity = %d/%d, want %d", audited, stored, want)
 	}
 }
 

@@ -5,15 +5,24 @@
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, voucherDiscount, type Buyer } from "../lib/checkout.ts";
   import { hasPersistentOrderAccess, listOrderAccess, saveOrderAccess, type CheckoutOrderAccess } from "../lib/order-access.ts";
-  import { findOrderForActiveReservation } from "../lib/checkout-recovery.ts";
+  import { findOrderForActiveReservation, orderMatchesReservation, restoredReservationQuantities } from "../lib/checkout-recovery.ts";
   import Toast from "../components/Toast.svelte";
   import { concertTerms } from "../lib/terms.ts";
   import { RESERVATION_DURATION_MS, isReservationExpired, remainingReservationSeconds, reservationBasketKey, parseCheckoutAttempt, parseStoredReservation, serializeStoredReservation, type StoredReservation } from "../lib/reservation.ts";
   let { id }: { id: string } = $props();
   let concert = $state<Concert | undefined>();
+  let restoredReservation = $state<Reservation | null>(null);
   let loading = $state(true);
   let loadError = $state("");
-  const lines = $derived(concert ? checkoutLines(concert, new URLSearchParams(location.search)) : []);
+  const lines = $derived.by(() => {
+    if (!concert) return [];
+    const currentConcert = concert;
+    if (!restoredReservation) return checkoutLines(currentConcert, new URLSearchParams(location.search));
+    return restoredReservation.items.flatMap((item) => {
+      const tier = currentConcert.ticketTiers.find((candidate) => candidate.id === item.tierId);
+      return tier ? [{ tier: { ...tier, name: item.name, price: item.unitPrice }, quantity: item.quantity }] : [];
+    });
+  });
   let reservation = $state<Reservation | undefined>();
   let reservationError = $state("");
   let creatingReservation = $state(false);
@@ -219,8 +228,42 @@
       else paymentError = value instanceof ApiError ? value.message : "Pesanan belum dapat dibuat. Coba lagi.";
     } finally { converting = false; }
   }
-  async function setupReservation(signal: AbortSignal) {
-    if (!concert || !lines.length) return;
+  async function setupReservation(signal: AbortSignal, recoveryHint: StoredReservation | null = null) {
+    if (!concert) return;
+    if (recoveryHint?.reservationId) {
+      creatingReservation = true;
+      reservationError = "";
+      try {
+        const confirmed = await getReservation(recoveryHint.reservationId, signal);
+        if (signal.aborted) return;
+        const quantities = restoredReservationQuantities(concert, id, new URLSearchParams(location.search), confirmed);
+        const confirmedKey = quantities ? reservationBasketKey(concert.id, quantities) : "";
+        const confirmedBasket = confirmedKey.slice(confirmedKey.lastIndexOf(":") + 1);
+        if (confirmed.id !== recoveryHint.reservationId || !quantities || recoveryHint.eventId !== concert.id || recoveryHint.basketKey !== confirmedBasket) {
+          throw new ApiError("Data reservasi tidak cocok dengan konser dan keranjang ini. Mulai checkout dari pilihan tiket yang tersimpan.", 409, "RESERVATION_MISMATCH");
+        }
+        if (["EXPIRED", "CANCELLED"].includes(confirmed.status)) {
+          reservationError = confirmed.status === "EXPIRED" ? "Reservasi ini sudah kedaluwarsa." : "Reservasi ini sudah dibatalkan.";
+          reservationExpired = true;
+          creatingReservation = false;
+          return;
+        }
+        restoredReservation = confirmed;
+        reservation = confirmed;
+        storedReservation = recoveryHint;
+        await tick();
+        if (reservationKey !== confirmedKey) throw new ApiError("Keranjang checkout berubah saat pemulihan reservasi.", 409, "RESERVATION_MISMATCH");
+        creatingReservation = false;
+        return setupReservation(signal);
+      } catch (value) {
+        if (signal.aborted) return;
+        reservationError = value instanceof ApiError ? value.message : "Reservasi sebelumnya belum dapat dimuat.";
+        restartCheckoutRequired = value instanceof ApiError && value.code === "RESERVATION_MISMATCH";
+        creatingReservation = false;
+        return;
+      }
+    }
+    if (!lines.length) return;
     creatingReservation = true;
     reservationError = "";
     let stored: StoredReservation | null = null;
@@ -231,6 +274,7 @@
       try {
         const detail = await getOrder(savedOrder.orderId, savedOrder.accessToken, signal);
         if (signal.aborted) return;
+        if (!reservation || !orderMatchesReservation(detail, reservation)) throw new ApiError("Order tidak cocok dengan snapshot reservasi.", 409, "RESERVATION_MISMATCH");
         if (detail.status === "PAID") {
           await restoreOrder(detail, savedOrder, signal);
           creatingReservation = false;
@@ -320,16 +364,16 @@
   onMount(() => {
     const controller = new AbortController();
     let cleanupReservation: (() => void) | undefined;
+    const recoveryHint = savedReservationForEvent();
     (async () => {
       try {
         let event: Concert;
         try { event = await getEvent(id, controller.signal); }
         catch (cause) {
-          const saved = cause instanceof ApiError && cause.code === "EVENT_NOT_FOUND" ? savedReservationForEvent() : null;
-          if (!saved?.reservationId) throw cause;
-          event = await getReservationEvent(saved.reservationId, saved.idempotencyKey, controller.signal);
+          if (!(cause instanceof ApiError && cause.code === "EVENT_NOT_FOUND" && recoveryHint?.reservationId)) throw cause;
+          event = await getReservationEvent(recoveryHint.reservationId, recoveryHint.idempotencyKey, controller.signal);
         }
-        if (!controller.signal.aborted) { concert = event; loading = false; cleanupReservation = await setupReservation(controller.signal); }
+        if (!controller.signal.aborted) { concert = event; loading = false; cleanupReservation = await setupReservation(controller.signal, recoveryHint); }
       } catch (value) {
         if (!controller.signal.aborted) { loadError = value instanceof ApiError && value.code === "EVENT_NOT_FOUND" ? "not-found" : value instanceof ApiError ? value.message : "Checkout belum dapat dimuat."; loading = false; }
       }

@@ -398,7 +398,7 @@ func formatStartsAt(value sql.NullTime) string {
 	if !value.Valid {
 		return ""
 	}
-	return value.Time.UTC().Format(time.RFC3339)
+	return value.Time.UTC().Format(time.RFC3339Nano)
 }
 
 func (r *Repository) adminDTO(ctx context.Context, event Event) (AdminEvent, error) {
@@ -535,6 +535,7 @@ func (r *Repository) SaveTier(ctx context.Context, eventID string, input TierInp
 		return err
 	}
 	var oldCapacity, available uint64
+	newAvailable := input.Capacity
 	var oldGate string
 	var tierID uint64
 	var before any
@@ -570,8 +571,8 @@ func (r *Repository) SaveTier(ctx context.Context, eventID string, input TierInp
 		if input.Capacity < bound {
 			return ErrCapacityBelowBound
 		}
-		available = input.Capacity - bound
-		_, err = tx.ExecContext(ctx, `UPDATE ticket_tiers SET name=?, zone_slug=?, price=?, capacity=?, available_quantity=?, max_per_order=?, benefit=?, gate=?, seating_mode=?, updated_at=UTC_TIMESTAMP(6) WHERE id=?`, input.Name, input.ZoneID, input.Price, input.Capacity, available, input.MaxPerOrder, input.Benefit, input.Gate, input.Seating, tierID)
+		newAvailable = input.Capacity - bound
+		_, err = tx.ExecContext(ctx, `UPDATE ticket_tiers SET name=?, zone_slug=?, price=?, capacity=?, available_quantity=?, max_per_order=?, benefit=?, gate=?, seating_mode=?, updated_at=UTC_TIMESTAMP(6) WHERE id=?`, input.Name, input.ZoneID, input.Price, input.Capacity, newAvailable, input.MaxPerOrder, input.Benefit, input.Gate, input.Seating, tierID)
 	} else {
 		_, err = tx.ExecContext(ctx, `INSERT INTO ticket_tiers (event_id, slug, name, zone_slug, price, capacity, available_quantity, max_per_order, benefit, gate, seating_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, eventID, input.ID, input.Name, input.ZoneID, input.Price, input.Capacity, input.Capacity, input.MaxPerOrder, input.Benefit, input.Gate, input.Seating)
 	}
@@ -582,13 +583,7 @@ func (r *Repository) SaveTier(ctx context.Context, eventID string, input TierInp
 		}
 		return fmt.Errorf("save ticket tier: %w", err)
 	}
-	var bound uint64
-	if create {
-		bound = 0
-	} else {
-		bound = oldCapacity - available
-	}
-	after := tierAuditValue{ID: input.ID, Name: input.Name, ZoneID: input.ZoneID, Price: input.Price, Capacity: input.Capacity, AvailableQuantity: input.Capacity - bound, MaxPerOrder: input.MaxPerOrder, Benefit: input.Benefit, Gate: input.Gate, Seating: input.Seating}
+	after := tierAuditValue{ID: input.ID, Name: input.Name, ZoneID: input.ZoneID, Price: input.Price, Capacity: input.Capacity, AvailableQuantity: newAvailable, MaxPerOrder: input.MaxPerOrder, Benefit: input.Benefit, Gate: input.Gate, Seating: input.Seating}
 	if err := recordAdminAudit(ctx, tx, actor, map[bool]string{true: "CREATE", false: "UPDATE"}[create], "TICKET_TIER", eventID+"/"+input.ID, before, after); err != nil {
 		return err
 	}
