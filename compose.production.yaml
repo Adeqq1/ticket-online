@@ -1,0 +1,82 @@
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${PRODUCTION_DB_NAME:?Set PRODUCTION_DB_NAME}
+      MYSQL_USER: ${PRODUCTION_DB_USER:?Set PRODUCTION_DB_USER}
+      MYSQL_PASSWORD: ${PRODUCTION_DB_PASSWORD:?Set PRODUCTION_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${PRODUCTION_DB_ROOT_PASSWORD:?Set PRODUCTION_DB_ROOT_PASSWORD}
+    volumes:
+      - production_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      private:
+        ipv4_address: 172.30.20.4
+    restart: unless-stopped
+
+  api:
+    image: ${PRODUCTION_IMAGE:?Set PRODUCTION_IMAGE to a tested image tag}
+    environment:
+      APP_ENV: production
+      HTTP_ADDR: :8080
+      STATIC_DIR: /app/public
+      MYSQL_DSN: ${PRODUCTION_MYSQL_DSN:?Set PRODUCTION_MYSQL_DSN}
+      ORDER_ACCESS_SECRET: ${PRODUCTION_ORDER_ACCESS_SECRET:?Set PRODUCTION_ORDER_ACCESS_SECRET}
+      MIDTRANS_ENV: production
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:?Set production Midtrans Server Key}
+      TRANSACTIONS_ENABLED: ${TRANSACTIONS_ENABLED:-false}
+      FRONTEND_URL: https://${PRODUCTION_DOMAIN:?Set PRODUCTION_DOMAIN}
+      SMTP_HOST: ${PRODUCTION_SMTP_HOST:-}
+      SMTP_PORT: ${PRODUCTION_SMTP_PORT:-587}
+      SMTP_USERNAME: ${PRODUCTION_SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${PRODUCTION_SMTP_PASSWORD:-}
+      SMTP_FROM: ${PRODUCTION_SMTP_FROM:-}
+      SMTP_TLS_MODE: ${PRODUCTION_SMTP_TLS_MODE:-starttls}
+      TRUSTED_PROXY_CIDRS: 172.30.20.2/32
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/ticket-api", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks: [private]
+    restart: unless-stopped
+
+  https:
+    image: caddy:2-alpine
+    environment:
+      PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN:?Set PRODUCTION_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - production_caddy_data:/data
+      - production_caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      private:
+        ipv4_address: 172.30.20.2
+    restart: unless-stopped
+
+networks:
+  private:
+    ipam:
+      config:
+        - subnet: 172.30.20.0/24
+
+volumes:
+  production_mysql_data:
+  production_caddy_data:
+  production_caddy_config:

@@ -19,8 +19,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 19 {
-		t.Fatalf("migration count = %d, want 19", len(items))
+	if len(items) != 20 {
+		t.Fatalf("migration count = %d, want 20", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -44,6 +44,9 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	}
 	if !strings.Contains(string(items[18].data), "check_lease_until") || !strings.Contains(string(items[18].data), "superseded_by") {
 		t.Fatal("admin issue migration was not loaded")
+	}
+	if !strings.Contains(string(items[19].data), "payment_environment") || !strings.Contains(string(items[19].data), "'sandbox'") {
+		t.Fatal("Midtrans environment migration was not loaded")
 	}
 }
 

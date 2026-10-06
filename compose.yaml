@@ -24,8 +24,10 @@ services:
     environment:
       MYSQL_DSN: ticket:ticket@tcp(db:3306)/ticket_online?parseTime=true&loc=UTC
       APP_ENV: ${APP_ENV:-production}
+      MIDTRANS_ENV: ${MIDTRANS_ENV:-sandbox}
       ORDER_ACCESS_SECRET: ${ORDER_ACCESS_SECRET:?Set ORDER_ACCESS_SECRET to base64 of 32 random bytes}
       MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-}
+      TRANSACTIONS_ENABLED: ${TRANSACTIONS_ENABLED:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}

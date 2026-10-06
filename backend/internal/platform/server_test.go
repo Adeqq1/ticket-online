@@ -70,6 +70,31 @@ func TestSimulatedPaymentRouteOnlyExistsInDevelopment(t *testing.T) {
 	}
 }
 
+func TestTransactionGateBlocksOnlyNewTransactions(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	handler := transactionGate(false, next)
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodPost, "/api/v1/reservations", http.StatusServiceUnavailable},
+		{http.MethodPost, "/api/v1/reservations/0123456789abcdef0123456789abcdef/checkout", http.StatusServiceUnavailable},
+		{http.MethodPost, "/api/v1/orders/0123456789abcdef0123456789abcdef/payments", http.StatusServiceUnavailable},
+		{http.MethodPost, "/api/v1/payments/midtrans/notification", http.StatusNoContent},
+		{http.MethodGet, "/api/v1/orders/0123456789abcdef0123456789abcdef", http.StatusNoContent},
+		{http.MethodDelete, "/api/v1/reservations/0123456789abcdef0123456789abcdef", http.StatusNoContent},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(tc.method, tc.path, nil))
+		if response.Code != tc.want {
+			t.Errorf("%s %s returned %d; want %d", tc.method, tc.path, response.Code, tc.want)
+		}
+		if tc.want == http.StatusServiceUnavailable && (response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Body.String(), "TRANSACTIONS_PAUSED")) {
+			t.Errorf("paused response missing cache policy or error code: %v %s", response.Header(), response.Body.String())
+		}
+	}
+}
+
 func TestTicketReadRoutesAreRegisteredInProduction(t *testing.T) {
 	handler := testHandler(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), "", false)
 	for _, path := range []string{

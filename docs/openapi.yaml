@@ -3,10 +3,12 @@ info:
   title: Ticket Online API
   version: 1.0.0
   description: >-
-    Kontrak API katalog, reservasi, checkout, pembayaran simulasi, e-ticket,
+    Kontrak API katalog, reservasi, checkout, pembayaran, e-ticket,
     autentikasi petugas, pengelolaan akun STAFF, dan check-in. Token sesi
     petugas terpisah dari token akses order. Respons error memakai bentuk
     {error: {code, message}}; beberapa respons check-in menyertakan detail tambahan.
+    TRANSACTIONS_ENABLED=false menghentikan pembuatan reservasi, checkout, dan pembayaran baru
+    dengan HTTP 503 dan kode TRANSACTIONS_PAUSED; webhook, rekonsiliasi, serta akses tiket tetap tersedia.
 servers:
   - url: /
     description: Origin aplikasi
@@ -375,6 +377,11 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: {code: ORDER_LIMIT_EXCEEDED, message: Jumlah tiket melebihi batas pemesanan}
+        '503':
+          description: Pembuatan transaksi baru sedang dihentikan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/reservations/{reservationID}:
@@ -491,6 +498,11 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: {code: RESERVATION_EXPIRED, message: Reservasi sudah kedaluwarsa}
+        '503':
+          description: Pembuatan transaksi baru sedang dihentikan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/reservations/{reservationID}/checkout:
@@ -593,6 +605,11 @@ paths:
                   value: {error: {code: INVALID_REQUEST, message: Data checkout tidak valid}}
                 invalidVoucher:
                   value: {error: {code: INVALID_VOUCHER, message: Kode voucher tidak valid}}
+        '503':
+          description: Pembuatan transaksi baru sedang dihentikan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/orders/{orderID}:
@@ -627,7 +644,7 @@ paths:
     post:
       operationId: createSnapPayment
       tags: [Pembayaran]
-      summary: Buat atau lanjutkan sesi pembayaran Midtrans Snap sandbox
+      summary: Buat atau lanjutkan sesi pembayaran Midtrans Snap
       security:
         - OrderAccessToken: []
       requestBody:
@@ -650,6 +667,11 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '502':
           description: Penyedia pembayaran belum dapat membuat sesi.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Pembuatan transaksi baru sedang dihentikan.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -721,6 +743,11 @@ paths:
                   value: {error: {code: NOT_FOUND, message: Data tidak ditemukan}}
                 order:
                   value: {error: {code: ORDER_NOT_FOUND, message: Order tidak ditemukan}}
+        '503':
+          description: Pembuatan transaksi baru sedang dihentikan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '409':
           description: Order kedaluwarsa/tidak dapat dibayar, atau pembayaran sukses tidak dapat diubah.
           content:

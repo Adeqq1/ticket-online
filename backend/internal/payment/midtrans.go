@@ -17,9 +17,21 @@ import (
 	"time"
 )
 
-const midtransSnapURL = "https://app.sandbox.midtrans.com/snap/v1/transactions"
+func midtransSnapURL(environment string) string {
+	if environment == "production" {
+		return "https://app.midtrans.com/snap/v1/transactions"
+	}
+	return "https://app.sandbox.midtrans.com/snap/v1/transactions"
+}
 
-var midtransHTTPClient = &http.Client{Timeout: 8 * time.Second}
+func midtransRedirectHost(environment string) string {
+	if environment == "production" {
+		return "app.midtrans.com"
+	}
+	return "app.sandbox.midtrans.com"
+}
+
+var midtransHTTPClient = &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 
 type snapRequest struct {
 	TransactionDetails struct {
@@ -252,6 +264,10 @@ func (h *Handler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if redirect != "" {
+		if !h.validProviderRedirect(redirect) {
+			writeError(w, 502, "PAYMENT_PROVIDER_ERROR", "Sesi pembayaran tidak valid.")
+			return
+		}
 		writeJSON(w, 200, map[string]string{"redirectUrl": redirect})
 		return
 	}
@@ -291,7 +307,7 @@ func (h *Handler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	providerURL, err := url.Parse(response.RedirectURL)
-	if err != nil || providerURL.Scheme != "https" || providerURL.Host != "app.sandbox.midtrans.com" || !strings.HasPrefix(providerURL.Path, "/snap/") {
+	if err != nil || providerURL.Scheme != "https" || providerURL.Host != midtransRedirectHost(h.environment) || !strings.HasPrefix(providerURL.Path, "/snap/") || providerURL.User != nil {
 		writeError(w, 502, "PAYMENT_PROVIDER_ERROR", "Sesi pembayaran tidak valid.")
 		return
 	}
@@ -316,9 +332,14 @@ func (h *Handler) validReturnURL(value string) bool {
 	return true
 }
 
+func (h *Handler) validProviderRedirect(value string) bool {
+	providerURL, err := url.Parse(value)
+	return err == nil && providerURL.Scheme == "https" && providerURL.Host == midtransRedirectHost(h.environment) && strings.HasPrefix(providerURL.Path, "/snap/") && providerURL.User == nil
+}
+
 func (h *Handler) callSnap(ctx context.Context, payload snapRequest) (snapResponse, error) {
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, midtransSnapURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, midtransSnapURL(h.environment), bytes.NewReader(body))
 	if err != nil {
 		return snapResponse{}, err
 	}

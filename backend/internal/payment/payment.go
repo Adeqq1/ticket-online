@@ -74,7 +74,15 @@ type Repository struct {
 }
 
 func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db, midtransBaseURL: "https://api.sandbox.midtrans.com"}
+	return NewRepositoryWithMidtransEnvironment(db, "sandbox")
+}
+
+func NewRepositoryWithMidtransEnvironment(db *sql.DB, environment string) *Repository {
+	baseURL := "https://api.sandbox.midtrans.com"
+	if environment == "production" {
+		baseURL = "https://api.midtrans.com"
+	}
+	return &Repository{db: db, midtransBaseURL: baseURL}
 }
 
 func (r *Repository) Simulate(ctx context.Context, orderID string, request Request) (Payment, bool, error) {

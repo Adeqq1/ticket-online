@@ -27,25 +27,29 @@ import (
 )
 
 func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "", nil)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "", "sandbox", true, nil)
 }
 
 func NewHandlerWithPaymentConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, nil, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, nil, trustedProxies...)
 }
 
 func NewHandlerWithOperations(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, metrics, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, metrics, trustedProxies...)
 }
 
-func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
+func NewHandlerWithPaymentRuntime(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, trustedProxies...)
+}
+
+func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
 	mux := http.NewServeMux()
 	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
 	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access)
-	paymentRepository := payment.NewRepository(db)
-	paymentHandler := payment.NewHandlerWithMidtrans(paymentRepository, logger, access, midtransKey, frontendURL)
+	paymentRepository := payment.NewRepositoryWithMidtransEnvironment(db, environment)
+	paymentHandler := payment.NewHandlerWithMidtrans(paymentRepository, logger, access, midtransKey, frontendURL, environment)
 	staffService := staffauth.New(db)
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
@@ -89,7 +93,31 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 		mux.HandleFunc("POST /api/v1/payments/midtrans/notification", paymentHandler.MidtransNotification)
 	}
 	mux.HandleFunc("/", staticHandler(staticDir))
-	return loggingMiddleware(logger, mux, operations.Process)
+	return loggingMiddleware(logger, transactionGate(transactionsEnabled, mux), operations.Process)
+}
+
+func transactionGate(enabled bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !enabled && createsTransaction(r.Method, r.URL.Path) {
+			w.Header().Set("Cache-Control", "no-store")
+			Error(w, http.StatusServiceUnavailable, "TRANSACTIONS_PAUSED", "Transaksi baru sedang dihentikan sementara")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func createsTransaction(method, path string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	if path == "/api/v1/reservations" || strings.HasPrefix(path, "/api/v1/orders/") && (strings.HasSuffix(path, "/payments") || strings.HasSuffix(path, "/simulate-payment")) {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/v1/reservations/") {
+		return strings.HasSuffix(path, "/convert") || strings.HasSuffix(path, "/checkout")
+	}
+	return false
 }
 
 func staticHandler(staticDir string) http.HandlerFunc {
