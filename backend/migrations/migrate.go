@@ -139,6 +139,13 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 19 {
+		if err := resumeAdminIssues(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -155,6 +162,39 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration %s: %w", item.name, err)
+	}
+	return nil
+}
+
+func resumeAdminIssues(ctx context.Context, db *sql.Conn) error {
+	columns := []struct{ table, name, definition string }{
+		{"payment_reconciliation_cases", "reason", "VARCHAR(80) NOT NULL DEFAULT 'PAYMENT_SUCCEEDED_AFTER_ORDER_CLOSED'"},
+		{"payment_reconciliation_cases", "last_checked_at", "DATETIME(6) NULL"},
+		{"payment_reconciliation_cases", "last_check_error", "VARCHAR(512) NOT NULL DEFAULT ''"},
+		{"payment_reconciliation_cases", "check_token", "CHAR(32) NULL"},
+		{"payment_reconciliation_cases", "check_lease_until", "DATETIME(6) NULL"},
+		{"email_queue", "superseded_by", "CHAR(32) NULL"},
+	}
+	for _, column := range columns {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?)`, column.table, column.name).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.ExecContext(ctx, "ALTER TABLE "+column.table+" ADD COLUMN "+column.name+" "+column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	var indexExists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_queue' AND INDEX_NAME = 'ix_email_queue_admin_failed')`).Scan(&indexExists); err != nil {
+		return err
+	}
+	if !indexExists {
+		_, err := db.ExecContext(ctx, "ALTER TABLE email_queue ADD KEY ix_email_queue_admin_failed (status, updated_at, id)")
+		return err
 	}
 	return nil
 }

@@ -68,7 +68,7 @@
   function localTime(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" }) + " WIB"; }
   function statusLabel(value: OrderStatus) { return ({ PENDING: "Menunggu pembayaran", PAID: "Lunas", CANCELLED: "Dibatalkan", EXPIRED: "Kedaluwarsa" })[value]; }
 
-  onMount(() => { void load({}); });
+  onMount(() => { const orderId = new URLSearchParams(location.search).get("orderId"); void load({}); if (orderId && /^[0-9a-f]{32}$/.test(orderId)) void openDetail(orderId); });
   onDestroy(() => { generation++; detailGeneration++; request?.abort(); detailRequest?.abort(); });
 </script>
 
@@ -79,7 +79,7 @@
   <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
   <main id="order-admin-content" class="staff-admin-content">
     <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMIN</p><h1>Pengelolaan pesanan.</h1><p>Telusuri pembayaran dan status tiket pesanan.</p></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a aria-current="page" href="/admin/orders">Pesanan</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a aria-current="page" href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="order-filter-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="order-filter-title">Cari pesanan</h2></div></div>
       <form class="order-filter-form" onsubmit={search} aria-busy={loading}>

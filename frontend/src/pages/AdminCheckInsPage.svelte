@@ -74,7 +74,7 @@
   <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut || loading} onclick={onLogout}>Keluar</button></header>
   <main id="checkin-history-content" class="staff-admin-content">
     <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> AUDIT</p><h1>Riwayat check-in.</h1><p>Periksa hasil scan yang tercatat server beserta petugas dan waktu masuk.</p></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/staff">Kelola petugas</a><a aria-current="page" href="/admin/check-ins">Riwayat check-in</a></nav>
+    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/staff">Kelola petugas</a><a aria-current="page" href="/admin/check-ins">Riwayat check-in</a></nav>
 
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="history-filters-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="history-filters-title">Filter riwayat</h2></div></div>

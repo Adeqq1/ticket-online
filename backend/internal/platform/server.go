@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/adminissues"
 	"github.com/Adeqq1/ticket-online/backend/internal/adminorders"
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkin"
@@ -38,11 +39,13 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
 	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access)
-	paymentHandler := payment.NewHandlerWithMidtrans(payment.NewRepository(db), logger, access, midtransKey, frontendURL)
+	paymentRepository := payment.NewRepository(db)
+	paymentHandler := payment.NewHandlerWithMidtrans(paymentRepository, logger, access, midtransKey, frontendURL)
 	staffService := staffauth.New(db)
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
 	adminorders.NewHandler(adminorders.NewService(db, staffService), logger).Register(mux)
+	adminissues.NewHandler(adminissues.NewService(db, staffService, access, paymentRepository, midtransKey), logger).Register(mux)
 	recovery.NewHandler(db, access, logger, trustedProxies...).Register(mux)
 	checkinHandler := checkin.NewHandler(checkin.NewService(db, staffService), logger)
 	mux.HandleFunc("POST /api/v1/staff/check-ins", checkinHandler.CheckIn)

@@ -19,8 +19,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 18 {
-		t.Fatalf("migration count = %d, want 18", len(items))
+	if len(items) != 19 {
+		t.Fatalf("migration count = %d, want 19", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -41,6 +41,9 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	}
 	if !strings.Contains(string(items[17].data), "idx_orders_admin_created") {
 		t.Fatal("admin order pagination index was not loaded")
+	}
+	if !strings.Contains(string(items[18].data), "check_lease_until") || !strings.Contains(string(items[18].data), "superseded_by") {
+		t.Fatal("admin issue migration was not loaded")
 	}
 }
 

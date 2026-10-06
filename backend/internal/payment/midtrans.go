@@ -152,8 +152,16 @@ func (r *Repository) applyGatewayStatus(ctx context.Context, gatewayOrderID, gro
 		return err
 	}
 	defer tx.Rollback()
+	if err := r.ApplyGatewayStatusTx(ctx, tx, gatewayOrderID, grossAmount, transactionStatus, fraudStatus); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) ApplyGatewayStatusTx(ctx context.Context, tx *sql.Tx, gatewayOrderID, grossAmount, transactionStatus, fraudStatus string) error {
 	var orderID, orderStatus, paymentStatus string
 	var amount uint64
+	var err error
 	if err = tx.QueryRowContext(ctx, "SELECT o.id, o.status, p.status, p.amount FROM orders o JOIN payments p ON p.order_id = o.id WHERE p.gateway_order_id = ? FOR UPDATE", gatewayOrderID).Scan(&orderID, &orderStatus, &paymentStatus, &amount); errors.Is(err, sql.ErrNoRows) {
 		return ErrOrderNotFound
 	} else if err != nil {
@@ -170,10 +178,10 @@ func (r *Repository) applyGatewayStatus(ctx context.Context, gatewayOrderID, gro
 		newStatus = "FAILED"
 	}
 	if paymentStatus == "SUCCEEDED" {
-		return tx.Commit()
+		return nil
 	}
 	if paymentStatus == "FAILED" && newStatus == "PENDING" {
-		return tx.Commit()
+		return nil
 	}
 	now := time.Now().UTC()
 	var paidAt any
@@ -189,7 +197,7 @@ func (r *Repository) applyGatewayStatus(ctx context.Context, gatewayOrderID, gro
 			if _, err := tx.ExecContext(ctx, "UPDATE payments SET status = 'SUCCEEDED', paid_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?", orderID); err != nil {
 				return err
 			}
-			return tx.Commit()
+			return nil
 		}
 		paidAt = now
 		if _, err = tx.ExecContext(ctx, "UPDATE orders SET status = 'PAID', updated_at = ? WHERE id = ? AND status = 'PENDING'", now, orderID); err != nil {
@@ -202,7 +210,7 @@ func (r *Repository) applyGatewayStatus(ctx context.Context, gatewayOrderID, gro
 	if _, err = tx.ExecContext(ctx, "UPDATE payments SET status = ?, paid_at = ?, updated_at = ? WHERE order_id = ?", newStatus, paidAt, now, orderID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 type midtransNotification struct {

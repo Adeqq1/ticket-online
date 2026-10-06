@@ -131,6 +131,12 @@ type limit struct {
 	period time.Duration
 }
 
+type RateLimit struct {
+	Bucket string
+	Max    int
+	Period time.Duration
+}
+
 // allow counts one hit in each limit in order and stops at the first exceeded one.
 // It returns that limit's index (-1 when all pass) and the seconds until its window resets.
 func allow(ctx context.Context, db *sql.DB, limits ...limit) (int, int, error) {
@@ -151,27 +157,43 @@ func allowOnce(ctx context.Context, db *sql.DB, limits []limit) (int, int, error
 		return 0, 0, fmt.Errorf("begin rate limit: %w", err)
 	}
 	defer tx.Rollback()
+	public := make([]RateLimit, len(limits))
+	for i, current := range limits {
+		public[i] = RateLimit{Bucket: current.bucket, Max: current.max, Period: current.period}
+	}
+	blocked, wait, err := CheckRateLimitsTx(ctx, tx, public...)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return blocked, wait, nil
+}
+
+// CheckRateLimitsTx records hits in the caller's transaction so a protected action and its rate limit commit together.
+func CheckRateLimitsTx(ctx context.Context, tx *sql.Tx, limits ...RateLimit) (int, int, error) {
 	for index, current := range limits {
-		seconds := int(current.period.Seconds())
+		seconds := int(current.Period.Seconds())
 		// hits is assigned before reset_at, so both IF() calls still read the old reset_at.
 		if _, err := tx.ExecContext(ctx, `INSERT INTO rate_limits (bucket, hits, reset_at)
 			VALUES (?, 1, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND))
 			ON DUPLICATE KEY UPDATE hits = IF(reset_at <= UTC_TIMESTAMP(6), 1, hits + 1),
 			reset_at = IF(reset_at <= UTC_TIMESTAMP(6), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), reset_at)`,
-			current.bucket, seconds, seconds); err != nil {
+			current.Bucket, seconds, seconds); err != nil {
 			return 0, 0, fmt.Errorf("count rate limit: %w", err)
 		}
 		var hits, wait int
 		if err := tx.QueryRowContext(ctx, `SELECT hits,
 			CAST(CEIL(TIMESTAMPDIFF(MICROSECOND, UTC_TIMESTAMP(6), reset_at) / 1000000) AS SIGNED)
-			FROM rate_limits WHERE bucket = ? FOR UPDATE`, current.bucket).Scan(&hits, &wait); err != nil {
+			FROM rate_limits WHERE bucket = ? FOR UPDATE`, current.Bucket).Scan(&hits, &wait); err != nil {
 			return 0, 0, fmt.Errorf("read rate limit: %w", err)
 		}
-		if hits > current.max {
-			return index, max(wait, 1), tx.Commit()
+		if hits > current.Max {
+			return index, max(wait, 1), nil
 		}
 	}
-	return -1, 0, tx.Commit()
+	return -1, 0, nil
 }
 
 func clientIP(r *http.Request, trusted []netip.Prefix) string {

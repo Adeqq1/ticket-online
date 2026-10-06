@@ -20,6 +20,10 @@ type midtransStatus struct {
 	FraudStatus       string `json:"fraud_status"`
 }
 
+type GatewayStatus struct {
+	OrderID, GrossAmount, TransactionStatus, FraudStatus string
+}
+
 func (r *Repository) readMidtransStatus(ctx context.Context, serverKey, gatewayOrderID string) (midtransStatus, error) {
 	endpoint := strings.TrimRight(r.midtransBaseURL, "/") + "/v2/" + url.PathEscape(gatewayOrderID) + "/status"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -47,6 +51,14 @@ func (r *Repository) readMidtransStatus(ctx context.Context, serverKey, gatewayO
 		return midtransStatus{}, errors.New("Midtrans status response does not match payment attempt")
 	}
 	return result, nil
+}
+
+func (r *Repository) ReadGatewayStatus(ctx context.Context, serverKey, gatewayOrderID string) (GatewayStatus, error) {
+	status, err := r.readMidtransStatus(ctx, serverKey, gatewayOrderID)
+	if err != nil {
+		return GatewayStatus{}, err
+	}
+	return GatewayStatus{OrderID: status.OrderID, GrossAmount: status.GrossAmount, TransactionStatus: status.TransactionStatus, FraudStatus: status.FraudStatus}, nil
 }
 
 func (r *Repository) cancelMidtrans(ctx context.Context, serverKey, gatewayOrderID string) error {

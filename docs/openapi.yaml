@@ -1229,6 +1229,154 @@ paths:
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/payment-cases:
+    get:
+      operationId: listAdminPaymentCases
+      tags: [Admin Operasional]
+      summary: Daftar kasus rekonsiliasi pembayaran
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: q, in: query, schema: {type: string, maxLength: 32}}
+        - {name: status, in: query, schema: {type: string, enum: [OPEN, RESOLVED], default: OPEN}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}}
+      responses:
+        '200':
+          description: Kasus pembayaran terbaru, maksimum 50 item.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminPaymentCasePage'}
+        '400': {$ref: '#/components/responses/InvalidCheckInRequest'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+  /api/v1/admin/payment-cases/{caseID}:
+    get:
+      operationId: getAdminPaymentCase
+      tags: [Admin Operasional]
+      summary: Detail kasus dan audit penanganan
+      security: [{StaffSessionToken: []}]
+      responses:
+        '200':
+          description: Status order lokal, pembayaran provider, dan riwayat audit.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminPaymentCaseDetail'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    parameters:
+      - {name: caseID, in: path, required: true, schema: {type: string, pattern: '^[1-9][0-9]{0,19}$'}}
+  /api/v1/admin/payment-cases/{caseID}/recheck:
+    post:
+      operationId: recheckAdminPaymentCase
+      tags: [Admin Operasional]
+      summary: Periksa ulang status pembayaran dari server
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: caseID, in: path, required: true, schema: {type: string, pattern: '^[1-9][0-9]{0,19}$'}}
+      responses:
+        '200':
+          description: Status provider tercatat dan diterapkan dengan aturan pembayaran yang sama seperti webhook.
+          content:
+            application/json:
+              schema: {type: object, required: [caseId, providerStatus], properties: {caseId: {type: string}, providerStatus: {type: string}}}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {description: Kasus sedang diperiksa atau sudah ditutup.}
+        '429': {description: Batas pemeriksaan ulang tercapai.}
+        '502': {description: Provider belum dapat dihubungi atau responsnya tidak valid.}
+        '503': {description: Kredensial provider belum dikonfigurasi.}
+  /api/v1/admin/payment-cases/{caseID}/notes:
+    post:
+      operationId: addAdminPaymentCaseNote
+      tags: [Admin Operasional]
+      summary: Menambahkan catatan audit pada kasus
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: caseID, in: path, required: true, schema: {type: string, pattern: '^[1-9][0-9]{0,19}$'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [note], properties: {note: {type: string, minLength: 1, maxLength: 2000}}}
+      responses:
+        '204': {description: Catatan tersimpan di audit.}
+        '400': {$ref: '#/components/responses/InvalidCheckInRequest'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+  /api/v1/admin/payment-cases/{caseID}/resolve:
+    post:
+      operationId: resolveAdminPaymentCase
+      tags: [Admin Operasional]
+      summary: Menutup kasus dengan catatan wajib
+      description: Menutup kasus tidak menerbitkan tiket untuk pembayaran yang datang setelah stok dilepas.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: caseID, in: path, required: true, schema: {type: string, pattern: '^[1-9][0-9]{0,19}$'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [note], properties: {note: {type: string, minLength: 1, maxLength: 2000}}}
+      responses:
+        '204': {description: Kasus ditutup dan alasan tersimpan di audit.}
+        '400': {$ref: '#/components/responses/InvalidCheckInRequest'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {description: Kasus sedang diperiksa atau sudah ditutup.}
+  /api/v1/admin/email-jobs:
+    get:
+      operationId: listAdminFailedEmailJobs
+      tags: [Admin Operasional]
+      summary: Daftar antrean email gagal
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: q, in: query, schema: {type: string, maxLength: 32}}
+        - {name: kind, in: query, schema: {type: string, enum: [TICKETS, RECOVERY]}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}}
+      responses:
+        '200':
+          description: Maksimum 50 job email gagal yang belum digantikan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminEmailJobPage'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+  /api/v1/admin/email-jobs/{jobID}:
+    parameters:
+      - {name: jobID, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}}
+    get:
+      operationId: getAdminEmailJob
+      tags: [Admin Operasional]
+      summary: Detail job email gagal dan kelayakan retry
+      security: [{StaffSessionToken: []}]
+      responses:
+        '200':
+          description: Detail email dan alasan retry tersedia atau ditolak.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminEmailDetail'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/admin/email-jobs/{jobID}/retry:
+    post:
+      operationId: retryAdminEmailJob
+      tags: [Admin Operasional]
+      summary: Jadwalkan ulang email gagal
+      description: Memakai cooldown yang sama dengan pengiriman ulang publik; retry pemulihan membuat request dan tautan baru.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: jobID, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}}
+      responses:
+        '200':
+          description: Job email dijadwalkan ulang dan aksi dicatat dalam audit.
+          content:
+            application/json:
+              schema: {type: object, required: [jobId, retryJobId, status], properties: {jobId: {type: string}, retryJobId: {type: string}, status: {type: string, const: PENDING}}}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {description: Job tidak lagi gagal, telah digantikan, atau order tidak memenuhi syarat.}
+        '429': {description: Batas kirim ulang tercapai.}
   /api/v1/admin/check-ins:
     get:
       operationId: listCheckInHistory
@@ -1621,6 +1769,82 @@ components:
                   status: {type: string, enum: [CHECKED_IN, NOT_CHECKED_IN]}
                   checkedInAt: {type: [string, 'null'], format: date-time}
                   checkedInBy: {type: [string, 'null']}
+    AdminIssueAudit:
+      type: object
+      required: [action, actorName, createdAt, data]
+      properties:
+        action: {type: string}
+        actorName: {type: string}
+        createdAt: {type: string, format: date-time}
+        data: {type: object}
+    AdminPaymentCase:
+      type: object
+      required: [id, status, orderId, reference, eventName, orderStatus, paymentStatus, providerStatus, reason, amount, createdAt, updatedAt, lastCheckedAt, lastCheckError, checkInProgress]
+      properties:
+        id: {type: string, pattern: '^[1-9][0-9]{0,19}$'}
+        status: {type: string, enum: [OPEN, RESOLVED]}
+        orderId: {type: string, pattern: '^[0-9a-f]{32}$'}
+        reference: {type: string}
+        eventName: {type: string}
+        orderStatus: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED]}
+        paymentStatus: {type: string, enum: [PENDING, FAILED, SUCCEEDED]}
+        providerStatus: {type: string}
+        reason: {type: string}
+        amount: {type: integer, minimum: 0}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        lastCheckedAt: {type: [string, 'null'], format: date-time}
+        lastCheckError: {type: string}
+        checkInProgress: {type: boolean}
+    AdminPaymentCasePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/AdminPaymentCase'}}
+        nextCursor: {type: [string, 'null']}
+    AdminPaymentCaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/AdminPaymentCase'
+        - type: object
+          required: [total, expiresAt, gatewayOrderId, canRecheck, canResolve, notes, history]
+          properties:
+            total: {type: integer, minimum: 0}
+            expiresAt: {type: string, format: date-time}
+            gatewayOrderId: {type: string}
+            canRecheck: {type: boolean}
+            canResolve: {type: boolean}
+            notes: {type: array, items: {$ref: '#/components/schemas/AdminIssueAudit'}}
+            history: {type: array, items: {$ref: '#/components/schemas/AdminIssueAudit'}}
+    AdminEmailJob:
+      type: object
+      required: [id, kind, status, reference, recipient, attempts, lastError, updatedAt, supersededBy]
+      properties:
+        id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        kind: {type: string, enum: [TICKETS, RECOVERY]}
+        status: {type: string, enum: [FAILED, PENDING, SENT, PROCESSING]}
+        reference: {type: string}
+        recipient: {type: string, description: Email sebagian disamarkan pada daftar; nilai lengkap hanya tersedia pada detail admin.}
+        attempts: {type: integer, minimum: 0, maximum: 255}
+        lastError: {type: string}
+        updatedAt: {type: string, format: date-time}
+        supersededBy: {type: [string, 'null']}
+    AdminEmailJobPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/AdminEmailJob'}}
+        nextCursor: {type: [string, 'null']}
+    AdminEmailDetail:
+      allOf:
+        - $ref: '#/components/schemas/AdminEmailJob'
+        - type: object
+          required: [orderStatus, canRetry, retryReason, retryJobId, history]
+          properties:
+            orderStatus: {type: string}
+            canRetry: {type: boolean}
+            retryReason: {type: string}
+            retryJobId: {type: [string, 'null']}
+            history: {type: array, items: {$ref: '#/components/schemas/AdminIssueAudit'}}
     CheckInHistoryItem:
       type: object
       required: [id, code, eventId, eventName, gate, staff, outcome, recordedAt, checkedInAt]
