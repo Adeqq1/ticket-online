@@ -22,27 +22,32 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
+	"github.com/Adeqq1/ticket-online/backend/internal/refund"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
 
 func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "", "sandbox", true, nil)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "", "sandbox", true, nil, nil)
 }
 
 func NewHandlerWithPaymentConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, nil, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, nil, nil, trustedProxies...)
 }
 
 func NewHandlerWithOperations(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, metrics, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, metrics, nil, trustedProxies...)
 }
 
 func NewHandlerWithPaymentRuntime(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, nil, trustedProxies...)
 }
 
-func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
+func NewHandlerWithRefundConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, refundMethods []string, trustedProxies ...netip.Prefix) http.Handler {
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, refundMethods, trustedProxies...)
+}
+
+func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, refundMethods []string, trustedProxies ...netip.Prefix) http.Handler {
 	mux := http.NewServeMux()
 	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
@@ -54,6 +59,8 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
 	adminorders.NewHandler(adminorders.NewService(db, staffService), logger).Register(mux)
+	refundService := refund.New(db, staffService, midtransKey, environment, refundMethods, logger)
+	refund.NewHandler(refundService, logger).Register(mux)
 	adminissues.NewHandler(adminissues.NewService(db, staffService, access, paymentRepository, midtransKey), logger).Register(mux)
 	if metrics == nil {
 		metrics = operations.NewService(db, staffService, operations.Process)

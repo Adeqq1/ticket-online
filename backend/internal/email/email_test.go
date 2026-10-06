@@ -53,6 +53,24 @@ func TestMoney(t *testing.T) {
 	}
 }
 
+func TestRenderRefundMessageUsesSnapshotAndEscapesReason(t *testing.T) {
+	cfg := Config{Host: "smtp.example.com", From: "tickets@example.com", FrontendURL: "https://tickets.example.com"}
+	current := job{id: "job-1", claimToken: "claim-1", recipient: "buyer@example.com", refundSnapshot: []byte(`{"status":"SUCCEEDED","amount":125000,"reference":"TO-123","reason":"<event canceled>"}`)}
+	message, from, to, err := renderRefundMessage(cfg, current)
+	if err != nil || from != "tickets@example.com" || to != "buyer@example.com" {
+		t.Fatalf("render refund: %q %q %v", from, to, err)
+	}
+	for _, want := range []string{"TO-123", "Rp125.000", "&lt;event canceled&gt;"} {
+		if !strings.Contains(string(message), want) {
+			t.Errorf("refund email missing %q", want)
+		}
+	}
+	current.refundSnapshot = []byte(`{"status":"UNKNOWN","amount":125000,"reference":"TO-123"}`)
+	if _, _, _, err := renderRefundMessage(cfg, current); err == nil {
+		t.Fatal("unknown refund result could be emailed as final")
+	}
+}
+
 func TestEmailOrigins(t *testing.T) {
 	for _, value := range []string{"https://tickets.example.com", "http://localhost:5173"} {
 		if !safeURL(value) {

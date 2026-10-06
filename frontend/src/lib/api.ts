@@ -13,7 +13,7 @@ export type ApiErrorBody = { error?: { code?: string; message?: string; expected
 export type ReservationItem = { tierId: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
 export type Reservation = { id: string; status: string; expiresAt: string; event: { id: string; artist: string }; items: ReservationItem[]; subtotal: number; reference?: string };
 export type OrderItem = ReservationItem;
-export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED";
+export type OrderStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED" | "REFUND_PENDING" | "REFUNDED";
 export type PaymentMethod = "QRIS" | "VIRTUAL_ACCOUNT" | "GOPAY";
 export type PaymentStatus = "PENDING" | "FAILED" | "SUCCEEDED";
 export type OrderAttendeeInput = { tierId: string; names: string[] };
@@ -53,7 +53,7 @@ export type AdminPaymentCaseDetail = AdminPaymentCase & { total: number; expires
 export type AdminEmailJob = { id: string; kind: "TICKETS" | "RECOVERY"; status: "FAILED" | "PENDING" | "SENT" | "PROCESSING"; reference: string; recipient: string; attempts: number; lastError: string; updatedAt: string; supersededBy: string | null };
 export type AdminEmailDetail = AdminEmailJob & { orderStatus: string; canRetry: boolean; retryReason: string; retryJobId: string | null; history: AdminIssueAudit[] };
 export type AdminWorkerStatus = { name: string; running: boolean; startedAt: string | null; lastFinishedAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; consecutiveFailures: number };
-export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; workers: AdminWorkerStatus[]; alerts: string[] };
+export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; openRefunds: number; workers: AdminWorkerStatus[]; alerts: string[] };
 
 export class ApiError extends Error {
   code: string;
@@ -129,6 +129,9 @@ export function getAdminOrders(accessToken: string, filters: AdminOrderFilter = 
 
 export function getAdminOrder(accessToken: string, orderId: string, signal?: AbortSignal) {
   return request<AdminOrderDetail>(`/api/v1/admin/orders/${encodeURIComponent(orderId)}`, signal, { headers: privateHeaders(accessToken) });
+}
+export function requestAdminRefund(accessToken: string, orderId: string, reason: string) {
+  return adminIssueRequest<{ status: string; amount: number; reason: string }>(accessToken, `/api/v1/admin/orders/${encodeURIComponent(orderId)}/refund`, undefined, "POST", { reason });
 }
 
 function adminIssueRequest<T>(accessToken: string, path: string, signal?: AbortSignal, method = "GET", body?: unknown) {

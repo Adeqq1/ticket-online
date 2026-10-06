@@ -56,7 +56,7 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Detail pesanan</p>
     <h1>{detail ? detail.reference : "Pesanan"}</h1>
-    {#if detail}<p>{detail.status === "PAID" ? "Pembayaran dikonfirmasi." : "Pesanan belum lunas."} Akses berlaku sampai {eventDate(detail.accessExpiresAt)}.</p>{/if}
+    {#if detail}<p>{detail.status === "PAID" ? "Pembayaran dikonfirmasi." : detail.status === "REFUND_PENDING" ? "Refund sedang diproses. Tiket tidak dapat digunakan selama pemeriksaan." : detail.status === "REFUNDED" ? "Refund berhasil. Tiket pesanan ini sudah tidak berlaku." : "Pesanan belum lunas."} Akses berlaku sampai {eventDate(detail.accessExpiresAt)}.</p>{/if}
   </header>
 
   {#if loading}
@@ -78,6 +78,9 @@
           <li><article class="my-order-card"><div><b>{ticket.attendeeName}</b><p>{ticket.tierName} · Gate {ticket.gate} · {ticket.code}</p></div><a class="button button-secondary" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Buka e-ticket</a></article></li>
         {/each}
       </ul>
+    {/if}
+    {#if detail.status === "REFUND_PENDING" || detail.status === "REFUNDED"}
+      <div class="recovery-panel" role="status"><h2>{detail.status === "REFUNDED" ? "Refund selesai" : "Refund sedang diproses"}</h2><p>{detail.status === "REFUNDED" ? "E-ticket tidak lagi dapat digunakan." : "Kami sedang mengonfirmasi refund dengan penyedia pembayaran. Periksa kembali halaman ini untuk pembaruan."}</p></div>
     {/if}
     {#if detail.status === "PAID"}
       <div class="recovery-panel">

@@ -28,6 +28,8 @@ tags:
     description: Check-in hanya dapat dilakukan STAFF pada event dan gate yang ditugaskan. ADMIN dapat membaca status dan riwayat sesuai endpoint.
   - name: Admin Operasional
     description: Pemantauan API, worker, email gagal, dan kasus pembayaran terbuka khusus ADMIN.
+  - name: Admin Pesanan
+    description: Detail dan refund penuh order oleh ADMIN. Refund hanya untuk QRIS/GoPay yang diaktifkan lewat allowlist konfigurasi.
 paths:
   /api/v1/events:
     get:
@@ -1220,7 +1222,7 @@ paths:
       parameters:
         - {name: q, in: query, schema: {type: string, maxLength: 32}, description: Potongan reference literal tanpa membedakan kapital.}
         - {name: eventId, in: query, schema: {type: string, maxLength: 64}}
-        - {name: status, in: query, schema: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED]}}
+        - {name: status, in: query, schema: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED, REFUND_PENDING, REFUNDED]}}
         - {name: dateFrom, in: query, schema: {type: string, format: date}}
         - {name: dateTo, in: query, schema: {type: string, format: date}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 256}, description: Opaque cursor halaman berikutnya.}
@@ -1257,6 +1259,49 @@ paths:
         '401': {$ref: '#/components/responses/StaffUnauthorized'}
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/orders/{orderID}/refund:
+    parameters:
+      - $ref: '#/components/parameters/OrderID'
+    post:
+      operationId: requestAdminOrderRefund
+      tags: [Admin Pesanan]
+      summary: Mengajukan refund penuh untuk satu pesanan
+      description: >-
+        Hanya ADMIN. Server menentukan nominal dari total order dan meminta status settlement Midtrans sebelum pengajuan.
+        Refund hanya tersedia untuk kanal yang diaktifkan MIDTRANS_REFUND_METHODS. Hasil yang belum diketahui menahan tiket;
+        worker merekonsiliasi status provider tanpa mengirim permintaan baru.
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 3, maxLength: 500}
+      responses:
+        '200':
+          description: Refund sudah tercatat; `status` dapat tetap UNKNOWN sampai Midtrans mengonfirmasi hasil.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, amount, reason]
+                properties:
+                  status: {type: string, enum: [UNKNOWN, PROCESSING, SUCCEEDED, FAILED]}
+                  amount: {type: integer, minimum: 1}
+                  reason: {type: string}
+        '400': {$ref: '#/components/responses/InvalidCheckInRequest'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409':
+          description: Pesanan tidak memenuhi syarat atau kanal refund belum diaktifkan.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '500': {$ref: '#/components/responses/InternalError'}
   /api/v1/admin/payment-cases:
     get:
@@ -1634,20 +1679,21 @@ components:
   schemas:
     AdminOperations:
       type: object
-      required: [collectedAt, api5xxLast5m, failedEmailJobs, oldestPendingEmailSeconds, openPaymentCases, workers, alerts]
+      required: [collectedAt, api5xxLast5m, failedEmailJobs, oldestPendingEmailSeconds, openPaymentCases, openRefunds, workers, alerts]
       properties:
         collectedAt: {type: string, format: date-time}
         api5xxLast5m: {type: integer, minimum: 0}
         failedEmailJobs: {type: integer, minimum: 0}
         oldestPendingEmailSeconds: {type: integer, minimum: 0}
         openPaymentCases: {type: integer, minimum: 0}
+        openRefunds: {type: integer, minimum: 0}
         workers:
           type: array
           items:
             type: object
             required: [name, running, consecutiveFailures]
             properties:
-              name: {type: string, enum: [reservation, payment_expiry, email]}
+              name: {type: string, enum: [reservation, payment_expiry, email, refund]}
               running: {type: boolean}
               startedAt: {type: [string, 'null'], format: date-time}
               lastFinishedAt: {type: [string, 'null'], format: date-time}
@@ -1767,7 +1813,7 @@ components:
       properties:
         status: {type: string, enum: [CHECKED_IN, NOT_CHECKED_IN]}
         ticket: {$ref: '#/components/schemas/CheckInTicket'}
-        orderStatus: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED]}
+        orderStatus: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED, REFUND_PENDING, REFUNDED]}
         checkedInAt: {type: [string, 'null'], format: date-time, description: Waktu UTC jika status CHECKED_IN; null jika belum tercatat.}
     AdminOrder:
       type: object
@@ -1775,7 +1821,7 @@ components:
       properties:
         id: {type: string, pattern: '^[0-9a-f]{32}$'}
         reference: {type: string}
-        status: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED]}
+        status: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED, REFUND_PENDING, REFUNDED]}
         eventId: {type: string}
         eventName: {type: string}
         buyerName: {type: string}
@@ -1860,7 +1906,7 @@ components:
         orderId: {type: string, pattern: '^[0-9a-f]{32}$'}
         reference: {type: string}
         eventName: {type: string}
-        orderStatus: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED]}
+        orderStatus: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED, REFUND_PENDING, REFUNDED]}
         paymentStatus: {type: string, enum: [PENDING, FAILED, SUCCEEDED]}
         providerStatus: {type: string}
         reason: {type: string}
@@ -2179,7 +2225,7 @@ components:
         id: {type: string, pattern: '^[0-9a-f]{32}$'}
         reference: {type: string}
         reservationId: {type: string, pattern: '^[0-9a-f]{32}$'}
-        status: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED]}
+        status: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED, REFUND_PENDING, REFUNDED]}
         expiresAt: {type: string, format: date-time, description: Deadline pembayaran order.}
         subtotal: {type: integer, minimum: 0}
         adminFee: {type: integer, minimum: 0, description: Biaya admin rupiah yang ditetapkan server.}

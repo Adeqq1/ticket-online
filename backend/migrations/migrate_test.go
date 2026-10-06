@@ -19,8 +19,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 20 {
-		t.Fatalf("migration count = %d, want 20", len(items))
+	if len(items) != 21 {
+		t.Fatalf("migration count = %d, want 21", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -47,6 +47,9 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	}
 	if !strings.Contains(string(items[19].data), "payment_environment") || !strings.Contains(string(items[19].data), "'sandbox'") {
 		t.Fatal("Midtrans environment migration was not loaded")
+	}
+	if !strings.Contains(string(items[20].data), "CREATE TABLE order_refunds") || !strings.Contains(string(items[20].data), "REFUND_PENDING") {
+		t.Fatal("refund migration was not loaded")
 	}
 }
 

@@ -13,6 +13,7 @@ func clearSMTPEnv(t *testing.T) {
 	t.Setenv("MIDTRANS_ENV", "")
 	t.Setenv("MIDTRANS_SERVER_KEY", "")
 	t.Setenv("TRANSACTIONS_ENABLED", "")
+	t.Setenv("MIDTRANS_REFUND_METHODS", "")
 	for _, key := range []string{"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS_MODE"} {
 		t.Setenv(key, "")
 	}
@@ -49,6 +50,28 @@ func TestLoadConfigMidtransEnvironments(t *testing.T) {
 				t.Fatalf("transactions enabled = %v; want %v", cfg.TransactionsEnabled, tc.wantEnabled)
 			}
 		})
+	}
+}
+
+func TestLoadConfigRefundMethodsFailClosed(t *testing.T) {
+	clearSMTPEnv(t)
+	t.Setenv("MYSQL_DSN", "ticket:ticket@tcp(localhost:3306)/ticket_online?parseTime=true")
+	t.Setenv("ORDER_ACCESS_SECRET", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("MIDTRANS_SERVER_KEY", "SB-Mid-server-test")
+	for _, tc := range []struct {
+		value string
+		valid bool
+	}{{"", true}, {"QRIS,GOPAY", true}, {"VIRTUAL_ACCOUNT", false}, {"QRIS,", false}, {"qris", true}} {
+		t.Setenv("MIDTRANS_REFUND_METHODS", tc.value)
+		cfg, err := LoadConfig()
+		if (err == nil) != tc.valid {
+			t.Errorf("methods %q: error = %v; valid=%v", tc.value, err, tc.valid)
+			continue
+		}
+		if tc.value == "" && len(cfg.MidtransRefundMethods) != 0 {
+			t.Errorf("empty refund allowlist = %v", cfg.MidtransRefundMethods)
+		}
 	}
 }
 

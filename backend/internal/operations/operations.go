@@ -132,6 +132,7 @@ type Metrics struct {
 	FailedEmailJobs           int       `json:"failedEmailJobs"`
 	OldestPendingEmailSeconds int64     `json:"oldestPendingEmailSeconds"`
 	OpenPaymentCases          int       `json:"openPaymentCases"`
+	OpenRefunds               int       `json:"openRefunds"`
 	Workers                   []Worker  `json:"workers"`
 	Alerts                    []string  `json:"alerts"`
 }
@@ -170,6 +171,10 @@ func (s *Service) Collect(ctx context.Context) (Metrics, error) {
 		return next, err
 	}
 	next.OpenPaymentCases = int(open)
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM order_refunds WHERE status IN ('REQUESTED','PROCESSING','UNKNOWN')").Scan(&open); err != nil {
+		return next, err
+	}
+	next.OpenRefunds = int(open)
 	apiFailures, workers, _ := s.tracker.snapshot()
 	next.API5xxLast5m = apiFailures
 	now := next.CollectedAt
@@ -185,6 +190,9 @@ func (s *Service) Collect(ctx context.Context) (Metrics, error) {
 	}
 	if next.OpenPaymentCases > 0 {
 		alerts = append(alerts, "Ada kasus rekonsiliasi pembayaran yang masih terbuka.")
+	}
+	if next.OpenRefunds > 0 {
+		alerts = append(alerts, "Ada refund yang masih menunggu konfirmasi Midtrans.")
 	}
 	for _, item := range workers {
 		next.Workers = append(next.Workers, item.Worker)
