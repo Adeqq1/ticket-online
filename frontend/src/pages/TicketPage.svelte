@@ -4,6 +4,7 @@
   import Countdown from "../components/ticket/Countdown.svelte";
   import { ApiError, getTicket, type ApiTicket } from "../lib/api.ts";
   import { getOrderAccessForTicket } from "../lib/order-access.ts";
+  import { emailAccessToken, getEmailTicketAccess, saveEmailTicketAccess } from "../lib/ticket-email-access.ts";
   import { ticketQrSource } from "../lib/ticket-qr.ts";
   import Toast from "../components/Toast.svelte";
 
@@ -12,6 +13,7 @@
   let loading = $state(true);
   let error = $state<unknown>(null);
   let retrying = $state(false);
+  let pendingEmailToken: string | null = null;
   let toast = $state<{ id: number; message: string; tone: "success" | "error" } | null>(null);
   let toastId = 0;
   let controller: AbortController | undefined;
@@ -34,17 +36,30 @@
     loading = true;
     error = null;
     const access = getOrderAccessForTicket(id);
-    if (!access) {
+    const emailToken = pendingEmailToken ?? getEmailTicketAccess(id);
+    const token = emailToken ?? access?.accessToken;
+    if (!token) {
       error = new Error("Akses privat tiket tidak ditemukan di browser ini.");
       loading = false;
       return;
     }
-    try { ticket = await getTicket(id, access.accessToken, controller.signal); }
+    try {
+      ticket = await getTicket(id, token, controller.signal);
+      if (emailToken) {
+        saveEmailTicketAccess(id, emailToken);
+        pendingEmailToken = null;
+      }
+    }
     catch (value) { if (!controller.signal.aborted) error = value; }
     finally { if (!controller.signal.aborted) loading = false; }
   }
 
-  onMount(() => { void load(); return () => controller?.abort(); });
+  onMount(() => {
+    pendingEmailToken = emailAccessToken(window.location.hash);
+    if (window.location.hash) history.replaceState(history.state, "", window.location.pathname + window.location.search);
+    void load();
+    return () => controller?.abort();
+  });
 
   async function copyCode() {
     if (!ticket) return;
@@ -70,7 +85,7 @@
       <aside class="pass-stub"><div><span class="pass-label">Kode e-ticket</span>{#if qrSource}<img class="qr-code" src={qrSource} alt={`QR code untuk kode e-ticket ${ticket.code}`} />{:else}<p role="status">QR tidak tersedia. Gunakan kode e-ticket di bawah.</p>{/if}<p class="ticket-code">{ticket.code}</p><button class="button button-secondary" type="button" onclick={copyCode}>Salin kode</button></div><Countdown startsAt={ticket.eventStartsAt} /></aside>
     </article>
     <div class="ticket-actions"><button class="button" type="button" onclick={() => window.print()}>Cetak / Simpan PDF</button><a class="button button-secondary" href="/tiket-saya">Tiket Saya</a></div>
-    <p class="ticket-caption">Akses tiket berlaku di browser yang sama. Tunjukkan QR atau kode e-ticket kepada petugas di gate.</p>
+    <p class="ticket-caption">Simpan email ini untuk membuka e-ticket kembali. Tunjukkan QR atau kode e-ticket kepada petugas di gate.</p>
     {#if toast}<Toast id={toast.id} message={toast.message} tone={toast.tone} onDismiss={() => toast = null} />{/if}
   </section>
 {/if}

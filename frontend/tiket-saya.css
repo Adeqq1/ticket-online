@@ -38,3 +38,16 @@
 .my-ticket-action { margin-bottom: 0; }
 @media (max-width: 1023px) { .my-ticket-card-link { grid-template-columns: 130px minmax(0, 1fr); } }
 @media (max-width: 767px) { .my-tickets { padding-block: 28px 56px; }.my-tickets-summary { align-items: flex-start; flex-direction: column; gap: 5px; }.my-tickets-list { grid-template-columns: 1fr; gap: 12px; }.my-ticket-card-link { grid-template-columns: 120px minmax(0, 1fr); }.my-ticket-poster { min-height: 190px; padding: 10px; font-size: 11px; }.my-ticket-card-body { padding: 15px; }.my-ticket-card h2 { margin-top: 24px; font-size: 30px; }.my-ticket-reference { font-size: 10px; }.my-ticket-action { padding-top: 18px; }.my-tickets-empty { grid-template-columns: 1fr; justify-items: start; gap: 38px; min-height: 0; padding-block: 42px; }.ticket-illustration { margin-left: 14px; }.my-order-card { align-items: flex-start; flex-direction: column; gap: 12px; } }
+.recovery-panel { display: grid; gap: 12px; max-width: 680px; margin-top: 20px; border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; background: var(--surface); line-height: 1.5; }
+.recovery-panel h2, .recovery-panel p { margin: 0; }
+.recovery-panel h2 { font-size: 24px; letter-spacing: -.03em; }
+.recovery-panel > p, .recovery-hint { color: var(--muted); }
+.recovery-panel .button { justify-self: start; }
+.recovery-panel:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+.recovery-hint { font-size: 13px; font-weight: 400; }
+.recovery-wide { grid-column: 1 / -1; }
+.recovery-codes { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.recovery-codes li { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 8px; }
+.recovery-codes code { font-family: "Courier New", monospace; font-weight: 700; overflow-wrap: anywhere; }
+.recovery-footer { margin-top: 28px; }
+@media (max-width: 767px) { .recovery-panel.field-grid { grid-template-columns: 1fr; } }

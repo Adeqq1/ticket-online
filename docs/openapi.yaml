@@ -467,7 +467,11 @@ paths:
       operationId: midtransNotification
       tags: [Pembayaran]
       summary: Terima notifikasi status pembayaran Midtrans
-      description: Endpoint memverifikasi signature_key dan nominal sebelum mengubah status order atau menerbitkan tiket.
+      description: >-
+        Endpoint memverifikasi signature_key dan nominal sebelum mengubah status order atau menerbitkan tiket.
+        Notifikasi yang sama boleh dikirim berulang atau bersamaan; order tetap PAID dengan satu set e-ticket,
+        dan email tiket tetap satu pekerjaan antrean. Pengiriman email terjadi di worker terpisah, sehingga
+        kegagalan SMTP tidak memengaruhi respons webhook, status pembayaran, atau tiket.
       requestBody:
         required: true
         content:
@@ -615,6 +619,105 @@ paths:
                   value: {error: {code: TICKET_NOT_FOUND, message: E-ticket tidak ditemukan}}
         '410':
           $ref: '#/components/responses/AccessTokenExpired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/ticket-recovery:
+    post:
+      operationId: requestTicketRecovery
+      tags: [E-ticket]
+      summary: Minta tautan pemulihan tiket
+      description: >-
+        Mengantrekan email pemulihan. Pencocokan email dan reference dilakukan worker, sehingga semua permintaan
+        berformat valid mendapat respons 202 yang sama. Email hanya dikirim ke alamat pembeli yang tersimpan untuk
+        pesanan PAID dengan tiket lengkap dan akses yang belum kedaluwarsa. Tautan berbentuk
+        /pulihkan-tiket#token=... dan berlaku 15 menit. Batas: 10 permintaan per IP per 15 menit (429), serta
+        3 permintaan per pasangan email/reference per 15 menit dengan jeda 60 detik (tetap 202, tanpa email baru).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketRecoveryRequest'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '400':
+          $ref: '#/components/responses/InvalidIDOrJSON'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/ticket-recovery/verify:
+    post:
+      operationId: verifyTicketRecovery
+      tags: [E-ticket]
+      summary: Gunakan tautan pemulihan
+      description: >-
+        Memakai token pemulihan sekali. Keberhasilan menandai permintaan dan seluruh token dari percobaan email
+        lainnya sebagai terpakai, lalu mengembalikan token akses order. Batas 30 verifikasi per IP per 15 menit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+      responses:
+        '200':
+          description: Akses order yang dipulihkan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketRecoveryResult'
+        '400':
+          $ref: '#/components/responses/InvalidIDOrJSON'
+        '410':
+          description: Token tidak dikenal, kedaluwarsa, sudah terpakai, atau pesanan tidak lagi memenuhi syarat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: {error: {code: RECOVERY_LINK_INVALID, message: Tautan pemulihan tidak berlaku lagi. Minta tautan baru.}}
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/orders/{orderID}/resend-email:
+    parameters:
+      - $ref: '#/components/parameters/OrderID'
+    post:
+      operationId: resendOrderEmail
+      tags: [E-ticket]
+      summary: Kirim ulang email tiket
+      description: >-
+        Menjadwalkan ulang email tiket ke alamat pembeli yang tersimpan. Pekerjaan yang masih aktif tidak
+        diduplikasi; pekerjaan SENT atau FAILED dijadwalkan ulang dengan jumlah percobaan direset. Satu permintaan per
+        order setiap 60 detik.
+      security:
+        - OrderAccessToken: []
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '400':
+          $ref: '#/components/responses/InvalidID'
+        '401':
+          $ref: '#/components/responses/AccessTokenRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Pesanan belum lunas atau tiketnya belum lengkap.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: {error: {code: ORDER_NOT_ELIGIBLE, message: Email tiket hanya dapat dikirim ulang untuk pesanan lunas dengan tiket lengkap}}
+        '410':
+          $ref: '#/components/responses/AccessTokenExpired'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/staff/login:
@@ -963,6 +1066,26 @@ components:
   responses:
     NoContent:
       description: Operasi berhasil; respons tidak memiliki body.
+    Accepted:
+      description: Permintaan diterima dan diproses di latar belakang.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [message]
+            properties:
+              message: {type: string}
+    RateLimited:
+      description: Batas permintaan terlampaui.
+      headers:
+        Retry-After:
+          description: Detik sampai permintaan berikutnya diizinkan.
+          schema: {type: integer, minimum: 1}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: {error: {code: RATE_LIMITED, message: Terlalu banyak permintaan. Coba lagi nanti.}}
     InvalidJSON:
       description: JSON tidak valid.
       content:
@@ -1073,6 +1196,26 @@ components:
           properties:
             code: {type: string}
             message: {type: string}
+    TicketRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [email, reference]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+        reference: {type: string, pattern: '^[Tt][Oo]-[0-9A-Fa-f]{20}$'}
+    TicketRecoveryResult:
+      type: object
+      required: [orderId, accessToken, reference, reservationId, expiresAt, accessExpiresAt, ticketIds]
+      properties:
+        orderId: {type: string}
+        accessToken: {type: string, description: Token akses order yang sama dengan respons checkout.}
+        reference: {type: string}
+        reservationId: {type: string}
+        expiresAt: {type: string, format: date-time, description: Deadline order.}
+        accessExpiresAt: {type: string, format: date-time}
+        ticketIds:
+          type: array
+          items: {type: string}
     StaffAssignment:
       type: object
       additionalProperties: false

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
+	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
@@ -25,11 +27,11 @@ func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL t
 	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "")
 }
 
-func NewHandlerWithPaymentConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL)
+func NewHandlerWithPaymentConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, trustedProxies ...netip.Prefix) http.Handler {
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, trustedProxies...)
 }
 
-func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string) http.Handler {
+func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, trustedProxies ...netip.Prefix) http.Handler {
 	mux := http.NewServeMux()
 	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
@@ -38,6 +40,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	paymentHandler := payment.NewHandlerWithMidtrans(payment.NewRepository(db), logger, access, midtransKey, frontendURL)
 	staffService := staffauth.New(db)
 	staffauth.NewHandler(staffService, logger).Register(mux)
+	recovery.NewHandler(db, access, logger, trustedProxies...).Register(mux)
 	checkinHandler := checkin.NewHandler(checkin.NewService(db, staffService), logger)
 	mux.HandleFunc("POST /api/v1/staff/check-ins", checkinHandler.CheckIn)
 	mux.HandleFunc("GET /api/v1/staff/ticket-status", checkinHandler.TicketStatus)

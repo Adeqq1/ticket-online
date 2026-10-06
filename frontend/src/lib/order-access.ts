@@ -1,4 +1,10 @@
-export type OrderAccess = { orderId: string; accessToken: string; expiresAt: string; accessExpiresAt: string; reservationId: string; idempotencyKey: string; basketKey: string; reference: string; ticketIds: string[] };
+// Checkout metadata (idempotencyKey, basketKey) is absent on records restored through ticket recovery.
+export type OrderAccess = { orderId: string; accessToken: string; expiresAt: string; accessExpiresAt: string; reservationId: string; idempotencyKey?: string; basketKey?: string; reference: string; ticketIds: string[] };
+export type CheckoutOrderAccess = OrderAccess & { idempotencyKey: string; basketKey: string };
+
+export function hasCheckoutMetadata(record: OrderAccess): record is CheckoutOrderAccess {
+  return Boolean(record.idempotencyKey && record.basketKey);
+}
 
 const prefix = "ticket-online:order:";
 const sessionPrefix = "ticket-online:order-session:";
@@ -11,7 +17,7 @@ function sessionKey(orderId: string) { return `${sessionPrefix}${orderId}`; }
 export function parseOrderAccess(value: string | null): OrderAccess | null {
   try {
     const record = JSON.parse(value ?? "") as Partial<OrderAccess>;
-    if (typeof record.orderId !== "string" || !record.orderId || typeof record.accessToken !== "string" || !record.accessToken || typeof record.expiresAt !== "string" || !Number.isFinite(Date.parse(record.expiresAt)) || typeof record.accessExpiresAt !== "string" || !Number.isFinite(Date.parse(record.accessExpiresAt)) || typeof record.reservationId !== "string" || !record.reservationId || typeof record.idempotencyKey !== "string" || !record.idempotencyKey || typeof record.basketKey !== "string" || !record.basketKey || typeof record.reference !== "string" || !record.reference || !Array.isArray(record.ticketIds) || record.ticketIds.some((id) => typeof id !== "string")) return null;
+    if (typeof record.orderId !== "string" || !record.orderId || typeof record.accessToken !== "string" || !record.accessToken || typeof record.expiresAt !== "string" || !Number.isFinite(Date.parse(record.expiresAt)) || typeof record.accessExpiresAt !== "string" || !Number.isFinite(Date.parse(record.accessExpiresAt)) || typeof record.reservationId !== "string" || !record.reservationId || !(record.idempotencyKey === undefined && record.basketKey === undefined || typeof record.idempotencyKey === "string" && record.idempotencyKey && typeof record.basketKey === "string" && record.basketKey) || typeof record.reference !== "string" || !record.reference || !Array.isArray(record.ticketIds) || record.ticketIds.some((id) => typeof id !== "string")) return null;
     return record as OrderAccess;
   } catch { return null; }
 }

@@ -4,7 +4,7 @@
   const purchaseSteps = [
     { question: "Bagaimana simulasi pembelian tiket berjalan?", answer: "Pilih konser dari katalog, buka detail acara, lalu pilih jenis tiket yang tersedia. Isi data pemesan, pilih metode pembayaran, dan tinjau kembali detail pesanan sebelum menekan tombol Buat pesanan." },
     { question: "Apakah pembayaran di website ini benar-benar diproses?", answer: "Tidak ada uang yang diproses. Metode QRIS, virtual account, dan GoPay hanya simulasi development, serta dinonaktifkan pada lingkungan lain." },
-    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah pembayaran dikonfirmasi server, e-ticket untuk setiap peserta tersedia di halaman Tiket Saya pada browser yang sama. Tunjukkan kode ET dan gate yang tercetak di tiket kepada petugas. Kode ini belum mendukung pemindaian QR. Login pembeli, pengiriman email, dan pemulihan lintas perangkat belum tersedia." }
+    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah pembayaran dikonfirmasi server, ringkasan pesanan dan tautan e-ticket setiap peserta dikirim ke email pemesan. Kamu juga dapat membuka tiket tersimpan pada halaman Tiket Saya. Tunjukkan QR atau kode ET dan gate yang tercetak di tiket kepada petugas." }
   ];
 
   const paymentRules = [

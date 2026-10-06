@@ -1,5 +1,6 @@
 import { eventDate, type Concert, type Genre, type StageZone, type TicketStatus, type TicketTier } from "./concerts.ts";
 import type { Buyer } from "./checkout.ts";
+import { isRecoveryResult } from "./ticket-recovery.ts";
 
 export type ApiZone = { id: string; name: string; description: string };
 export type ApiTicketTier = { id: string; name: string; zoneId: string; price: number; availableQuantity: number; maxPerOrder: number; benefit: string; gate: string; seating: "assigned" | "free-standing" };
@@ -44,6 +45,7 @@ export class ApiError extends Error {
   checkedInAt?: string;
   ticket?: CheckInTicket;
   resultStatus?: "ALREADY_USED";
+  retryAfter?: number;
   constructor(message: string, status: number, code = "API_ERROR", details: Pick<ApiErrorBody, "error" | "status" | "ticket" | "checkedInAt"> = {}) {
     super(message); this.name = "ApiError"; this.status = status; this.code = code;
     this.expectedGate = details.error?.expectedGate;
@@ -63,7 +65,10 @@ async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit
   if (!response.ok) {
     let body: ApiErrorBody = {};
     try { body = await response.json() as ApiErrorBody; } catch { /* malformed error body */ }
-    throw new ApiError(body.error?.message ?? "Terjadi kesalahan pada server.", response.status, body.error?.code ?? "API_ERROR", body);
+    const error = new ApiError(body.error?.message ?? "Terjadi kesalahan pada server.", response.status, body.error?.code ?? "API_ERROR", body);
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    if (Number.isInteger(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter;
+    throw error;
   }
   if (response.status === 204) return undefined as T;
   try { return await response.json() as T; }
@@ -123,6 +128,21 @@ export async function listOrderTickets(orderId: string, accessToken: string, sig
 
 export function getTicket(ticketId: string, accessToken: string, signal?: AbortSignal) {
   return request<ApiTicket>(`/api/v1/tickets/${encodeURIComponent(ticketId)}`, signal, { headers: privateHeaders(accessToken) });
+}
+
+export function requestTicketRecovery(email: string, reference: string, signal?: AbortSignal) {
+  return request<{ message: string }>("/api/v1/ticket-recovery", signal, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, reference }) }, 202);
+}
+
+export function verifyTicketRecovery(token: string, signal?: AbortSignal) {
+  return request<unknown>("/api/v1/ticket-recovery/verify", signal, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) }, 200).then((result) => {
+    if (!isRecoveryResult(result)) throw new ApiError("Respons pemulihan tidak lengkap; hasil belum diketahui.", 0, "UNKNOWN_OUTCOME");
+    return result;
+  });
+}
+
+export function resendOrderEmail(orderId: string, accessToken: string, signal?: AbortSignal) {
+  return request<{ message: string }>(`/api/v1/orders/${encodeURIComponent(orderId)}/resend-email`, signal, { method: "POST", headers: privateHeaders(accessToken) }, 202);
 }
 
 function staffHeaders(accessToken: string): HeadersInit { return { Authorization: `Bearer ${accessToken}` }; }

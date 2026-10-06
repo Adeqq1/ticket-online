@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { findOrderForActiveReservation } from "./checkout-recovery.ts";
-import type { OrderAccess } from "./order-access.ts";
+import type { CheckoutOrderAccess, OrderAccess } from "./order-access.ts";
 import type { StoredReservation } from "./reservation.ts";
 
 const reservation: StoredReservation = {
@@ -11,7 +11,7 @@ const reservation: StoredReservation = {
 };
 const activeReservationId = "reservation-active";
 
-function order(orderId: string, reservationId: string, basketKey = "basket-key"): OrderAccess {
+function order(orderId: string, reservationId: string, basketKey = "basket-key"): CheckoutOrderAccess {
   return {
     orderId,
     accessToken: `token-${orderId}`,

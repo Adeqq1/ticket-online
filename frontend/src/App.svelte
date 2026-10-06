@@ -8,6 +8,8 @@
   import TicketPage from "./pages/TicketPage.svelte";
   import MyTicketsPage from "./pages/MyTicketsPage.svelte";
   import GuidePage from "./pages/GuidePage.svelte";
+  import OrderPage from "./pages/OrderPage.svelte";
+  import TicketRecoveryPage from "./pages/TicketRecoveryPage.svelte";
   import UnknownRoutePage from "./pages/UnknownRoutePage.svelte";
   import AdminArea from "./AdminArea.svelte";
   import { matchRoute } from "./lib/route.ts";
@@ -22,6 +24,8 @@
   {:else if route.name === "checkout"}<CheckoutPage id={route.id} />
   {:else if route.name === "ticket"}<TicketPage id={route.id} />
   {:else if route.name === "my-tickets"}<MyTicketsPage />
+  {:else if route.name === "ticket-recovery"}<TicketRecoveryPage />
+  {:else if route.name === "order"}<OrderPage id={route.id} />
   {:else if route.name === "guide"}<GuidePage />
   {:else if route.name === "admin-login"}<AdminArea page="login" />
   {:else if route.name === "admin-staff"}<AdminArea page="staff" />

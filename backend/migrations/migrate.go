@@ -117,6 +117,15 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		return fmt.Errorf("check migration %s: %w", item.name, err)
 	}
 
+	if item.version == 14 {
+		// MySQL DDL commits implicitly. Resume this upgrade before recording its original checksum.
+		if err := resumeRecovery(ctx, db, item); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration %s: %w", item.name, err)
@@ -132,6 +141,129 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration %s: %w", item.name, err)
+	}
+	return nil
+}
+
+// ponytail: only upgrade 014 needs schema-aware recovery; extend per-upgrade when another non-atomic DDL upgrade is introduced.
+func resumeRecovery(ctx context.Context, db *sql.Conn, item migration) error {
+	exec := func(statement string) error {
+		_, err := db.ExecContext(ctx, statement)
+		return err
+	}
+	for _, statement := range statements(string(item.data))[:3] {
+		if err := exec(statement); err != nil {
+			return err
+		}
+	}
+	exists := func(table, predicate string, args ...any) (bool, error) {
+		var found bool
+		err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM information_schema."+table+
+			" WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_queue' AND "+predicate+")", args...).Scan(&found)
+		return found, err
+	}
+	primaryIsID, err := exists("STATISTICS", "INDEX_NAME = 'PRIMARY' AND COLUMN_NAME = 'id'")
+	if err != nil {
+		return err
+	}
+	if !primaryIsID {
+		found, err := exists("TABLE_CONSTRAINTS", "CONSTRAINT_NAME = 'fk_email_queue_order'")
+		if err != nil {
+			return err
+		}
+		if found {
+			if err := exec("ALTER TABLE email_queue DROP FOREIGN KEY fk_email_queue_order"); err != nil {
+				return err
+			}
+		}
+	}
+	for _, column := range []struct{ name, definition string }{
+		{"id", "CHAR(32) NULL FIRST"},
+		{"kind", "ENUM('TICKETS', 'RECOVERY') NOT NULL DEFAULT 'TICKETS' AFTER id"},
+		{"dedupe_key", "VARCHAR(80) NULL AFTER kind"},
+		{"recovery_request_id", "CHAR(32) NULL AFTER order_id"},
+	} {
+		found, err := exists("COLUMNS", "COLUMN_NAME = ?", column.name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			if err := exec("ALTER TABLE email_queue ADD COLUMN " + column.name + " " + column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	if err := exec(`UPDATE email_queue SET id = COALESCE(id, order_id), dedupe_key = COALESCE(dedupe_key, CONCAT('tickets:', order_id))
+		WHERE kind = 'TICKETS' AND order_id IS NOT NULL AND (id IS NULL OR dedupe_key IS NULL)`); err != nil {
+		return err
+	}
+	var invalid bool
+	if err := db.QueryRowContext(ctx, `SELECT
+		EXISTS(SELECT 1 FROM email_queue WHERE id IS NULL OR dedupe_key IS NULL) OR
+		EXISTS(SELECT 1 FROM email_queue GROUP BY id HAVING COUNT(*) > 1) OR
+		EXISTS(SELECT 1 FROM email_queue GROUP BY dedupe_key HAVING COUNT(*) > 1)`).Scan(&invalid); err != nil {
+		return err
+	}
+	if invalid {
+		return fmt.Errorf("email_queue contains missing or duplicate recovery keys")
+	}
+	if !primaryIsID {
+		primaryExists, err := exists("STATISTICS", "INDEX_NAME = 'PRIMARY'")
+		if err != nil {
+			return err
+		}
+		statement := "ALTER TABLE email_queue MODIFY id CHAR(32) NOT NULL, ADD PRIMARY KEY (id)"
+		if primaryExists {
+			statement += ", DROP PRIMARY KEY"
+		}
+		if err := exec(statement); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct{ name, nullable, definition string }{
+		{"id", "NO", "CHAR(32) NOT NULL"},
+		{"dedupe_key", "NO", "VARCHAR(80) NOT NULL"},
+		{"order_id", "YES", "CHAR(32) NULL"},
+	} {
+		ready, err := exists("COLUMNS", "COLUMN_NAME = ? AND IS_NULLABLE = ?", column.name, column.nullable)
+		if err != nil {
+			return err
+		}
+		if !ready {
+			if err := exec("ALTER TABLE email_queue MODIFY " + column.name + " " + column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	for _, index := range []struct{ name, definition string }{
+		{"uq_email_queue_dedupe", "UNIQUE KEY uq_email_queue_dedupe (dedupe_key)"},
+		{"ix_email_queue_order", "KEY ix_email_queue_order (order_id)"},
+		{"ix_email_queue_recovery", "KEY ix_email_queue_recovery (recovery_request_id)"},
+	} {
+		found, err := exists("STATISTICS", "INDEX_NAME = ?", index.name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			if err := exec("ALTER TABLE email_queue ADD " + index.definition); err != nil {
+				return err
+			}
+		}
+	}
+	for _, constraint := range []struct{ name, definition string }{
+		{"fk_email_queue_order", "FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE RESTRICT ON UPDATE RESTRICT"},
+		{"fk_email_queue_recovery", "FOREIGN KEY (recovery_request_id) REFERENCES recovery_requests (id) ON DELETE RESTRICT ON UPDATE RESTRICT"},
+		{"chk_email_queue_target", "CHECK ((kind = 'TICKETS' AND order_id IS NOT NULL AND recovery_request_id IS NULL) OR (kind = 'RECOVERY' AND order_id IS NULL AND recovery_request_id IS NOT NULL))"},
+	} {
+		found, err := exists("TABLE_CONSTRAINTS", "CONSTRAINT_NAME = ?", constraint.name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			if err := exec("ALTER TABLE email_queue ADD CONSTRAINT " + constraint.name + " " + constraint.definition); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

@@ -62,7 +62,8 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Dompet tiket</p>
     <h1>Tiket saya.</h1>
-    <p>Order dan tiket diambil dari akun akses yang tersimpan pada browser ini. Login pembeli, pengiriman email, dan pemulihan lintas perangkat belum tersedia.</p>
+    <p>Order dan tiket yang tersimpan dapat dibuka di sini. Tautan pada email konfirmasi juga dapat membuka e-ticket di perangkat lain.</p>
+    <p><a class="text-button" href="/pulihkan-tiket">Pulihkan tiket di browser ini</a></p>
   </header>
 
   {#if demoDataPresent}<p class="legacy-ticket-note" role="status">Snapshot demo lama tersimpan di browser, tetapi bukan tiket backend dan tidak ditampilkan sebagai tiket masuk.</p>{/if}
@@ -82,7 +83,7 @@
               <div class="my-ticket-card-body">
                 <div class="my-ticket-card-topline">
                   <span class:past={!upcoming(ticket)} class="my-ticket-status">{upcoming(ticket) ? "Mendatang" : "Selesai"}</span>
-                  <span class="my-ticket-reference">{ticket.orderReference}</span>
+                  {#if access}<a class="my-ticket-reference" href={`/pesanan/${encodeURIComponent(access.orderId)}`}>{ticket.orderReference}</a>{:else}<span class="my-ticket-reference">{ticket.orderReference}</span>{/if}
                 </div>
                 <h2>{ticket.eventArtist}</h2>
                 <p class="my-ticket-date">{eventDate(ticket.eventStartsAt)}</p>

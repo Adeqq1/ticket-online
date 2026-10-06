@@ -2,6 +2,10 @@ package platform
 
 import (
 	"fmt"
+	"net"
+	"net/mail"
+	"net/netip"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +23,13 @@ type Config struct {
 	OrderAccessSecret []byte
 	MidtransServerKey string
 	FrontendURL       string
+	SMTPHost          string
+	SMTPPort          int
+	SMTPUsername      string
+	SMTPPassword      string
+	SMTPFrom          string
+	SMTPTLSMode       string
+	TrustedProxyCIDRs []netip.Prefix
 }
 
 func LoadConfig() (Config, error) {
@@ -29,6 +40,12 @@ func LoadConfig() (Config, error) {
 		StaticDir:         os.Getenv("STATIC_DIR"),
 		MidtransServerKey: strings.TrimSpace(os.Getenv("MIDTRANS_SERVER_KEY")),
 		FrontendURL:       strings.TrimRight(envOr("FRONTEND_URL", "http://localhost:5173"), "/"),
+		SMTPHost:          strings.TrimSpace(os.Getenv("SMTP_HOST")),
+		SMTPPort:          587,
+		SMTPUsername:      os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:      os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:          strings.TrimSpace(os.Getenv("SMTP_FROM")),
+		SMTPTLSMode:       envOr("SMTP_TLS_MODE", "starttls"),
 		ReservationTTL:    10 * time.Minute,
 		ExpiryInterval:    15 * time.Second,
 	}
@@ -38,6 +55,52 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.MySQLDSN == "" {
 		return Config{}, fmt.Errorf("MYSQL_DSN is required")
+	}
+	if value := strings.TrimSpace(os.Getenv("TRUSTED_PROXY_CIDRS")); value != "" {
+		for _, raw := range strings.Split(value, ",") {
+			prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+			if err != nil {
+				return Config{}, fmt.Errorf("invalid TRUSTED_PROXY_CIDRS: %w", err)
+			}
+			cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, prefix.Masked())
+		}
+	}
+	if value := os.Getenv("SMTP_PORT"); value != "" {
+		var port int
+		if _, err := fmt.Sscan(value, &port); err != nil || port < 1 || port > 65535 || fmt.Sprint(port) != value {
+			return Config{}, fmt.Errorf("invalid SMTP_PORT")
+		}
+		cfg.SMTPPort = port
+	}
+	if (cfg.SMTPUsername == "") != (cfg.SMTPPassword == "") {
+		return Config{}, fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD must be set together")
+	}
+	if cfg.SMTPTLSMode != "starttls" && cfg.SMTPTLSMode != "tls" && cfg.SMTPTLSMode != "none" {
+		return Config{}, fmt.Errorf("invalid SMTP_TLS_MODE")
+	}
+	if cfg.SMTPTLSMode == "none" && cfg.AppEnv != "development" {
+		return Config{}, fmt.Errorf("SMTP_TLS_MODE=none is allowed only in development")
+	}
+	if cfg.SMTPTLSMode == "none" && cfg.SMTPUsername != "" {
+		return Config{}, fmt.Errorf("SMTP credentials require TLS")
+	}
+	if cfg.SMTPHost != "" {
+		if strings.ContainsAny(cfg.SMTPHost, " \t\r\n/\\") || (strings.Contains(cfg.SMTPHost, ":") && net.ParseIP(strings.Trim(cfg.SMTPHost, "[]")) == nil) {
+			return Config{}, fmt.Errorf("invalid SMTP_HOST")
+		}
+		if address := net.ParseIP(strings.Trim(cfg.SMTPHost, "[]")); address != nil {
+			cfg.SMTPHost = address.String()
+		}
+		if cfg.SMTPFrom == "" {
+			return Config{}, fmt.Errorf("SMTP_FROM is required when SMTP_HOST is set")
+		}
+		if _, err := mail.ParseAddress(cfg.SMTPFrom); err != nil {
+			return Config{}, fmt.Errorf("invalid SMTP_FROM")
+		}
+		frontend, err := url.Parse(cfg.FrontendURL)
+		if err != nil || frontend.Host == "" || frontend.Path != "" || (frontend.Scheme != "http" && frontend.Scheme != "https") || frontend.User != nil || frontend.RawQuery != "" || frontend.Fragment != "" || (cfg.AppEnv == "production" && frontend.Scheme != "https") {
+			return Config{}, fmt.Errorf("FRONTEND_URL must be an origin and use HTTPS in production when email is enabled")
+		}
 	}
 	cfg.OrderAccessSecret, err = orderaccess.ParseSecret(os.Getenv("ORDER_ACCESS_SECRET"))
 	if err != nil {
