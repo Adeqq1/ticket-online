@@ -62,7 +62,7 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Dompet tiket</p>
     <h1>Tiket saya.</h1>
-    <p>Order dan tiket diambil dari akun akses yang tersimpan pada browser ini. Login pembeli, pengiriman email, dan pemulihan lintas perangkat belum tersedia.</p>
+    <p>Order dan tiket yang tersimpan dapat dibuka di sini. Tautan pada email konfirmasi juga dapat membuka e-ticket di perangkat lain.</p>
   </header>
 
   {#if demoDataPresent}<p class="legacy-ticket-note" role="status">Snapshot demo lama tersimpan di browser, tetapi bukan tiket backend dan tidak ditampilkan sebagai tiket masuk.</p>{/if}

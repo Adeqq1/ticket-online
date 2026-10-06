@@ -1,14 +1,17 @@
 package migrations
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	items, err := load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 12 {
-		t.Fatalf("migration count = %d, want 12", len(items))
+	if len(items) != 13 {
+		t.Fatalf("migration count = %d, want 13", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -17,6 +20,9 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	}
 	if len(statements(string(items[0].data))) < 6 {
 		t.Fatal("initial migration was not split into executable statements")
+	}
+	if !strings.Contains(string(items[12].data), "CREATE TABLE IF NOT EXISTS email_queue") {
+		t.Fatal("email queue migration was not loaded")
 	}
 }
 

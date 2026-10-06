@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/email"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
@@ -45,6 +46,12 @@ func main() {
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
 	go worker.Run(serverCtx)
 	go payment.NewRepository(db).RunExpiryWorker(serverCtx, cfg.ExpiryInterval, cfg.MidtransServerKey, logger)
+	emailWorker := email.NewService(db, email.Config{
+		Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
+		From: cfg.SMTPFrom, TLSMode: cfg.SMTPTLSMode, FrontendURL: cfg.FrontendURL, AccessSecret: cfg.OrderAccessSecret,
+	}, logger)
+	emailWorkerDone := make(chan struct{})
+	go func() { defer close(emailWorkerDone); emailWorker.Run(serverCtx, cfg.ExpiryInterval) }()
 	go func() {
 		logger.Info("http server listening", "addr", cfg.HTTPAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -59,6 +66,11 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
 		os.Exit(1)
+	}
+	select {
+	case <-emailWorkerDone:
+	case <-shutdownCtx.Done():
+		logger.Warn("email worker did not stop before shutdown deadline")
 	}
 	logger.Info("http server stopped")
 }

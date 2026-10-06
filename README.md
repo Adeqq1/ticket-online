@@ -15,9 +15,11 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 
 Catalog event, reservation, order, pembayaran, dan e-ticket menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer`, nama untuk setiap tiket pada `attendees`, dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi hanya tersedia di backend development. Pembayaran berhasil menerbitkan snapshot e-ticket untuk setiap tiket dalam transaksi yang sama.
 
-Frontend checkout, pembayaran simulasi, dan e-ticket membaca order serta snapshot tiket dari API. Setiap peserta menerima satu kode `ET-…` dengan data gate dan snapshot acara dari server. Tiket Saya memuat order yang aksesnya tersimpan pada browser yang sama; login pembeli, email, dan pemulihan lintas perangkat belum tersedia. Snapshot demo lama tetap tersimpan, tetapi tidak dianggap tiket backend.
+Frontend checkout, pembayaran simulasi, dan e-ticket membaca order serta snapshot tiket dari API. Setiap peserta menerima satu kode `ET-…` dengan data gate dan snapshot acara dari server. Tiket Saya memuat order yang aksesnya tersimpan pada browser yang sama; tautan pada email konfirmasi juga dapat membuka e-ticket di perangkat lain. Snapshot demo lama tetap tersimpan, tetapi tidak dianggap tiket backend.
 
 Order `PENDING` memakai deadline reservasi, tersedia sebagai `expiresAt` pada respons checkout/detail order. Worker mengubah order yang lewat deadline menjadi `EXPIRED` dan mengembalikan stok tepat sekali; pembayaran terlambat ditolak meskipun worker belum berjalan. Deadline ini berbeda dari masa berlaku token akses.
+
+Setelah pembayaran berhasil dan semua e-ticket diterbitkan, worker membuat antrean email dan mengirim ringkasan pesanan beserta tautan untuk setiap peserta. Tautan membawa akses privat pada fragment URL yang dibersihkan dari address bar setelah dibuka; tiket dapat dimuat di perangkat lain selama akses order belum kedaluwarsa. Email dikirim maksimal tiga kali. Status antrean yang dapat dilihat di database adalah `PENDING`, `PROCESSING`, `SENT`, dan `FAILED`; `SENT` berarti server SMTP menerima pesan.
 
 Checkout juga memerlukan header `Idempotency-Key` yang sama dengan key reservasi. Respons menyertakan `accessToken` privat order serta `accessExpiresAt`. Simpan token dengan aman; token dipakai sebagai `Authorization: Bearer <accessToken>` pada API order dan tiket, serta pembayaran simulasi. Token kedaluwarsa pukul 00.00 WIB setelah tanggal konser. Server memakai `ORDER_ACCESS_SECRET` yang tetap untuk menandatangani token.
 
@@ -78,11 +80,19 @@ Environment variable backend:
 | `APP_ENV` | `production` | Aktifkan endpoint pembayaran simulasi hanya dengan `development` |
 | `MIDTRANS_SERVER_KEY` | kosong | Server key Midtrans sandbox; mengaktifkan Snap dan webhook bertanda tangan |
 | `FRONTEND_URL` | `http://localhost:5173` | Origin frontend untuk validasi URL kembali Snap |
+| `SMTP_HOST` | kosong | Host server email; kosong menonaktifkan pengiriman email |
+| `SMTP_PORT` | `587` | Port SMTP |
+| `SMTP_USERNAME` | kosong | Username SMTP; harus diisi bersama password |
+| `SMTP_PASSWORD` | kosong | Password SMTP |
+| `SMTP_FROM` | kosong | Alamat pengirim; wajib saat `SMTP_HOST` diisi |
+| `SMTP_TLS_MODE` | `starttls` | `starttls` atau `tls`; `none` hanya untuk development tanpa kredensial |
 | `STATIC_DIR` | kosong | Direktori frontend production |
 | `RESERVATION_TTL` | `10m` | Lama reservation |
 | `EXPIRY_INTERVAL` | `15s` | Interval expiry worker |
 
 `go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali. Backend terpisah juga memerlukan `ORDER_ACCESS_SECRET` yang sama setiap kali proses API dijalankan.
+
+Untuk mengaktifkan email, set `SMTP_HOST`, `SMTP_FROM`, dan kredensial yang diberikan server SMTP. `SMTP_USERNAME` dan `SMTP_PASSWORD` harus hadir bersama. Set `FRONTEND_URL` ke origin aplikasi ber-HTTPS sebelum mengaktifkan SMTP pada production. Compose meneruskan variabel ini ke API; simpan password melalui secret environment deployment, bukan Git.
 
 Untuk sandbox, isi `MIDTRANS_SERVER_KEY` dengan Server Key sandbox dari dashboard Midtrans dan set `FRONTEND_URL` ke origin aplikasi, lalu jalankan Compose. Daftarkan notifikasi Midtrans ke `POST /api/v1/payments/midtrans/notification`. Checkout meminta sesi Snap melalui `POST /api/v1/orders/{orderID}/payments`, lalu mengarahkan pembeli ke halaman pembayaran Midtrans. Order hanya ditandai lunas dan e-ticket diterbitkan setelah notifikasi bertanda tangan valid dengan nominal yang cocok; status order dapat dimuat ulang setelah pembeli kembali ke checkout. Worker memeriksa status Midtrans sebelum melepas stok order dengan sesi aktif; jika provider tidak dapat dihubungi, stok tetap ditahan sampai status dapat dipastikan. Settlement yang datang setelah stok telanjur dilepas dicatat sebagai kasus rekonsiliasi durable dan tidak menerbitkan tiket melebihi kapasitas. Snap sandbox memakai QRIS, transfer bank, dan GoPay. Jangan gunakan server key production untuk sandbox.
 
