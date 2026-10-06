@@ -52,6 +52,8 @@ export type AdminPaymentCase = { id: string; status: "OPEN" | "RESOLVED"; orderI
 export type AdminPaymentCaseDetail = AdminPaymentCase & { total: number; expiresAt: string; gatewayOrderId: string; canRecheck: boolean; canResolve: boolean; notes: AdminIssueAudit[]; history: AdminIssueAudit[] };
 export type AdminEmailJob = { id: string; kind: "TICKETS" | "RECOVERY"; status: "FAILED" | "PENDING" | "SENT" | "PROCESSING"; reference: string; recipient: string; attempts: number; lastError: string; updatedAt: string; supersededBy: string | null };
 export type AdminEmailDetail = AdminEmailJob & { orderStatus: string; canRetry: boolean; retryReason: string; retryJobId: string | null; history: AdminIssueAudit[] };
+export type AdminWorkerStatus = { name: string; running: boolean; startedAt: string | null; lastFinishedAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; consecutiveFailures: number };
+export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; workers: AdminWorkerStatus[]; alerts: string[] };
 
 export class ApiError extends Error {
   code: string;
@@ -140,6 +142,7 @@ export function resolveAdminPaymentCase(accessToken: string, id: string, note: s
 export function getAdminEmailJobs(accessToken: string, signal?: AbortSignal, cursor?: string) { const query = new URLSearchParams(); if (cursor) query.set("cursor", cursor); return adminIssueRequest<{ items: AdminEmailJob[]; nextCursor: string | null }>(accessToken, `/api/v1/admin/email-jobs${query.size ? `?${query}` : ""}`, signal); }
 export function getAdminEmailJob(accessToken: string, id: string, signal?: AbortSignal) { return adminIssueRequest<AdminEmailDetail>(accessToken, `/api/v1/admin/email-jobs/${encodeURIComponent(id)}`, signal); }
 export function retryAdminEmailJob(accessToken: string, id: string) { return adminIssueRequest<{ jobId: string; retryJobId: string; status: string }>(accessToken, `/api/v1/admin/email-jobs/${encodeURIComponent(id)}/retry`, undefined, "POST"); }
+export function getAdminOperations(accessToken: string, signal?: AbortSignal) { return adminIssueRequest<AdminOperations>(accessToken, "/api/v1/admin/operations", signal); }
 
 export function createAdminEvent(accessToken: string, payload: AdminEventInput, signal?: AbortSignal) {
   return request<AdminApiEvent>("/api/v1/admin/events", signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) });

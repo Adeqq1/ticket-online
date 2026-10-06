@@ -1,0 +1,83 @@
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${STAGING_DB_NAME:?Set STAGING_DB_NAME}
+      MYSQL_USER: ${STAGING_DB_USER:?Set STAGING_DB_USER}
+      MYSQL_PASSWORD: ${STAGING_DB_PASSWORD:?Set STAGING_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${STAGING_DB_ROOT_PASSWORD:?Set STAGING_DB_ROOT_PASSWORD}
+      STAGING_DB_BACKUP_PASSWORD: ${STAGING_DB_BACKUP_PASSWORD:?Set STAGING_DB_BACKUP_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
+      - ./.secrets/mysql-backup.cnf:/run/secrets/backup.cnf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      private:
+        ipv4_address: 172.30.19.4
+    restart: unless-stopped
+
+  api:
+    image: ${STAGING_IMAGE:?Set STAGING_IMAGE to the tested image tag}
+    environment:
+      APP_ENV: production
+      HTTP_ADDR: :8080
+      STATIC_DIR: /app/public
+      MYSQL_DSN: ${STAGING_MYSQL_DSN:?Set STAGING_MYSQL_DSN}
+      ORDER_ACCESS_SECRET: ${ORDER_ACCESS_SECRET:?Set ORDER_ACCESS_SECRET}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:?Set sandbox MIDTRANS_SERVER_KEY}
+      FRONTEND_URL: https://${STAGING_DOMAIN:?Set STAGING_DOMAIN}
+      SMTP_HOST: ${SMTP_HOST:?Set sandbox SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:?Set sandbox SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?Set sandbox SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM:?Set sandbox SMTP_FROM}
+      SMTP_TLS_MODE: ${SMTP_TLS_MODE:-starttls}
+      TRUSTED_PROXY_CIDRS: 172.30.19.2/32
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/ticket-api", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks: [private]
+    restart: unless-stopped
+
+  https:
+    image: caddy:2-alpine
+    environment:
+      STAGING_DOMAIN: ${STAGING_DOMAIN:?Set STAGING_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      private:
+        ipv4_address: 172.30.19.2
+    restart: unless-stopped
+
+networks:
+  private:
+    ipam:
+      config:
+        - subnet: 172.30.19.0/24
+
+volumes:
+  mysql_data:
+  caddy_data:
+  caddy_config:

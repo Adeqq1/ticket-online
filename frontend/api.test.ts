@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminCheckInHistory, getAdminEmailJobs, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
+import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -8,6 +8,21 @@ const apiEvent: ApiEvent = {
   zones: [{ id: "festival", name: "Festival", description: "Area umum" }],
   ticketTiers: [{ id: "festival", name: "Festival", zoneId: "festival", price: 225000, availableQuantity: 42, maxPerOrder: 6, benefit: "Area berdiri", gate: "Gate B", seating: "free-standing" }],
 };
+
+test("admin operations API sends the staff session to the protected endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let request: { url: string; init?: RequestInit } | undefined;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    request = { url: String(input), init };
+    return new Response(JSON.stringify({ collectedAt: "2026-10-06T00:00:00Z", api5xxLast5m: 0, failedEmailJobs: 0, oldestPendingEmailSeconds: 0, openPaymentCases: 0, workers: [], alerts: [] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const result = await getAdminOperations("staff-token");
+    expect(result.alerts).toEqual([]);
+    expect(request?.url).toBe("/api/v1/admin/operations");
+    expect(new Headers(request?.init?.headers).get("Authorization")).toBe("Bearer staff-token");
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("maps API catalog DTO to the frontend concert model", () => {
   const concert = mapApiEvent(apiEvent);

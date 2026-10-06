@@ -18,6 +18,8 @@ COPY --from=backend-build /out/ticket-api /app/ticket-api
 COPY --from=backend-build /out/ticket-migrate /app/ticket-migrate
 COPY --from=backend-build /out/ticket-staff /app/ticket-staff
 COPY --from=frontend-build /src/frontend/dist /app/public
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.revision=$VCS_REF
 USER nonroot:nonroot
 ENV HTTP_ADDR=:8080 STATIC_DIR=/app/public
 EXPOSE 8080

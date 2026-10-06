@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 )
 
 func (r *Repository) ExpirePendingOrders(ctx context.Context) error {
@@ -48,7 +50,10 @@ func (r *Repository) RunExpiryWorker(ctx context.Context, interval time.Duration
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		if err := r.ExpirePendingOrdersWithMidtrans(ctx, serverKey); err != nil && ctx.Err() == nil {
+		operations.Process.Begin("payment_expiry", time.Now())
+		err := r.ExpirePendingOrdersWithMidtrans(ctx, serverKey)
+		operations.Process.Finish("payment_expiry", time.Now(), err)
+		if err != nil && ctx.Err() == nil {
 			logger.ErrorContext(ctx, "reconcile expired payment orders", "error", err)
 		}
 		select {

@@ -7,10 +7,11 @@
   import AdminEventsPage from "./pages/AdminEventsPage.svelte";
   import AdminOrdersPage from "./pages/AdminOrdersPage.svelte";
   import AdminIssuesPage from "./pages/AdminIssuesPage.svelte";
+  import AdminOperationsPage from "./pages/AdminOperationsPage.svelte";
   import { ApiError, getStaffProfile, type Staff } from "./lib/api.ts";
   import { clearStaffSession, logoutStaffSession, readStaffSession, roleMatchesPage, staffHome } from "./lib/staff-session.ts";
 
-  let { page }: { page: "login" | "staff" | "history" | "events" | "orders" | "issues" | "scan" } = $props();
+  let { page }: { page: "login" | "staff" | "history" | "events" | "orders" | "issues" | "operations" | "scan" } = $props();
   let staff = $state<Staff | null>(null);
   let checking = $state(true);
   let error = $state("");
@@ -28,8 +29,8 @@
 
   function profileUpdated(current: Staff) {
     staff = current;
-    if (page === "issues" && current.role !== "ADMIN") location.replace(staffHome(current.role));
-    if (page !== "login" && page !== "issues" && !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current)) location.replace(staffHome(current.role));
+    if ((page === "issues" || page === "operations") && current.role !== "ADMIN") location.replace(staffHome(current.role));
+    if (page !== "login" && page !== "issues" && page !== "operations" && !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current)) location.replace(staffHome(current.role));
   }
 
   async function logout() {
@@ -68,7 +69,7 @@
       if (!alive || generation !== sessionGeneration) return;
       if (current.role !== "ADMIN" && current.role !== "STAFF") { clearStaffSession(); location.replace("/admin/login"); return; }
       staff = current;
-      if (page === "login" || (page === "issues" ? current.role !== "ADMIN" : !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current))) { location.replace(staffHome(current.role)); return; }
+      if (page === "login" || ((page === "issues" || page === "operations") ? current.role !== "ADMIN" : !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current))) { location.replace(staffHome(current.role)); return; }
       expiryTimer = setTimeout(login, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     } catch (cause) {
       if (!alive || generation !== sessionGeneration) return;
@@ -114,6 +115,7 @@
     {:else if page === "events"}<AdminEventsPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
     {:else if page === "orders"}<AdminOrdersPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
     {:else if page === "issues"}<AdminIssuesPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
+    {:else if page === "operations"}<AdminOperationsPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
     {:else if page === "scan"}<AdminScanPage accessToken={readStaffSession()?.accessToken ?? ""} {staff} sessionReady={Boolean(staff) && !checking && !error && !logoutPending} onUnauthorized={login} onProfile={profileUpdated} onLogout={logout} loggingOut={logoutPending} />{/if}
   </div>
 {/if}

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,13 +12,19 @@ import (
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/email"
+	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
+	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 	"github.com/Adeqq1/ticket-online/backend/migrations"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
+		healthcheck()
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	cfg, err := platform.LoadConfig()
 	if err != nil {
@@ -42,10 +50,16 @@ func main() {
 
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithPaymentConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL, cfg.TrustedProxyCIDRs...))
+	slog.SetDefault(logger)
+	metrics := operations.NewService(db, staffauth.New(db), operations.Process)
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithOperations(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL, metrics, cfg.TrustedProxyCIDRs...))
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
+	operations.Process.Register("reservation", time.Now())
+	operations.Process.Register("payment_expiry", time.Now())
+	operations.Process.Register("email", time.Now())
 	go worker.Run(serverCtx)
 	go payment.NewRepository(db).RunExpiryWorker(serverCtx, cfg.ExpiryInterval, cfg.MidtransServerKey, logger)
+	go metrics.Run(serverCtx, logger)
 	emailWorker := email.NewService(db, email.Config{
 		Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
 		From: cfg.SMTPFrom, TLSMode: cfg.SMTPTLSMode, FrontendURL: cfg.FrontendURL, AccessSecret: cfg.OrderAccessSecret,
@@ -73,4 +87,27 @@ func main() {
 		logger.Warn("email worker did not stop before shutdown deadline")
 	}
 	logger.Info("http server stopped")
+}
+
+func healthcheck() {
+	address := os.Getenv("HTTP_ADDR")
+	if address == "" {
+		address = ":8080"
+	}
+	_, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" {
+		fmt.Fprintln(os.Stderr, "invalid HTTP_ADDR")
+		os.Exit(1)
+	}
+	client := http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get("http://" + net.JoinHostPort("127.0.0.1", port) + "/api/v1/ready")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "API readiness check failed")
+		os.Exit(1)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, "API is not ready")
+		os.Exit(1)
+	}
 }

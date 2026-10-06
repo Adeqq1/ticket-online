@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-staging-backups-after-14-days",
+      "Status": "Enabled",
+      "Filter": {"Prefix": "ticket-online-staging/backups/"},
+      "Expiration": {"Days": 14},
+      "NoncurrentVersionExpiration": {"NoncurrentDays": 14}
+    }
+  ]
+}

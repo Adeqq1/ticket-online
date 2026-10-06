@@ -24,6 +24,8 @@ tags:
     description: Pengelolaan metadata dan status publikasi konser khusus ADMIN.
   - name: Check-in
     description: Check-in hanya dapat dilakukan STAFF pada event dan gate yang ditugaskan. ADMIN dapat membaca status dan riwayat sesuai endpoint.
+  - name: Admin Operasional
+    description: Pemantauan API, worker, email gagal, dan kasus pembayaran terbuka khusus ADMIN.
 paths:
   /api/v1/events:
     get:
@@ -1377,6 +1379,28 @@ paths:
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '409': {description: Job tidak lagi gagal, telah digantikan, atau order tidak memenuhi syarat.}
         '429': {description: Batas kirim ulang tercapai.}
+  /api/v1/admin/operations:
+    get:
+      operationId: getAdminOperations
+      tags: [Admin Operasional]
+      summary: Membaca status API, antrean email, kasus pembayaran, dan worker
+      description: Hanya ADMIN aktif. Metrik dikumpulkan berkala; snapshot yang lebih lama dari dua menit dianggap belum tersedia.
+      security: [{StaffSessionToken: []}]
+      responses:
+        '200':
+          description: Snapshot operasional terbaru.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminOperations'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '503':
+          description: Snapshot metrik kedaluwarsa atau sesi tidak dapat diverifikasi.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/admin/check-ins:
     get:
       operationId: listCheckInHistory
@@ -1581,6 +1605,29 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/Error'}
   schemas:
+    AdminOperations:
+      type: object
+      required: [collectedAt, api5xxLast5m, failedEmailJobs, oldestPendingEmailSeconds, openPaymentCases, workers, alerts]
+      properties:
+        collectedAt: {type: string, format: date-time}
+        api5xxLast5m: {type: integer, minimum: 0}
+        failedEmailJobs: {type: integer, minimum: 0}
+        oldestPendingEmailSeconds: {type: integer, minimum: 0}
+        openPaymentCases: {type: integer, minimum: 0}
+        workers:
+          type: array
+          items:
+            type: object
+            required: [name, running, consecutiveFailures]
+            properties:
+              name: {type: string, enum: [reservation, payment_expiry, email]}
+              running: {type: boolean}
+              startedAt: {type: [string, 'null'], format: date-time}
+              lastFinishedAt: {type: [string, 'null'], format: date-time}
+              lastSuccessAt: {type: [string, 'null'], format: date-time}
+              lastFailureAt: {type: [string, 'null'], format: date-time}
+              consecutiveFailures: {type: integer, minimum: 0}
+        alerts: {type: array, items: {type: string}}
     Error:
       type: object
       required: [error]

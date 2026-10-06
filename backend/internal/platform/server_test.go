@@ -125,6 +125,29 @@ func TestAdminEventRoutesRequireAdministratorSession(t *testing.T) {
 	}
 }
 
+func TestAdminOperationsRequiresSessionAndReportsAuthenticationOutage(t *testing.T) {
+	handler := testHandler(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), "", false)
+	for _, test := range []struct {
+		name, token string
+		want        int
+	}{
+		{name: "missing session", want: http.StatusUnauthorized},
+		{name: "session backend unavailable", token: strings.Repeat("a", 43), want: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/operations", nil)
+			if test.token != "" {
+				request.Header.Set("Authorization", "Bearer "+test.token)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want || response.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status/cache-control = %d/%q, want %d/no-store: %s", response.Code, response.Header().Get("Cache-Control"), test.want, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestStaticHandlerFallsBackToIndexForBrowserRoutes(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("spa"), 0o644); err != nil {
