@@ -165,7 +165,23 @@ func TestAdminLifecycleLocksAuditsArchivesAndPreservesReservationSnapshot(t *tes
 	if len(detail.TicketTiers) != 1 || detail.TicketTiers[0].Capacity != 5 || detail.TicketTiers[0].BoundQuantity != 5 || detail.TicketTiers[0].AvailableQuantity != 0 {
 		t.Fatalf("concurrent capacity result = %+v", detail.TicketTiers)
 	}
-	assertTierAuditAvailability(t, ctx, db, eventID, 0)
+	// The audit captures the admin transaction; a later reservation can reduce current stock.
+	var beforeCapacity, beforeAvailable, afterCapacity, afterAvailable uint64
+	if err := db.QueryRowContext(ctx, `SELECT
+		JSON_UNQUOTE(JSON_EXTRACT(before_json, '$.capacity')),
+		JSON_UNQUOTE(JSON_EXTRACT(before_json, '$.availableQuantity')),
+		JSON_UNQUOTE(JSON_EXTRACT(after_json, '$.capacity')),
+		JSON_UNQUOTE(JSON_EXTRACT(after_json, '$.availableQuantity'))
+		FROM admin_audit_log WHERE object_id = ? AND object_type = 'TICKET_TIER'
+		ORDER BY id DESC LIMIT 1`, eventID+"/general").Scan(&beforeCapacity, &beforeAvailable, &afterCapacity, &afterAvailable); err != nil {
+		t.Fatal(err)
+	}
+	if beforeCapacity != 12 || (beforeAvailable != 7 && beforeAvailable != 8) || afterCapacity != 5 {
+		t.Fatalf("concurrent audit capacity/available = %d/%d -> %d/%d", beforeCapacity, beforeAvailable, afterCapacity, afterAvailable)
+	}
+	if afterAvailable != afterCapacity-(beforeCapacity-beforeAvailable) {
+		t.Fatalf("concurrent audit changed bound quantity: capacity/available = %d/%d -> %d/%d", beforeCapacity, beforeAvailable, afterCapacity, afterAvailable)
+	}
 	var auditCountBefore int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_audit_log WHERE object_id = ?`, eventID+"/general").Scan(&auditCountBefore); err != nil {
 		t.Fatal(err)
