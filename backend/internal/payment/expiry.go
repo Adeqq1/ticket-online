@@ -5,10 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
 func (r *Repository) ExpirePendingOrders(ctx context.Context) error {
+	return r.ExpirePendingOrdersWithMidtrans(ctx, "")
+}
+
+func (r *Repository) ExpirePendingOrdersWithMidtrans(ctx context.Context, serverKey string) error {
 	rows, err := r.db.QueryContext(ctx, "SELECT id FROM orders WHERE status = 'PENDING' AND expires_at <= UTC_TIMESTAMP(6) ORDER BY expires_at, id LIMIT 100")
 	if err != nil {
 		return fmt.Errorf("find expired orders: %w", err)
@@ -30,39 +35,32 @@ func (r *Repository) ExpirePendingOrders(ctx context.Context) error {
 	if closeErr != nil {
 		return fmt.Errorf("close expired orders: %w", closeErr)
 	}
+	var failures []error
 	for _, id := range ids {
-		if err := r.expireOrder(ctx, id); err != nil {
-			return err
+		if err := r.expireOrderWithMidtrans(ctx, id, serverKey); err != nil {
+			failures = append(failures, fmt.Errorf("expire order %s: %w", id, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
+}
+
+func (r *Repository) RunExpiryWorker(ctx context.Context, interval time.Duration, serverKey string, logger *slog.Logger) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := r.ExpirePendingOrdersWithMidtrans(ctx, serverKey); err != nil && ctx.Err() == nil {
+			logger.ErrorContext(ctx, "reconcile expired payment orders", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (r *Repository) expireOrder(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return fmt.Errorf("begin order expiration: %w", err)
-	}
-	defer tx.Rollback()
-	var status string
-	var expiresAt time.Time
-	err = tx.QueryRowContext(ctx, "SELECT status, expires_at FROM orders WHERE id = ? FOR UPDATE", id).Scan(&status, &expiresAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("lock order for expiration: %w", err)
-	}
-	if status != "PENDING" || time.Now().UTC().Before(expiresAt) {
-		return nil
-	}
-	if err := expireLockedOrder(ctx, tx, id); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit order expiration: %w", err)
-	}
-	return nil
+	return r.expireOrderWithMidtrans(ctx, id, "")
 }
 
 // Both payment and expiry lock the order first, then update tiers in ID order.

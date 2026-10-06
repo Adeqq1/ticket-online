@@ -328,7 +328,7 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 	if response := callHistory(validSession.AccessToken, ""); response.Code != http.StatusForbidden {
 		t.Fatalf("staff check-in history status=%d body=%s", response.Code, response.Body.String())
 	}
-	if response := callHistory(otherSession.AccessToken, "?eventId="); response.Code != http.StatusBadRequest {
+	if response := callHistory(otherSession.AccessToken, "?eventId="+eventID+"&eventId="+eventID); response.Code != http.StatusBadRequest {
 		t.Fatalf("duplicate history filter status=%d body=%s", response.Code, response.Body.String())
 	}
 	if _, err := db.ExecContext(ctx, "UPDATE staff_users SET role = 'ADMIN' WHERE id = ?", otherStaff.ID); err != nil {
@@ -340,12 +340,16 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 	if historyResponse.Code != http.StatusOK || json.Unmarshal(historyResponse.Body.Bytes(), &history) != nil {
 		t.Fatalf("admin history status=%d body=%s", historyResponse.Code, historyResponse.Body.String())
 	}
-	if len(history.Items) != 2 || history.FilterOptions == nil || history.NextCursor != nil {
-		t.Fatalf("filtered history = %+v; want success and duplicate for partial code", history)
+	if len(history.Items) != 4 || history.FilterOptions == nil || history.NextCursor != nil {
+		t.Fatalf("filtered history = %+v; want four attempts for partial code", history)
 	}
-	var successful, repeated int
+	var successful, repeated, unpaid, forbidden int
 	for _, item := range history.Items {
-		if item.Code == nil || !strings.Contains(*item.Code, partialCode) || item.Staff.ID != validStaff.ID || item.EventID == nil || *item.EventID != eventID || item.Gate == nil || *item.Gate != gateA {
+		wantStaffID := validStaff.ID
+		if item.Outcome == "FORBIDDEN" {
+			wantStaffID = otherStaff.ID
+		}
+		if item.Code == nil || !strings.Contains(*item.Code, partialCode) || item.Staff.ID != wantStaffID || item.EventID == nil || *item.EventID != eventID || item.Gate == nil || *item.Gate != gateA {
 			t.Fatalf("history item does not match filters: %+v", item)
 		}
 		switch item.Outcome {
@@ -353,10 +357,14 @@ func TestCheckInAuthorizationGateAndSingleUse(t *testing.T) {
 			successful++
 		case "TICKET_ALREADY_USED":
 			repeated++
+		case "ORDER_NOT_PAID":
+			unpaid++
+		case "FORBIDDEN":
+			forbidden++
 		}
 	}
-	if successful != 1 || repeated != 1 {
-		t.Fatalf("filtered history outcomes: checked-in=%d repeated=%d", successful, repeated)
+	if successful != 1 || repeated != 1 || unpaid != 1 || forbidden != 1 {
+		t.Fatalf("filtered history outcomes: checked-in=%d repeated=%d unpaid=%d forbidden=%d", successful, repeated, unpaid, forbidden)
 	}
 	noMatch := callHistory(otherSession.AccessToken, "?q=not-a-ticket")
 	if noMatch.Code != http.StatusOK || !strings.Contains(noMatch.Body.String(), `"items":[]`) {

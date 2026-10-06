@@ -7,8 +7,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 11 {
-		t.Fatalf("migration count = %d, want 11", len(items))
+	if len(items) != 12 {
+		t.Fatalf("migration count = %d, want 12", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {

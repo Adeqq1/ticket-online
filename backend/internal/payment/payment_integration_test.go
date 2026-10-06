@@ -4,8 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,7 +184,7 @@ func TestUnpaidOrderExpiryAndPaymentRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	repository := NewRepository(db)
-	for _, scenario := range []string{"abandoned", "late-payment", "paid", "race-expired", "race-paid"} {
+	for _, scenario := range []string{"abandoned", "late-payment", "paid", "race-expired", "race-paid", "gateway-late-settlement", "gateway-unavailable", "gateway-cancel-confirmed", "gateway-cancel-unconfirmed", "settlement-after-release"} {
 		t.Run(scenario, func(t *testing.T) {
 			reservationID, err := randomID()
 			if err != nil {
@@ -200,7 +204,7 @@ func TestUnpaidOrderExpiryAndPaymentRace(t *testing.T) {
 			}
 			var orderID string
 			t.Cleanup(func() {
-				for _, table := range []string{"etickets", "payments", "order_attendees", "order_buyers", "order_items"} {
+				for _, table := range []string{"payment_reconciliation_cases", "etickets", "payments", "order_attendees", "order_buyers", "order_items"} {
 					if _, err := db.Exec("DELETE FROM "+table+" WHERE order_id = ?", orderID); err != nil {
 						t.Error(err)
 					}
@@ -232,6 +236,14 @@ func TestUnpaidOrderExpiryAndPaymentRace(t *testing.T) {
 				t.Fatal(err)
 			}
 			orderID = order.ID
+			gatewayOrderID := orderID + "-testattempt01"
+			if strings.HasPrefix(scenario, "gateway-") || scenario == "settlement-after-release" {
+				if _, err := db.ExecContext(ctx, `INSERT INTO payments
+					(id, order_id, method, amount, status, gateway_order_id, created_at, updated_at)
+					VALUES (?, ?, 'QRIS', ?, 'PENDING', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, reservationID, orderID, order.Total, gatewayOrderID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			pay := func() error {
 				_, _, err := repository.Simulate(ctx, orderID, Request{Method: "QRIS", Result: "SUCCEEDED"})
 				return err
@@ -242,6 +254,7 @@ func TestUnpaidOrderExpiryAndPaymentRace(t *testing.T) {
 				}
 			}
 			wantStatus, wantStock, wantTickets := "EXPIRED", 5, 0
+			var provider *httptest.Server
 			switch scenario {
 			case "abandoned":
 				setExpired()
@@ -274,11 +287,127 @@ func TestUnpaidOrderExpiryAndPaymentRace(t *testing.T) {
 					t.Fatalf("concurrent expiry error = %v", err)
 				}
 				setExpired()
-			}
-			// Run the worker batch twice: stock must be restored at most once.
-			for range 2 {
+			case "gateway-late-settlement", "gateway-unavailable":
+				setExpired()
+				if scenario == "gateway-late-settlement" {
+					start := make(chan struct{})
+					type snapURLResult struct {
+						url string
+						err error
+					}
+					results := make(chan snapURLResult, 2)
+					var wg sync.WaitGroup
+					for _, responseURL := range []string{"https://app.sandbox.midtrans.com/snap/parallel-a", "https://app.sandbox.midtrans.com/snap/parallel-b"} {
+						wg.Add(1)
+						go func(responseURL string) {
+							defer wg.Done()
+							<-start
+							value, err := repository.SetSnapURL(ctx, reservationID, gatewayOrderID, responseURL, responseURL)
+							results <- snapURLResult{value, err}
+						}(responseURL)
+					}
+					close(start)
+					wg.Wait()
+					close(results)
+					canonicalURL := ""
+					for result := range results {
+						if result.err != nil {
+							t.Fatal(result.err)
+						}
+						if canonicalURL != "" && canonicalURL != result.url {
+							t.Fatalf("concurrent Snap responses returned different URLs: %q and %q", canonicalURL, result.url)
+						}
+						canonicalURL = result.url
+					}
+					activeURL, err := repository.SetSnapURL(ctx, reservationID, gatewayOrderID, "token-current", "https://app.sandbox.midtrans.com/snap/current")
+					if err != nil || activeURL != canonicalURL {
+						t.Fatalf("save current Snap URL = %q, %v", activeURL, err)
+					}
+					if _, err := repository.SetSnapURL(ctx, reservationID, gatewayOrderID+"-stale", "token-stale", "https://app.sandbox.midtrans.com/snap/stale"); !errors.Is(err, ErrPaymentAttemptChanged) {
+						t.Fatalf("stale Snap response error = %v; want conflict", err)
+					}
+					activeURL, err = repository.SetSnapURL(ctx, reservationID, gatewayOrderID, "token-replay", "https://app.sandbox.midtrans.com/snap/replay")
+					if err != nil || activeURL != canonicalURL {
+						t.Fatalf("idempotent Snap URL replay = %q, %v", activeURL, err)
+					}
+				}
+				providerStatus := "settlement"
+				providerCode := http.StatusOK
+				if scenario == "gateway-unavailable" {
+					providerCode = http.StatusServiceUnavailable
+				}
+				provider = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(providerCode)
+					if providerCode == http.StatusOK {
+						_, _ = fmt.Fprintf(w, `{"order_id":%q,"gross_amount":"%d.00","transaction_status":%q}`, gatewayOrderID, order.Total, providerStatus)
+					}
+				}))
+				t.Cleanup(provider.Close)
+				testRepository := NewRepository(db)
+				testRepository.midtransBaseURL = provider.URL
+				err := testRepository.ExpirePendingOrdersWithMidtrans(ctx, "sandbox-test-key")
+				if scenario == "gateway-unavailable" {
+					if err == nil {
+						t.Fatal("provider outage unexpectedly expired an order with a pending payment")
+					}
+					wantStatus, wantStock, wantTickets = "PENDING", 3, 0
+				} else if err != nil {
+					t.Fatal(err)
+				} else {
+					wantStatus, wantStock, wantTickets = "PAID", 3, 2
+					settlement := midtransNotification{OrderID: gatewayOrderID, GrossAmount: fmt.Sprintf("%d.00", order.Total), TransactionStatus: "settlement"}
+					if err := repository.ApplyNotification(ctx, settlement); err != nil {
+						t.Fatalf("duplicate settlement notification: %v", err)
+					}
+					if _, err := repository.SetSnapURL(ctx, reservationID, gatewayOrderID, "late-token", "https://app.sandbox.midtrans.com/snap/late"); !errors.Is(err, ErrPaymentAttemptChanged) {
+						t.Fatalf("Snap response after webhook error = %v; want conflict", err)
+					}
+				}
+			case "gateway-cancel-confirmed", "gateway-cancel-unconfirmed":
+				setExpired()
+				providerStatus := "pending"
+				provider = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel") && scenario == "gateway-cancel-confirmed" {
+						providerStatus = "cancel"
+					}
+					if r.Method == http.MethodGet {
+						_, _ = fmt.Fprintf(w, `{"order_id":%q,"gross_amount":"%d.00","transaction_status":%q}`, gatewayOrderID, order.Total, providerStatus)
+					}
+				}))
+				t.Cleanup(provider.Close)
+				testRepository := NewRepository(db)
+				testRepository.midtransBaseURL = provider.URL
+				err := testRepository.ExpirePendingOrdersWithMidtrans(ctx, "sandbox-test-key")
+				if scenario == "gateway-cancel-unconfirmed" {
+					if err == nil {
+						t.Fatal("unconfirmed provider cancellation unexpectedly released stock")
+					}
+					wantStatus, wantStock, wantTickets = "PENDING", 3, 0
+				} else if err != nil {
+					t.Fatal(err)
+				}
+			case "settlement-after-release":
+				if err := repository.ApplyNotification(ctx, midtransNotification{OrderID: gatewayOrderID, GrossAmount: fmt.Sprintf("%d.00", order.Total), TransactionStatus: "expire"}); err != nil {
+					t.Fatal(err)
+				}
+				setExpired()
 				if err := repository.ExpirePendingOrders(ctx); err != nil {
 					t.Fatal(err)
+				}
+				if err := repository.ApplyNotification(ctx, midtransNotification{OrderID: gatewayOrderID, GrossAmount: fmt.Sprintf("%d.00", order.Total), TransactionStatus: "settlement"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := repository.ApplyNotification(ctx, midtransNotification{OrderID: gatewayOrderID, GrossAmount: fmt.Sprintf("%d.00", order.Total), TransactionStatus: "settlement"}); err != nil {
+					t.Fatalf("duplicate late settlement notification: %v", err)
+				}
+			}
+			// Run the worker batch twice: stock must be restored at most once.
+			if scenario != "gateway-unavailable" && scenario != "gateway-cancel-unconfirmed" {
+				for range 2 {
+					if err := repository.ExpirePendingOrders(ctx); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			var status string
@@ -288,6 +417,12 @@ func TestUnpaidOrderExpiryAndPaymentRace(t *testing.T) {
 			}
 			if status != wantStatus || stock != wantStock || tickets != wantTickets {
 				t.Fatalf("status=%s stock=%d tickets=%d; want %s %d %d", status, stock, tickets, wantStatus, wantStock, wantTickets)
+			}
+			if scenario == "settlement-after-release" {
+				var cases int
+				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM payment_reconciliation_cases WHERE gateway_order_id = ? AND status = 'OPEN'", gatewayOrderID).Scan(&cases); err != nil || cases != 1 {
+					t.Fatalf("late settlement reconciliation cases=%d err=%v; want one durable case", cases, err)
+				}
 			}
 		})
 	}

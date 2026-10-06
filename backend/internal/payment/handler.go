@@ -153,6 +153,8 @@ func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusConflict, "ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
 	case errors.Is(err, ErrPaymentConflict):
 		writeError(w, http.StatusConflict, "PAYMENT_CONFLICT", "Pembayaran berhasil dan tidak dapat diubah")
+	case errors.Is(err, ErrPaymentAttemptChanged):
+		writeError(w, http.StatusConflict, "PAYMENT_ATTEMPT_CHANGED", "Sesi pembayaran berubah. Periksa status order sebelum melanjutkan.")
 	case errors.Is(err, ErrTicketNotFound):
 		writeError(w, http.StatusNotFound, "TICKET_NOT_FOUND", "E-ticket tidak ditemukan")
 	case errors.Is(err, ErrIncompleteTickets):

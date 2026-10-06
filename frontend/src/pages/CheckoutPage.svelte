@@ -4,7 +4,7 @@
   import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, voucherDiscount, type Buyer } from "../lib/checkout.ts";
-  import { listOrderAccess, saveOrderAccess, type OrderAccess } from "../lib/order-access.ts";
+  import { hasPersistentOrderAccess, listOrderAccess, saveOrderAccess, type OrderAccess } from "../lib/order-access.ts";
   import { findOrderForActiveReservation } from "../lib/checkout-recovery.ts";
   import Toast from "../components/Toast.svelte";
   import { concertTerms } from "../lib/terms.ts";
@@ -171,6 +171,25 @@
           await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
         } else paymentError = "Server belum mengonfirmasi pembayaran. Periksa status order sebelum mencoba lagi.";
       } else {
+        const reservationForReturn = {
+          reservationId: activeOrder.reservationId,
+          idempotencyKey: orderAccess.idempotencyKey,
+          eventId: concert.id,
+          basketKey: reservationKey.slice(reservationKey.lastIndexOf(":") + 1),
+        };
+        try {
+          sessionStorage.setItem(reservationKey, serializeStoredReservation(reservationForReturn));
+          storedReservation = parseStoredReservation(sessionStorage.getItem(reservationKey));
+        } catch { storedReservation = null; }
+        if (!hasPersistentOrderAccess(activeOrder.id)) {
+          saveOrderAccess(orderAccess);
+        }
+        if (!storedReservation || storedReservation.reservationId !== activeOrder.reservationId || !hasPersistentOrderAccess(activeOrder.id)) {
+          storageFailed = true;
+          paymentError = "Aktifkan penyimpanan browser agar order dapat dipulihkan setelah pembayaran. Tidak ada pembayaran yang dimulai.";
+          return;
+        }
+        storageFailed = false;
         paymentUncertain = true;
         const { redirectUrl } = await createSnapPayment(activeOrder.id, payment || "QRIS", window.location.href, orderAccess.accessToken);
         window.location.assign(redirectUrl);
@@ -197,7 +216,12 @@
       try {
         const detail = await getOrder(savedOrder.orderId, savedOrder.accessToken, signal);
         if (signal.aborted) return;
-        if (["PAID", "EXPIRED", "CANCELLED"].includes(detail.status)) {
+        if (detail.status === "PAID") {
+          await restoreOrder(detail, savedOrder, signal);
+          creatingReservation = false;
+          return startExpiryTimer();
+        }
+        if (["EXPIRED", "CANCELLED"].includes(detail.status)) {
           try { sessionStorage.removeItem(reservationKey); sessionStorage.removeItem(checkoutAttemptKey); } catch { storageFailed = true; }
           stored = null;
         } else {

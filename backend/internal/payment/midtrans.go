@@ -110,12 +110,43 @@ func (r *Repository) BeginSnap(ctx context.Context, orderID, method string) (id 
 	return id, amount, gatewayOrderID, "", nil
 }
 
-func (r *Repository) SetSnapURL(ctx context.Context, id, token, redirect string) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE payments SET gateway_reference = ?, redirect_url = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'", token, redirect, time.Now().UTC(), id)
-	return err
+func (r *Repository) SetSnapURL(ctx context.Context, id, gatewayOrderID, token, redirect string) (string, error) {
+	result, err := r.db.ExecContext(ctx, `UPDATE payments
+		SET gateway_reference = COALESCE(gateway_reference, ?), redirect_url = COALESCE(redirect_url, ?), updated_at = ?
+		WHERE id = ? AND gateway_order_id = ? AND status = 'PENDING'`, token, redirect, time.Now().UTC(), id, gatewayOrderID)
+	if err != nil {
+		return "", err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	var currentGatewayOrderID, currentStatus string
+	var currentRedirect sql.NullString
+	err = r.db.QueryRowContext(ctx, "SELECT gateway_order_id, status, redirect_url FROM payments WHERE id = ?", id).Scan(&currentGatewayOrderID, &currentStatus, &currentRedirect)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrPaymentAttemptChanged
+		}
+		return "", err
+	}
+	if currentGatewayOrderID != gatewayOrderID || currentStatus != "PENDING" {
+		return "", ErrPaymentAttemptChanged
+	}
+	if affected == 0 && (!currentRedirect.Valid || currentRedirect.String == "") {
+		return "", ErrPaymentAttemptChanged
+	}
+	if !currentRedirect.Valid || currentRedirect.String == "" {
+		return "", ErrPaymentAttemptChanged
+	}
+	return currentRedirect.String, nil
 }
 
 func (r *Repository) ApplyNotification(ctx context.Context, n midtransNotification) error {
+	return r.applyGatewayStatus(ctx, n.OrderID, n.GrossAmount, n.TransactionStatus, n.FraudStatus)
+}
+
+func (r *Repository) applyGatewayStatus(ctx context.Context, gatewayOrderID, grossAmount, transactionStatus, fraudStatus string) error {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
@@ -123,19 +154,19 @@ func (r *Repository) ApplyNotification(ctx context.Context, n midtransNotificati
 	defer tx.Rollback()
 	var orderID, orderStatus, paymentStatus string
 	var amount uint64
-	if err = tx.QueryRowContext(ctx, "SELECT o.id, o.status, p.status, p.amount FROM orders o JOIN payments p ON p.order_id = o.id WHERE p.gateway_order_id = ? FOR UPDATE", n.OrderID).Scan(&orderID, &orderStatus, &paymentStatus, &amount); errors.Is(err, sql.ErrNoRows) {
+	if err = tx.QueryRowContext(ctx, "SELECT o.id, o.status, p.status, p.amount FROM orders o JOIN payments p ON p.order_id = o.id WHERE p.gateway_order_id = ? FOR UPDATE", gatewayOrderID).Scan(&orderID, &orderStatus, &paymentStatus, &amount); errors.Is(err, sql.ErrNoRows) {
 		return ErrOrderNotFound
 	} else if err != nil {
 		return err
 	}
-	if fmt.Sprintf("%d.00", amount) != n.GrossAmount {
+	if fmt.Sprintf("%d.00", amount) != grossAmount {
 		return ErrInvalidRequest
 	}
 	newStatus := "PENDING"
-	succeeded := n.TransactionStatus == "settlement" || (n.TransactionStatus == "capture" && (n.FraudStatus == "" || n.FraudStatus == "accept"))
+	succeeded := transactionStatus == "settlement" || (transactionStatus == "capture" && (fraudStatus == "" || fraudStatus == "accept"))
 	if succeeded {
 		newStatus = "SUCCEEDED"
-	} else if n.TransactionStatus == "deny" || n.TransactionStatus == "cancel" || n.TransactionStatus == "expire" {
+	} else if transactionStatus == "deny" || transactionStatus == "cancel" || transactionStatus == "expire" {
 		newStatus = "FAILED"
 	}
 	if paymentStatus == "SUCCEEDED" {
@@ -148,7 +179,17 @@ func (r *Repository) ApplyNotification(ctx context.Context, n midtransNotificati
 	var paidAt any
 	if succeeded {
 		if orderStatus != "PENDING" {
-			return ErrOrderNotPayable
+			_, err = tx.ExecContext(ctx, `INSERT INTO payment_reconciliation_cases
+				(order_id, gateway_order_id, amount, provider_status, created_at, updated_at)
+				VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+				ON DUPLICATE KEY UPDATE provider_status = VALUES(provider_status)`, orderID, gatewayOrderID, amount, transactionStatus)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE payments SET status = 'SUCCEEDED', paid_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?", orderID); err != nil {
+				return err
+			}
+			return tx.Commit()
 		}
 		paidAt = now
 		if _, err = tx.ExecContext(ctx, "UPDATE orders SET status = 'PAID', updated_at = ? WHERE id = ? AND status = 'PENDING'", now, orderID); err != nil {
@@ -246,11 +287,12 @@ func (h *Handler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "PAYMENT_PROVIDER_ERROR", "Sesi pembayaran tidak valid.")
 		return
 	}
-	if err := h.repository.SetSnapURL(r.Context(), id, response.Token, response.RedirectURL); err != nil {
+	redirectURL, err := h.repository.SetSnapURL(r.Context(), id, gatewayOrderID, response.Token, response.RedirectURL)
+	if err != nil {
 		h.respondError(w, r, err)
 		return
 	}
-	writeJSON(w, 201, map[string]string{"redirectUrl": response.RedirectURL})
+	writeJSON(w, 201, map[string]string{"redirectUrl": redirectURL})
 }
 
 // Kept separate so configuration, return URL and provider calls remain server-owned.
