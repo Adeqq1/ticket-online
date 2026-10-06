@@ -1,8 +1,12 @@
 package adminorders
 
 import (
+	"encoding/base64"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,6 +28,36 @@ func TestParseFilterUsesJakartaInclusiveDateRangeAndValidatesInputs(t *testing.T
 		if _, err := parseFilter(filter); err == nil {
 			t.Errorf("parseFilter(%+v) unexpectedly succeeded", filter)
 		}
+	}
+}
+
+func TestParseFilterClassifiesInvalidRangesAndCursorsAsClientErrors(t *testing.T) {
+	validID := "0123456789abcdef0123456789abcdef"
+	encode := func(value string) string { return base64.RawURLEncoding.EncodeToString([]byte(value)) }
+	cases := []struct {
+		name   string
+		filter Filter
+		query  string
+	}{
+		{name: "reversed date range", filter: Filter{DateFrom: "2026-10-07", DateTo: "2026-10-06"}, query: "dateFrom=2026-10-07&dateTo=2026-10-06"},
+		{name: "invalid cursor JSON", filter: Filter{Cursor: encode("{")}, query: "cursor=" + encode("{")},
+		{name: "invalid cursor ID", filter: Filter{Cursor: encode(fmt.Sprintf(`{"id":"wrong","createdAt":"2026-10-06T00:00:00Z"}`))}, query: "cursor=" + encode(fmt.Sprintf(`{"id":"wrong","createdAt":"2026-10-06T00:00:00Z"}`))},
+		{name: "invalid cursor timestamp", filter: Filter{Cursor: encode(fmt.Sprintf(`{"id":%q,"createdAt":"invalid"}`, validID))}, query: "cursor=" + encode(fmt.Sprintf(`{"id":%q,"createdAt":"invalid"}`, validID))},
+		{name: "noncanonical cursor timestamp", filter: Filter{Cursor: encode(fmt.Sprintf(`{"id":%q,"createdAt":"2026-10-06T00:00:00+00:00"}`, validID))}, query: "cursor=" + encode(fmt.Sprintf(`{"id":%q,"createdAt":"2026-10-06T00:00:00+00:00"}`, validID))},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := parseFilter(test.filter); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("parseFilter error = %v, want ErrInvalidRequest", err)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/orders?"+test.query, nil)
+			request.Header.Set("Authorization", "Bearer valid-shaped-staff-token")
+			response := httptest.NewRecorder()
+			NewHandler(NewService(nil, nil), nil).list(response, request)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"INVALID_REQUEST"`) {
+				t.Fatalf("response = %d %s, want 400 INVALID_REQUEST", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

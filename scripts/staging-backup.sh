@@ -25,7 +25,8 @@ name="ticket-online-staging-$timestamp"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
 blob="$temporary/$name.sql.gz.age"
-"${compose[@]}" exec -T db sh -ec 'exec mysqldump --defaults-extra-file=/run/secrets/backup.cnf --single-transaction --routines --events --triggers --hex-blob --no-tablespaces "$MYSQL_DATABASE"' | gzip -c | age -r "$AGE_RECIPIENT" > "$blob"
+# Deliberately excludes routines, events, and triggers; add matching grants and round-trip coverage if migrations introduce them.
+"${compose[@]}" exec -T db sh -ec 'exec mysqldump --defaults-extra-file=/run/secrets/backup.cnf --single-transaction --skip-routines --skip-events --skip-triggers --hex-blob --no-tablespaces "$MYSQL_DATABASE"' | gzip -c | age -r "$AGE_RECIPIENT" > "$blob"
 checksum="$(sha256sum "$blob" | cut -d ' ' -f 1)"
 printf '%s  %s\n' "$checksum" "$name.sql.gz.age" > "$temporary/$name.sha256"
 printf '{"createdAt":"%s","schemaVersion":%s,"revision":"%s","image":"%s","imageId":"%s","sha256":"%s"}\n' \

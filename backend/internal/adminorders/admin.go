@@ -240,7 +240,7 @@ func parseFilter(filter Filter) (parsedFilter, error) {
 		result.To = to.AddDate(0, 0, 1).Add(-7 * time.Hour)
 	}
 	if filter.DateFrom != "" && filter.DateTo != "" && filter.DateFrom > filter.DateTo {
-		return parsedFilter{}, errors.New("invalid filter")
+		return parsedFilter{}, ErrInvalidRequest
 	}
 	if filter.Cursor != "" {
 		decoded, err := base64.RawURLEncoding.DecodeString(filter.Cursor)
@@ -249,11 +249,11 @@ func parseFilter(filter Filter) (parsedFilter, error) {
 		}
 		var value cursor
 		if json.Unmarshal(decoded, &value) != nil || !orderIDPattern.MatchString(value.ID) {
-			return parsedFilter{}, errors.New("invalid filter")
+			return parsedFilter{}, ErrInvalidRequest
 		}
 		createdAt, err := time.Parse(time.RFC3339Nano, value.CreatedAt)
 		if err != nil || createdAt.UTC().Format(time.RFC3339Nano) != value.CreatedAt {
-			return parsedFilter{}, errors.New("invalid filter")
+			return parsedFilter{}, ErrInvalidRequest
 		}
 		result.CursorAt, result.CursorID = createdAt.UTC(), value.ID
 	}

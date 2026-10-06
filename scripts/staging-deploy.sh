@@ -9,7 +9,9 @@ compose=(docker compose --env-file .env.staging -f compose.staging.yaml)
 docker compose --env-file .env.staging -f compose.staging.yaml config -q
 docker image inspect "$STAGING_IMAGE" >/dev/null
 "${compose[@]}" up -d --wait db
-if [[ -n "$("${compose[@]}" ps --status running -q api)" ]]; then
+schema_objects="$("${compose[@]}" exec -T db sh -ec 'exec mysql --defaults-extra-file=/run/secrets/backup.cnf "$MYSQL_DATABASE" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()"')"
+[[ "$schema_objects" =~ ^[0-9]+$ ]] || { printf 'Could not determine whether the staging database has an application schema.\n' >&2; exit 1; }
+if (( 10#$schema_objects > 0 )); then
 	./scripts/staging-backup.sh
 fi
 "${compose[@]}" stop https api
