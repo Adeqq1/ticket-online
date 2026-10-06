@@ -61,6 +61,7 @@ func TestPurchaseIssuesTicketThenCheckInSucceedsOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		_, _ = db.Exec("DELETE FROM checkin_attempts WHERE event_id = ?", eventID)
 		_, _ = db.Exec("DELETE FROM ticket_checkins WHERE event_id = ?", eventID)
 		_, _ = db.Exec("DELETE FROM staff_sessions WHERE staff_id = ?", staffID)
 		_, _ = db.Exec("DELETE FROM staff_assignments WHERE staff_id = ?", staffID)
@@ -160,6 +161,20 @@ func TestPurchaseIssuesTicketThenCheckInSucceedsOnlyOnce(t *testing.T) {
 	if err := json.Unmarshal(first.Body.Bytes(), &checkinResult); err != nil || checkinResult.Status != "CHECKED_IN" || checkinResult.CheckedInAt == "" {
 		t.Fatalf("check-in response = %+v; error = %v", checkinResult, err)
 	}
+	// A gate device can lose the response after the database commits. Recover by
+	// reading the server status; the read must preserve the recorded timestamp.
+	statusResponse := call(http.MethodGet, "/api/v1/staff/ticket-status?code="+payment.Tickets[0].Code, nil, map[string]string{"Authorization": "Bearer " + session.AccessToken})
+	checkStatus(statusResponse, http.StatusOK)
+	if statusResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("ticket status cache-control = %q", statusResponse.Header().Get("Cache-Control"))
+	}
+	var recovered struct {
+		Status      string `json:"status"`
+		CheckedInAt string `json:"checkedInAt"`
+	}
+	if err := json.Unmarshal(statusResponse.Body.Bytes(), &recovered); err != nil || recovered.Status != "CHECKED_IN" || recovered.CheckedInAt != checkinResult.CheckedInAt {
+		t.Fatalf("recovered status = %+v; error = %v, want original server timestamp", recovered, err)
+	}
 	second := call(http.MethodPost, "/api/v1/staff/check-ins", checkinBody, staffHeaders)
 	checkStatus(second, http.StatusConflict)
 	if !strings.Contains(second.Body.String(), "TICKET_ALREADY_USED") {
@@ -173,5 +188,9 @@ func TestPurchaseIssuesTicketThenCheckInSucceedsOnlyOnce(t *testing.T) {
 	var records int
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM ticket_checkins WHERE event_id = ?", eventID).Scan(&records); err != nil || records != 1 {
 		t.Fatalf("check-in records = %d; error = %v", records, err)
+	}
+	var attempts int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM checkin_attempts WHERE event_id = ?", eventID).Scan(&attempts); err != nil || attempts != 2 {
+		t.Fatalf("check-in attempts = %d; error = %v, want success and duplicate only", attempts, err)
 	}
 }

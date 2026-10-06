@@ -13,9 +13,11 @@ import (
 )
 
 type Handler struct {
-	repository *Repository
-	logger     *slog.Logger
-	access     *orderaccess.Access
+	repository  *Repository
+	logger      *slog.Logger
+	access      *orderaccess.Access
+	serverKey   string
+	frontendURL string
 }
 
 func NewHandler(repository *Repository, logger *slog.Logger) *Handler {
@@ -24,6 +26,10 @@ func NewHandler(repository *Repository, logger *slog.Logger) *Handler {
 
 func NewHandlerWithAccess(repository *Repository, logger *slog.Logger, access *orderaccess.Access) *Handler {
 	return &Handler{repository: repository, logger: logger, access: access}
+}
+
+func NewHandlerWithMidtrans(repository *Repository, logger *slog.Logger, access *orderaccess.Access, serverKey, frontendURL string) *Handler {
+	return &Handler{repository: repository, logger: logger, access: access, serverKey: serverKey, frontendURL: frontendURL}
 }
 
 func (h *Handler) Simulate(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +153,8 @@ func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusConflict, "ORDER_NOT_PAYABLE", "Order tidak dapat dibayar")
 	case errors.Is(err, ErrPaymentConflict):
 		writeError(w, http.StatusConflict, "PAYMENT_CONFLICT", "Pembayaran berhasil dan tidak dapat diubah")
+	case errors.Is(err, ErrPaymentAttemptChanged):
+		writeError(w, http.StatusConflict, "PAYMENT_ATTEMPT_CHANGED", "Sesi pembayaran berubah. Periksa status order sebelum melanjutkan.")
 	case errors.Is(err, ErrTicketNotFound):
 		writeError(w, http.StatusNotFound, "TICKET_NOT_FOUND", "E-ticket tidak ditemukan")
 	case errors.Is(err, ErrIncompleteTickets):

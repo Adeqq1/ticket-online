@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 	"github.com/Adeqq1/ticket-online/backend/migrations"
@@ -40,9 +41,10 @@ func main() {
 
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithOrderAccess(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret))
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithPaymentConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL))
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
 	go worker.Run(serverCtx)
+	go payment.NewRepository(db).RunExpiryWorker(serverCtx, cfg.ExpiryInterval, cfg.MidtransServerKey, logger)
 	go func() {
 		logger.Info("http server listening", "addr", cfg.HTTPAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

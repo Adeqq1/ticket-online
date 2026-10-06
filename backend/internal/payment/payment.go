@@ -13,12 +13,13 @@ import (
 )
 
 var (
-	ErrInvalidRequest    = errors.New("invalid payment request")
-	ErrOrderNotFound     = errors.New("order not found")
-	ErrOrderNotPayable   = errors.New("order cannot be paid")
-	ErrPaymentConflict   = errors.New("payment result conflicts with existing payment")
-	ErrTicketNotFound    = errors.New("e-ticket not found")
-	ErrIncompleteTickets = errors.New("order has an incomplete e-ticket set")
+	ErrInvalidRequest        = errors.New("invalid payment request")
+	ErrOrderNotFound         = errors.New("order not found")
+	ErrOrderNotPayable       = errors.New("order cannot be paid")
+	ErrPaymentConflict       = errors.New("payment result conflicts with existing payment")
+	ErrPaymentAttemptChanged = errors.New("payment attempt changed while creating Snap session")
+	ErrTicketNotFound        = errors.New("e-ticket not found")
+	ErrIncompleteTickets     = errors.New("order has an incomplete e-ticket set")
 )
 
 type Request struct {
@@ -67,9 +68,14 @@ func Validate(request Request) (Request, error) {
 	return request, nil
 }
 
-type Repository struct{ db *sql.DB }
+type Repository struct {
+	db              *sql.DB
+	midtransBaseURL string
+}
 
-func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db, midtransBaseURL: "https://api.sandbox.midtrans.com"}
+}
 
 func (r *Repository) Simulate(ctx context.Context, orderID string, request Request) (Payment, bool, error) {
 	request, err := Validate(request)

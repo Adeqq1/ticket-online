@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import jsQR from "jsqr";
+import qrcode from "qrcode-generator";
 import type { Staff } from "./api.ts";
-import { normalizeScanCode, submitScan, type ScannerState } from "./scanner.ts";
+import { checkTicketStatus, continueToNextScan, normalizeScanCode, parseCameraScanCode, submitScan, type ScannerState } from "./scanner.ts";
 
 const assignment = { eventId: "nusa-malam", gate: "Gate B" };
 const code = `ET-${"A".repeat(32)}`;
-const state = (): ScannerState => ({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan" });
+const state = (): ScannerState => ({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan", locked: false, lastAttempt: null, statusChecking: false, ticketStatus: null, statusCheckError: "" });
 const profile = (assignments = [assignment]): Staff => ({ id: "b".repeat(32), name: "Petugas", email: "staff@example.com", role: "STAFF", active: true, assignments });
 const ticket = { id: "a".repeat(32), code, attendeeName: "Peserta", tierName: "Festival", eventId: assignment.eventId, gate: assignment.gate };
 const result = { status: "CHECKED_IN", ticket, checkedInAt: "2026-10-05T12:00:00Z" };
@@ -16,6 +18,28 @@ function jsonResponse(body: unknown, status = 200) {
 describe("scanner operations", () => {
   test("trims surrounding whitespace and normalizes case", () => {
     expect(normalizeScanCode("  et-0123abcd  ")).toBe("ET-0123ABCD");
+  });
+
+  test("decodes a ticket QR and rejects non-ticket QR values", () => {
+    const matrix = qrcode(0, "M");
+    matrix.addData(code);
+    matrix.make();
+    const scale = 5;
+    const quiet = 8;
+    const width = (matrix.getModuleCount() + quiet * 2) * scale;
+    const pixels = new Uint8ClampedArray(width * width * 4).fill(255);
+    for (let row = 0; row < matrix.getModuleCount(); row += 1) {
+      for (let column = 0; column < matrix.getModuleCount(); column += 1) {
+        if (!matrix.isDark(row, column)) continue;
+        for (let y = 0; y < scale; y += 1) for (let x = 0; x < scale; x += 1) {
+          const offset = (((row + quiet) * scale + y) * width + (column + quiet) * scale + x) * 4;
+          pixels[offset] = 0; pixels[offset + 1] = 0; pixels[offset + 2] = 0;
+        }
+      }
+    }
+    expect(parseCameraScanCode(jsQR(pixels, width, width)?.data)).toBe(code);
+    expect(parseCameraScanCode("https://example.com/ticket")).toBeNull();
+    expect(parseCameraScanCode(null)).toBeNull();
   });
 
   test("submits exactly once after refreshing the session assignment", async () => {
@@ -49,6 +73,48 @@ describe("scanner operations", () => {
       expect(current.resultDetail).toContain("sudah berubah");
       expect(calls).toEqual(["/api/v1/staff/me"]);
     } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("locks a completed attempt until the operator starts the next scan", async () => {
+    const originalFetch = globalThis.fetch;
+    let posts = 0;
+    globalThis.fetch = (async (input) => String(input).endsWith("/me") ? jsonResponse({ staff: profile() }) : (posts += 1, jsonResponse(result, 201))) as typeof fetch;
+    const current = state();
+    try {
+      await submitScan(current, "token", assignment, code, () => {}, () => {});
+      await submitScan(current, "token", assignment, code, () => {}, () => {});
+      expect(posts).toBe(1);
+      expect(current.locked).toBe(true);
+      expect(continueToNextScan(current, false)).toBe(true);
+      expect(current).toMatchObject({ locked: false, status: "idle", lastAttempt: null });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("checks the last unknown attempt without sending another check-in", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET" });
+      return jsonResponse({ status: "CHECKED_IN", ticket, orderStatus: "PAID", checkedInAt: result.checkedInAt });
+    }) as typeof fetch;
+    const current = state();
+    current.locked = true;
+    current.status = "unknown";
+    current.lastAttempt = { ...assignment, code };
+    try {
+      await checkTicketStatus(current, "token", () => {});
+      expect(current.ticketStatus).toMatchObject({ status: "CHECKED_IN", checkedInAt: result.checkedInAt });
+      expect(continueToNextScan(current, false)).toBe(true);
+      expect(calls).toEqual([{ url: `/api/v1/staff/ticket-status?code=${code}`, method: "GET" }]);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("requires handling confirmation while an unknown result remains unresolved", () => {
+    const current = state();
+    current.locked = true;
+    current.status = "unknown";
+    expect(continueToNextScan(current, false)).toBe(false);
+    expect(continueToNextScan(current, true)).toBe(true);
   });
 
   test("maps server rejection codes to the gate result", async () => {
@@ -87,6 +153,37 @@ describe("scanner operations", () => {
       expect(current.status).toBe("unknown");
       expect(current.scanCount).toBe(1);
       expect(calls).toBe(2);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("recovers a check-in committed before its response was disconnected", async () => {
+    const originalFetch = globalThis.fetch;
+    let committed = false;
+    let posts = 0;
+    let statusReads = 0;
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/me")) return jsonResponse({ staff: profile() });
+      if (url.endsWith("/check-ins")) {
+        posts += 1;
+        committed = true;
+        throw new TypeError("response connection closed after server commit");
+      }
+      if (url.startsWith("/api/v1/staff/ticket-status?")) {
+        statusReads += 1;
+        expect(committed).toBe(true);
+        expect(init?.method ?? "GET").toBe("GET");
+        return jsonResponse({ status: "CHECKED_IN", ticket, orderStatus: "PAID", checkedInAt: result.checkedInAt });
+      }
+      throw new Error(`unexpected request ${url}`);
+    }) as typeof fetch;
+    const current = state();
+    try {
+      await submitScan(current, "token", assignment, code, () => {}, () => {});
+      expect(current.status).toBe("unknown");
+      await checkTicketStatus(current, "token", () => {});
+      expect(current.ticketStatus).toMatchObject({ status: "CHECKED_IN", checkedInAt: result.checkedInAt });
+      expect({ posts, statusReads }).toEqual({ posts: 1, statusReads: 1 });
     } finally { globalThis.fetch = originalFetch; }
   });
 

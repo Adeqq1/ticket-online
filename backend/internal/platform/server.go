@@ -22,16 +22,26 @@ import (
 )
 
 func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte) http.Handler {
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "")
+}
+
+func NewHandlerWithPaymentConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string) http.Handler {
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL)
+}
+
+func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string) http.Handler {
 	mux := http.NewServeMux()
 	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
 	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access)
-	paymentHandler := payment.NewHandlerWithAccess(payment.NewRepository(db), logger, access)
+	paymentHandler := payment.NewHandlerWithMidtrans(payment.NewRepository(db), logger, access, midtransKey, frontendURL)
 	staffService := staffauth.New(db)
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	checkinHandler := checkin.NewHandler(checkin.NewService(db, staffService), logger)
 	mux.HandleFunc("POST /api/v1/staff/check-ins", checkinHandler.CheckIn)
+	mux.HandleFunc("GET /api/v1/staff/ticket-status", checkinHandler.TicketStatus)
+	mux.HandleFunc("GET /api/v1/admin/check-ins", checkinHandler.History)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -54,6 +64,10 @@ func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL t
 	mux.HandleFunc("GET /api/v1/tickets/{ticketID}", paymentHandler.GetTicket)
 	if development {
 		mux.HandleFunc("POST /api/v1/orders/{orderID}/simulate-payment", paymentHandler.Simulate)
+	}
+	if midtransKey != "" {
+		mux.HandleFunc("POST /api/v1/orders/{orderID}/payments", paymentHandler.CreateSnap)
+		mux.HandleFunc("POST /api/v1/payments/midtrans/notification", paymentHandler.MidtransNotification)
 	}
 	mux.HandleFunc("/", staticHandler(staticDir))
 	return loggingMiddleware(logger, mux)

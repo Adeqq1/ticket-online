@@ -208,6 +208,27 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 // AuthorizeGateTx authenticates a staff session and its gate assignment while
 // holding a shared user lock for the lifetime of the caller's transaction.
 func (s *Service) AuthorizeGateTx(ctx context.Context, tx *sql.Tx, token, eventID, gate string) (Principal, error) {
+	principal, err := s.AuthenticateTx(ctx, tx, token)
+	if err != nil {
+		return Principal{}, err
+	}
+	if principal.Role != "STAFF" {
+		return Principal{}, ErrForbidden
+	}
+	var valid bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM staff_assignments
+		WHERE staff_id = ? AND event_id = ? AND gate = ?)`, principal.ID, eventID, gate).Scan(&valid); err != nil {
+		return Principal{}, fmt.Errorf("verify staff gate for check-in: %w", err)
+	}
+	if !valid {
+		return Principal{}, ErrForbidden
+	}
+	return principal, nil
+}
+
+// AuthenticateTx holds shared locks on the active user and session until the
+// caller's transaction ends, so revocation cannot race a protected operation.
+func (s *Service) AuthenticateTx(ctx context.Context, tx *sql.Tx, token string) (Principal, error) {
 	if len(token) != 43 {
 		return Principal{}, ErrUnauthorized
 	}
@@ -219,7 +240,7 @@ func (s *Service) AuthorizeGateTx(ctx context.Context, tx *sql.Tx, token, eventI
 		return Principal{}, ErrUnauthorized
 	}
 	if err != nil {
-		return Principal{}, fmt.Errorf("lock staff for check-in: %w", err)
+		return Principal{}, fmt.Errorf("lock staff for protected operation: %w", err)
 	}
 	var sessionStaffID string
 	err = tx.QueryRowContext(ctx, `SELECT staff_id FROM staff_sessions
@@ -228,20 +249,27 @@ func (s *Service) AuthorizeGateTx(ctx context.Context, tx *sql.Tx, token, eventI
 		return Principal{}, ErrUnauthorized
 	}
 	if err != nil {
-		return Principal{}, fmt.Errorf("lock staff session for check-in: %w", err)
+		return Principal{}, fmt.Errorf("lock staff session for protected operation: %w", err)
 	}
-	if user.Role != "STAFF" {
-		return Principal{}, ErrForbidden
+	return Principal{Staff: user}, nil
+}
+
+func (s *Service) AuthorizeTicketStatusTx(ctx context.Context, tx *sql.Tx, principal Principal, eventID, gate string) error {
+	if principal.Role == "ADMIN" {
+		return nil
+	}
+	if principal.Role != "STAFF" {
+		return ErrForbidden
 	}
 	var valid bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM staff_assignments
-		WHERE staff_id = ? AND event_id = ? AND gate = ?)`, user.ID, eventID, gate).Scan(&valid); err != nil {
-		return Principal{}, fmt.Errorf("verify staff gate for check-in: %w", err)
+		WHERE staff_id = ? AND event_id = ? AND gate = ?)`, principal.ID, eventID, gate).Scan(&valid); err != nil {
+		return fmt.Errorf("verify staff gate for ticket status: %w", err)
 	}
 	if !valid {
-		return Principal{}, ErrForbidden
+		return ErrForbidden
 	}
-	return Principal{Staff: user}, nil
+	return nil
 }
 
 func (s *Service) Logout(ctx context.Context, token string) error {

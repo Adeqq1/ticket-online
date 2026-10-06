@@ -3,10 +3,11 @@
   import AdminLoginPage from "./pages/AdminLoginPage.svelte";
   import AdminScanPage from "./pages/AdminScanPage.svelte";
   import AdminStaffPage from "./pages/AdminStaffPage.svelte";
+  import AdminCheckInsPage from "./pages/AdminCheckInsPage.svelte";
   import { ApiError, getStaffProfile, type Staff } from "./lib/api.ts";
   import { clearStaffSession, logoutStaffSession, readStaffSession, roleMatchesPage, staffHome } from "./lib/staff-session.ts";
 
-  let { page }: { page: "login" | "staff" | "scan" } = $props();
+  let { page }: { page: "login" | "staff" | "history" | "scan" } = $props();
   let staff = $state<Staff | null>(null);
   let checking = $state(true);
   let error = $state("");
@@ -105,7 +106,8 @@
 {#if staff}
   <div inert={checking || Boolean(error)} aria-hidden={checking || Boolean(error)}>
     {#if page === "staff"}<AdminStaffPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
-    {:else if page === "scan"}<AdminScanPage accessToken={readStaffSession()?.accessToken ?? ""} {staff} onUnauthorized={login} onProfile={profileUpdated} onLogout={logout} loggingOut={logoutPending} />{/if}
+    {:else if page === "history"}<AdminCheckInsPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
+    {:else if page === "scan"}<AdminScanPage accessToken={readStaffSession()?.accessToken ?? ""} {staff} sessionReady={Boolean(staff) && !checking && !error && !logoutPending} onUnauthorized={login} onProfile={profileUpdated} onLogout={logout} loggingOut={logoutPending} />{/if}
   </div>
 {/if}
 {#if !staff && !checking && !error && page === "login"}<AdminLoginPage />{/if}

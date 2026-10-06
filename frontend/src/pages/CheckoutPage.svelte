@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { createOrder, createReservation, getEvent, getOrder, getReservation, listOrderTickets, simulatePayment, ApiError, type ApiTicket, type CreateOrderRequest, type OrderBase, type OrderDetail, type OrderResponse, type PaymentMethod, type Reservation } from "../lib/api.ts";
+  import { createOrder, createReservation, createSnapPayment, getEvent, getOrder, getReservation, listOrderTickets, simulatePayment, ApiError, type ApiTicket, type CreateOrderRequest, type OrderBase, type OrderDetail, type OrderResponse, type PaymentMethod, type Reservation } from "../lib/api.ts";
   import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
   import NotFoundPanel from "../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, voucherDiscount, type Buyer } from "../lib/checkout.ts";
-  import { listOrderAccess, saveOrderAccess, type OrderAccess } from "../lib/order-access.ts";
+  import { hasPersistentOrderAccess, listOrderAccess, saveOrderAccess, type OrderAccess } from "../lib/order-access.ts";
   import { findOrderForActiveReservation } from "../lib/checkout-recovery.ts";
   import Toast from "../components/Toast.svelte";
   import { concertTerms } from "../lib/terms.ts";
@@ -42,7 +42,7 @@
   }
   function setAttendeeName(tierId: string, index: number, value: string) { if (checkoutUncertain || activeOrder) return; const names = [...(attendeeNames[tierId] ?? [])]; names[index] = value; attendeeNames[tierId] = names; }
   async function submitBuyer(event: SubmitEvent) { event.preventDefault(); if (checkoutUncertain || activeOrder || checkExpiry()) return; const valid = (["name", "email", "phone", "identity"] as const).map(validate).every(Boolean); const attendeesValid = lines.every((line) => { const names = attendeeNames[line.tier.id] ?? []; const messages = names.map((name) => name.trim().length >= 2 && name.trim().length <= 80 ? "" : "Nama peserta harus 2–80 karakter."); attendeeErrors[line.tier.id] = messages; return names.length === line.quantity && messages.every((error) => !error); }); if (valid && attendeesValid) await goToStep(2); else await tick().then(() => document.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()); }
-  async function submitPayment(event: SubmitEvent) { event.preventDefault(); if (checkExpiry()) return; if (!simulationEnabled) { await goToStep(3); return; } paymentError = payment ? "" : "Pilih metode pembayaran terlebih dahulu."; if (!payment) { await tick(); document.querySelector<HTMLInputElement>('input[name="payment"]')?.focus(); return; } await goToStep(3); }
+  async function submitPayment(event: SubmitEvent) { event.preventDefault(); if (checkExpiry()) return; paymentError = payment ? "" : "Pilih metode pembayaran terlebih dahulu."; if (!payment) { await tick(); document.querySelector<HTMLInputElement>('input[name="payment"]')?.focus(); return; } await goToStep(3); }
   function showToast(message: string, tone: "success" | "info" | "error" = "info") { toast = { id: ++toastId, message, tone }; }
   function openTerms() { termsDialog?.showModal(); }
   function closeDialog(dialog: HTMLDialogElement) { dialog.close(); }
@@ -132,10 +132,6 @@
         expiresAt = Date.parse(created.expiresAt);
         updateExpiryTimer();
       }
-      if (!simulationEnabled) {
-        paymentError = "Order sudah dibuat. Pembayaran belum tersedia di lingkungan ini.";
-        return;
-      }
       if (!orderAccess || !activeOrder) throw new Error("Akses order tidak tersedia di memori browser");
       if (activeOrder.status === "PAID") {
         const tickets = await listOrderTickets(activeOrder.id, orderAccess.accessToken);
@@ -159,20 +155,45 @@
           return;
         }
       }
-      paymentUncertain = true;
-      const resultPayment = await simulatePayment(activeOrder.id, { method: payment || "QRIS", result }, orderAccess.accessToken);
-      paymentUncertain = false;
-      paymentStatus = resultPayment.status;
-      if (resultPayment.orderStatus === "PAID") activeOrder = { ...activeOrder, status: "PAID" };
-      if (resultPayment.status === "FAILED") paymentError = "Pembayaran simulasi gagal. Coba bayar kembali untuk menyelesaikan pesanan.";
-      else if (resultPayment.orderStatus === "PAID") {
-        const tickets = resultPayment.tickets.length ? resultPayment.tickets : await listOrderTickets(activeOrder.id, orderAccess.accessToken);
-        saveIssuedTickets(tickets);
-        if (tickets.length !== activeOrder.items.reduce((count, item) => count + item.quantity, 0)) throw new Error("Sebagian e-ticket belum dapat dimuat. Coba muat ulang halaman.");
-        completed = true;
-        paymentError = "";
-        await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
-      } else paymentError = "Server belum mengonfirmasi pembayaran. Periksa status order sebelum mencoba lagi.";
+      if (simulationEnabled) {
+        paymentUncertain = true;
+        const resultPayment = await simulatePayment(activeOrder.id, { method: payment || "QRIS", result }, orderAccess.accessToken);
+        paymentUncertain = false;
+        paymentStatus = resultPayment.status;
+        if (resultPayment.orderStatus === "PAID") activeOrder = { ...activeOrder, status: "PAID" };
+        if (resultPayment.status === "FAILED") paymentError = "Pembayaran simulasi gagal. Coba bayar kembali untuk menyelesaikan pesanan.";
+        else if (resultPayment.orderStatus === "PAID") {
+          const tickets = resultPayment.tickets.length ? resultPayment.tickets : await listOrderTickets(activeOrder.id, orderAccess.accessToken);
+          saveIssuedTickets(tickets);
+          if (tickets.length !== activeOrder.items.reduce((count, item) => count + item.quantity, 0)) throw new Error("Sebagian e-ticket belum dapat dimuat. Coba muat ulang halaman.");
+          completed = true;
+          paymentError = "";
+          await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
+        } else paymentError = "Server belum mengonfirmasi pembayaran. Periksa status order sebelum mencoba lagi.";
+      } else {
+        const reservationForReturn = {
+          reservationId: activeOrder.reservationId,
+          idempotencyKey: orderAccess.idempotencyKey,
+          eventId: concert.id,
+          basketKey: reservationKey.slice(reservationKey.lastIndexOf(":") + 1),
+        };
+        try {
+          sessionStorage.setItem(reservationKey, serializeStoredReservation(reservationForReturn));
+          storedReservation = parseStoredReservation(sessionStorage.getItem(reservationKey));
+        } catch { storedReservation = null; }
+        if (!hasPersistentOrderAccess(activeOrder.id)) {
+          saveOrderAccess(orderAccess);
+        }
+        if (!storedReservation || storedReservation.reservationId !== activeOrder.reservationId || !hasPersistentOrderAccess(activeOrder.id)) {
+          storageFailed = true;
+          paymentError = "Aktifkan penyimpanan browser agar order dapat dipulihkan setelah pembayaran. Tidak ada pembayaran yang dimulai.";
+          return;
+        }
+        storageFailed = false;
+        paymentUncertain = true;
+        const { redirectUrl } = await createSnapPayment(activeOrder.id, payment || "QRIS", window.location.href, orderAccess.accessToken);
+        window.location.assign(redirectUrl);
+      }
     } catch (value) {
       if (!activeOrder && value instanceof ApiError && value.status === 422) clearCheckoutAttempt();
       if (value instanceof ApiError && ["RESERVATION_EXPIRED", "ORDER_NOT_PAYABLE"].includes(value.code)) {
@@ -195,7 +216,12 @@
       try {
         const detail = await getOrder(savedOrder.orderId, savedOrder.accessToken, signal);
         if (signal.aborted) return;
-        if (["PAID", "EXPIRED", "CANCELLED"].includes(detail.status)) {
+        if (detail.status === "PAID") {
+          await restoreOrder(detail, savedOrder, signal);
+          creatingReservation = false;
+          return startExpiryTimer();
+        }
+        if (["EXPIRED", "CANCELLED"].includes(detail.status)) {
           try { sessionStorage.removeItem(reservationKey); sessionStorage.removeItem(checkoutAttemptKey); } catch { storageFailed = true; }
           stored = null;
         } else {
@@ -326,8 +352,8 @@
            <a class="button button-secondary" href="/konser">Cari konser lain</a>
          </section>
       {:else if step === 1}<form id="buyer-form" novalidate onsubmit={submitBuyer}><div class="step-title"><p>Langkah 1 dari 3</p><h2 id="buyer-title" tabindex="-1">Data pemesan</h2><span>Data order disimpan pada browser yang sama; e-ticket belum dikirim lewat email.</span></div><div class="field-grid">{#each [{ name: "name", label: "Nama lengkap", type: "text" }, { name: "email", label: "Email", type: "email" }, { name: "phone", label: "No. HP", type: "tel" }, { name: "identity", label: "No. identitas", type: "text" }] as field}<label for={`buyer-${field.name}`}>{field.label}<input id={`buyer-${field.name}`} name={field.name} type={field.type} autocomplete={field.name === "name" ? "name" : field.name === "email" ? "email" : field.name === "phone" ? "tel" : "off"} inputmode={field.name === "phone" ? "tel" : field.name === "identity" ? "numeric" : undefined} maxlength={field.name === "name" ? 80 : undefined} disabled={Boolean(activeOrder) || checkoutUncertain} bind:value={buyer[field.name as keyof Buyer]} aria-describedby={`${field.name}-error`} aria-invalid={Boolean(errors[field.name as keyof Buyer])} class:is-invalid={Boolean(errors[field.name as keyof Buyer])} onblur={() => validate(field.name as keyof Buyer)} required /><small id={`${field.name}-error`} aria-live="polite">{errors[field.name as keyof Buyer]}</small></label>{/each}</div><section class="attendee-fields" aria-label="Nama pemegang tiket"><h3>Nama pemegang tiket</h3>{#each lines as line}<fieldset><legend>{line.quantity} tiket {line.tier.name}</legend>{#each attendeeNames[line.tier.id] ?? [] as _name, index}<label for={`attendee-${line.tier.id}-${index}`}>Peserta {index + 1}<input id={`attendee-${line.tier.id}-${index}`} value={attendeeNames[line.tier.id]?.[index] ?? ""} oninput={(event) => setAttendeeName(line.tier.id, index, event.currentTarget.value)} maxlength="80" autocomplete="off" disabled={Boolean(activeOrder) || checkoutUncertain} aria-invalid={Boolean(attendeeErrors[line.tier.id]?.[index])} required /><small class="form-error">{attendeeErrors[line.tier.id]?.[index] ?? ""}</small></label>{/each}</fieldset>{/each}</section><div class="step-actions"><span></span><button class="button" type="submit">Lanjut ke pembayaran</button></div></form>
-      {:else if step === 2}<form id="payment-form" onsubmit={submitPayment}><div class="step-title"><p>Langkah 2 dari 3</p><h2 id="payment-title" tabindex="-1">Pilih metode bayar.</h2><span>{simulationEnabled ? "Pembayaran di halaman ini hanya simulasi." : "Pembayaran belum tersedia di lingkungan ini."}</span></div>{#if simulationEnabled}<fieldset aria-describedby="payment-error" class:has-error={Boolean(paymentError)}><legend class="sr-only">Metode pembayaran</legend><div class="payment-options">{#each [{ id: "QRIS", label: "QRIS" }, { id: "VIRTUAL_ACCOUNT", label: "Virtual Account" }, { id: "GOPAY", label: "GoPay" }] as method}<label class="payment-card"><input bind:group={payment} type="radio" name="payment" value={method.id} aria-describedby="payment-error" disabled={Boolean(activeOrder) || checkoutUncertain} /><span class="payment-logo" class:gopay={method.id === "GOPAY"}>{method.label}</span><span><b>{method.label}</b><small>Simulasi pembayaran</small></span></label>{/each}</div></fieldset>{:else}<p role="status">Buat order untuk melihat nominal dari server. Pembayaran dapat diselesaikan saat simulasi diaktifkan.</p>{/if}<p id="payment-error" class="form-error" aria-live="polite">{paymentError}</p><div class="step-actions"><button class="text-button" type="button" disabled={Boolean(activeOrder) || checkoutUncertain} onclick={() => goToStep(1)}>Kembali</button><button class="button" type="submit">{simulationEnabled ? "Tinjau pesanan" : "Lanjutkan"}</button></div></form>
-       {:else}<section id="confirmation"><div class="step-title"><p>Langkah 3 dari 3</p><h2 id="confirmation-title" tabindex="-1">Periksa sebelum memesan.</h2><span>Pastikan data dan pesananmu sudah benar.</span></div><div class="confirmation-block"><div><span>Pemesan</span><b>{buyer.name}</b><p>{buyer.email} · {buyer.phone}</p></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(1)}>Ubah data</button>{/if}</div><div class="confirmation-block"><div><span>Pembayaran</span><b>{simulationEnabled ? paymentLabel : "Belum tersedia"}</b></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(2)}>Ubah metode</button>{/if}</div><p class="terms-trigger">Dengan melanjutkan, kamu menyetujui <button class="text-button" type="button" onclick={openTerms}>S&K Konser</button>.</p><p class="form-error" aria-live="polite">{paymentError}</p>{#if paymentStatus === "FAILED"}<p role="status">Pembayaran gagal. Order tetap tersimpan dan kamu dapat mencoba lagi.</p>{/if}{#if activeOrder && !simulationEnabled && activeOrder.status !== "PAID"}<p role="status">Pembayaran belum tersedia. Akses order disimpan pada browser ini.</p>{/if}<div class="step-actions"><button class="text-button" type="button" disabled={checkoutUncertain} onclick={() => goToStep(2)}>Kembali</button>{#if !completed}<button class="button" type="button" disabled={converting || (reservationExpired && !paymentUncertain && simulationEnabled)} onclick={() => activeOrder && !simulationEnabled ? refreshOrderStatus() : completeOrder("SUCCEEDED")}>{converting ? "Memproses..." : checkoutUncertain ? "Coba ulang checkout" : paymentUncertain ? "Periksa status pembayaran" : activeOrder ? !simulationEnabled ? "Periksa status order" : paymentStatus === "FAILED" ? "Coba bayar lagi" : "Muat e-ticket lagi" : simulationEnabled ? "Buat pesanan dan bayar" : "Buat order"}</button>{/if}</div>{#if simulationEnabled && !activeOrder && !checkoutUncertain}<button class="text-button" type="button" disabled={reservationExpired || converting} onclick={() => completeOrder("FAILED")}>Simulasikan pembayaran gagal</button>{/if}</section>{/if}
+      {:else if step === 2}<form id="payment-form" onsubmit={submitPayment}><div class="step-title"><p>Langkah 2 dari 3</p><h2 id="payment-title" tabindex="-1">Pilih metode bayar.</h2><span>{simulationEnabled ? "Mode pengembangan: pembayaran disimulasikan." : "Pembayaran diproses aman melalui Midtrans sandbox."}</span></div><fieldset aria-describedby="payment-error" class:has-error={Boolean(paymentError)}><legend class="sr-only">Metode pembayaran</legend><div class="payment-options">{#each [{ id: "QRIS", label: "QRIS" }, { id: "VIRTUAL_ACCOUNT", label: "Virtual Account" }, { id: "GOPAY", label: "GoPay" }] as method}<label class="payment-card"><input bind:group={payment} type="radio" name="payment" value={method.id} aria-describedby="payment-error" disabled={Boolean(activeOrder) || checkoutUncertain} /><span class="payment-logo" class:gopay={method.id === "GOPAY"}>{method.label}</span><span><b>{method.label}</b><small>{simulationEnabled ? "Simulasi" : "Pembayaran sandbox"}</small></span></label>{/each}</div></fieldset><p id="payment-error" class="form-error" aria-live="polite">{paymentError}</p><div class="step-actions"><button class="text-button" type="button" disabled={Boolean(activeOrder) || checkoutUncertain} onclick={() => goToStep(1)}>Kembali</button><button class="button" type="submit">Tinjau pesanan</button></div></form>
+       {:else}<section id="confirmation"><div class="step-title"><p>Langkah 3 dari 3</p><h2 id="confirmation-title" tabindex="-1">Periksa sebelum memesan.</h2><span>Pastikan data dan pesananmu sudah benar.</span></div><div class="confirmation-block"><div><span>Pemesan</span><b>{buyer.name}</b><p>{buyer.email} · {buyer.phone}</p></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(1)}>Ubah data</button>{/if}</div><div class="confirmation-block"><div><span>Pembayaran</span><b>{paymentLabel}</b></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(2)}>Ubah metode</button>{/if}</div><p class="terms-trigger">Dengan melanjutkan, kamu menyetujui <button class="text-button" type="button" onclick={openTerms}>S&K Konser</button>.</p><p class="form-error" aria-live="polite">{paymentError}</p>{#if paymentStatus === "FAILED"}<p role="status">Pembayaran gagal. Order tetap tersimpan dan kamu dapat mencoba lagi.</p>{/if}{#if activeOrder && activeOrder.status === "PENDING"}<p role="status">{paymentStatus === "PENDING" ? "Menunggu konfirmasi pembayaran dari Midtrans." : "Pesanan siap dibayar."}</p><button class="text-button" type="button" disabled={converting} onclick={refreshOrderStatus}>Periksa status pembayaran</button>{/if}<div class="step-actions"><button class="text-button" type="button" disabled={checkoutUncertain} onclick={() => goToStep(2)}>Kembali</button>{#if !completed}<button class="button" type="button" disabled={converting || (reservationExpired && !paymentUncertain)} onclick={() => completeOrder("SUCCEEDED")}>{converting ? "Memproses..." : checkoutUncertain ? "Coba ulang checkout" : paymentUncertain ? "Periksa status pembayaran" : activeOrder ? activeOrder.status === "PAID" ? "Muat e-ticket lagi" : paymentStatus === "FAILED" ? "Coba bayar lagi" : "Lanjutkan pembayaran" : "Buat pesanan dan bayar"}</button>{/if}</div>{#if simulationEnabled && !activeOrder && !checkoutUncertain}<button class="text-button" type="button" disabled={reservationExpired || converting} onclick={() => completeOrder("FAILED")}>Simulasikan pembayaran gagal</button>{/if}</section>{/if}
        </section><aside class="order-summary"><h2>Ringkasan pesanan</h2><p class="summary-event">{concert.artist}</p><p>{eventDate(concert.startsAt)}</p>{#each reservation.items as line}<div class="summary-line"><span>{line.quantity}x {line.name}</span><b>{formatRupiah.format(line.lineTotal)}</b></div>{/each}<div class="summary-line"><span>Biaya admin</span><b>{formatRupiah.format(activeOrder?.adminFee ?? ADMIN_FEE)}</b></div>{#if discount}<div class="summary-line discount-row"><span>Diskon</span><b>-{formatRupiah.format(discount)}</b></div>{/if}<form class="voucher-form" onsubmit={applyVoucher}><label for="voucher">Kode promo<input bind:value={voucherInput} id="voucher" autocomplete="off" disabled={Boolean(activeOrder) || checkoutUncertain || reservationExpired} /></label><button class="button button-small" type="submit" disabled={Boolean(activeOrder) || checkoutUncertain || reservationExpired}>Gunakan</button></form>{#if voucher}<p class:is-valid={Boolean(discount)} class="voucher-message" aria-live="polite">{activeOrder ? "Voucher tercatat pada pesanan." : discount ? "Estimasi promo HEMAT10 diterapkan." : "Kode voucher akan divalidasi server."}</p>{/if}<div class="grand-total"><span>{activeOrder ? "Total" : "Estimasi total"}</span><strong>{formatRupiah.format(total)}</strong></div>{#if !activeOrder && !checkoutUncertain}<small>Nominal akhir ditetapkan server setelah pesanan dibuat.</small>{/if}<button class="terms-button" type="button" onclick={openTerms}>Lihat S&amp;K Konser</button></aside></div>
    </section>
    <dialog class="terms-dialog" bind:this={termsDialog} aria-labelledby="terms-title"><div class="dialog-heading"><p class="checkout-kicker">Informasi penting</p><h2 id="terms-title">Syarat &amp; ketentuan konser</h2></div><div class="terms-dialog-list">{#each concertTerms as term}<section><h3>{term.title}</h3><p>{term.body}</p></section>{/each}</div><form method="dialog" class="dialog-actions"><button class="button" type="submit">Tutup</button></form></dialog>

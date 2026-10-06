@@ -1,11 +1,13 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { Staff } from "../lib/api.ts";
-  import { submitScan, type ScannerState } from "../lib/scanner.ts";
+  import { checkTicketStatus, continueToNextScan, submitScan, type ScannerState } from "../lib/scanner.ts";
+  import CameraScanner from "./CameraScanner.svelte";
 
-  let { accessToken, staff, onUnauthorized, onProfile, onLogout, loggingOut }: {
+  let { accessToken, staff, sessionReady, onUnauthorized, onProfile, onLogout, loggingOut }: {
     accessToken: string;
     staff: Staff;
+    sessionReady: boolean;
     onUnauthorized: () => void;
     onProfile: (staff: Staff) => void;
     onLogout: () => void;
@@ -14,7 +16,9 @@
   let assignmentKey = $state("");
   let code = $state("");
   let codeInput: HTMLInputElement | undefined;
-  let scan = $state<ScannerState>({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan" });
+  let scan = $state<ScannerState>({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan", locked: false, lastAttempt: null, statusChecking: false, ticketStatus: null, statusCheckError: "" });
+  let scanSource = $state<"camera" | "manual" | null>(null);
+  let unknownAcknowledged = $state(false);
   let assignment = $derived(staff.assignments.find((item) => `${item.eventId}:${item.gate}` === assignmentKey));
 
   $effect(() => {
@@ -34,15 +38,36 @@
     error: { label: "Check-in gagal", title: "Server menolak check-in", detail: "Periksa pesan server sebelum melanjutkan." },
   };
 
-  async function handleScan(event: SubmitEvent) {
-    event.preventDefault();
-    if (scan.busy || !assignment) return;
-    await submitScan(scan, accessToken, assignment, code, onProfile, onUnauthorized);
+  async function scanCode(value: string, source: "camera" | "manual") {
+    if (scan.busy || scan.locked || !assignment) return;
+    scanSource = source;
+    unknownAcknowledged = false;
+    code = value;
+    await submitScan(scan, accessToken, assignment, value, onProfile, onUnauthorized);
     if (scan.status !== "unknown") {
       code = "";
       await tick();
       codeInput?.focus();
     }
+  }
+
+  async function handleScan(event: SubmitEvent) {
+    event.preventDefault();
+    await scanCode(code, "manual");
+  }
+
+  function handleNextScan() {
+    if (!continueToNextScan(scan, unknownAcknowledged)) return false;
+    unknownAcknowledged = false;
+    scanSource = null;
+    code = "";
+    void tick().then(() => codeInput?.focus());
+    return true;
+  }
+
+  async function handleStatusCheck() {
+    unknownAcknowledged = false;
+    await checkTicketStatus(scan, accessToken, onUnauthorized);
   }
 </script>
 
@@ -56,14 +81,14 @@
   <a class="skip-link" href="#scan-content">Lewati ke scanner</a>
   <header class="scan-topbar">
     <a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a>
-    <div class="scan-live"><span class="scan-live-dot" aria-hidden="true"></span><span class="scan-live-state">Sistem aktif <i>•</i></span><strong>{assignment?.gate ?? "Pilih gate"}</strong><button class="staff-text-button" type="button" disabled={scan.busy || loggingOut} onclick={onLogout}>Keluar</button></div>
+    <div class="scan-live"><span class="scan-live-dot" aria-hidden="true"></span><span class="scan-live-state">Sistem aktif <i>•</i></span><strong>{assignment?.gate ?? "Pilih gate"}</strong><button class="staff-text-button" type="button" disabled={scan.busy || scan.statusChecking || loggingOut} onclick={onLogout}>Keluar</button></div>
   </header>
 
   <main id="scan-content" class="scan-content">
     <section class="scan-heading" aria-labelledby="scan-title">
       <div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> CHECK-IN</p><h1 id="scan-title">Buka pintu.<br /><em>Jaga momen.</em></h1><p class="scan-intro">Verifikasi tiket pengunjung dengan penugasan gate yang terdaftar.</p></div>
         <div class="scan-event-meta"><label class="meta-label" for="staff-assignment">Penugasan aktif</label>
-        {#if staff.assignments.length}<select id="staff-assignment" bind:value={assignmentKey} disabled={scan.busy}><option value="">Pilih event dan gate</option>{#each staff.assignments as item (`${item.eventId}:${item.gate}`)}<option value={`${item.eventId}:${item.gate}`}>{item.eventId} · {item.gate}</option>{/each}</select>
+        {#if staff.assignments.length}<select id="staff-assignment" bind:value={assignmentKey} disabled={scan.busy || scan.locked || scan.statusChecking}><option value="">Pilih event dan gate</option>{#each staff.assignments as item (`${item.eventId}:${item.gate}`)}<option value={`${item.eventId}:${item.gate}`}>{item.eventId} · {item.gate}</option>{/each}</select>
         {:else}<strong>Tidak ada penugasan</strong><span>Hubungi administrator untuk mengaktifkan akses gate.</span>{/if}
       </div>
     </section>
@@ -74,9 +99,12 @@
           <div class="panel-topline"><span class="panel-index">01</span><h2>Masukkan kode tiket</h2><span class="keyboard-hint">Enter ↵</span></div>
           <form class="scan-form" onsubmit={handleScan} aria-busy={scan.busy}>
             <label for="ticket-code">Kode e-ticket</label>
-            <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:this={codeInput} bind:value={code} placeholder="Contoh: ET-…" autocomplete="off" spellcheck="false" required disabled={scan.busy || !assignment} aria-describedby="ticket-code-note" /><button class="scan-submit" type="submit" disabled={scan.busy || !assignment}>{scan.busy ? "Memeriksa…" : "Verifikasi"} <span aria-hidden="true">↗</span></button></div>
+            <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:this={codeInput} bind:value={code} placeholder="Contoh: ET-…" autocomplete="off" spellcheck="false" required disabled={scan.busy || scan.locked || !assignment} aria-describedby="ticket-code-note" /><button class="scan-submit" type="submit" disabled={scan.busy || scan.locked || !assignment}>{scan.busy ? "Memeriksa…" : "Verifikasi"} <span aria-hidden="true">↗</span></button></div>
             <p id="ticket-code-note" class="input-note">Masukkan kode ET- dari e-ticket. Scanner keyboard dapat langsung mengetik kode di sini.</p>
           </form>
+          <CameraScanner enabled={Boolean(assignment) && sessionReady} busy={scan.busy || scan.statusChecking || loggingOut} locked={scan.locked} resumeCamera={scanSource === "camera"} canContinue={!scan.busy && !scan.statusChecking && (scan.status !== "unknown" || scan.ticketStatus?.status === "CHECKED_IN" || unknownAcknowledged)} onNext={handleNextScan} onCode={(value) => scanCode(value, "camera")} />
+          {#if scan.locked && scanSource === "manual"}<button class="scan-submit next-scan" type="button" disabled={scan.busy || scan.statusChecking || (scan.status === "unknown" && scan.ticketStatus?.status !== "CHECKED_IN" && !unknownAcknowledged)} onclick={handleNextScan}>Scan berikutnya</button>{/if}
+          {#if scan.status === "unknown"}<section class="scan-status-check" aria-labelledby="status-check-title"><h3 id="status-check-title">Hasil check-in belum diketahui</h3><p>Gate tetap ditahan sampai status tiket diperiksa.</p><button class="staff-secondary-button" type="button" disabled={scan.statusChecking || scan.busy} onclick={handleStatusCheck}>{scan.statusChecking ? "Memeriksa status…" : "Periksa status"}</button>{#if scan.ticketStatus}<p role="status">{scan.ticketStatus.status === "CHECKED_IN" ? "Check-in tiket sudah tercatat." : `Belum tercatat saat diperiksa. Status order: ${scan.ticketStatus.orderStatus}. Ini belum memastikan permintaan sebelumnya gagal.`}</p>{#if scan.ticketStatus.status === "CHECKED_IN" && scan.ticketStatus.checkedInAt}<p>Waktu check-in: <time datetime={scan.ticketStatus.checkedInAt}>{new Date(scan.ticketStatus.checkedInAt).toLocaleString("id-ID")}</time></p>{/if}<p>Kode tiket: <strong>{scan.ticketStatus.ticket.code}</strong></p>{/if}{#if scan.statusCheckError}<p role="alert">{scan.statusCheckError} Gate tetap ditahan.</p>{/if}{#if scan.ticketStatus?.status !== "CHECKED_IN"}<button class="staff-text-button" type="button" disabled={scan.statusChecking || unknownAcknowledged} onclick={() => unknownAcknowledged = true}>{unknownAcknowledged ? "Penanganan dikonfirmasi" : "Konfirmasi penanganan"}</button>{/if}</section>{/if}
           {#if !staff.assignments.length}<p class="staff-muted" role="status">Check-in dinonaktifkan karena akun ini belum memiliki penugasan event dan gate.</p>{/if}
         </div>
         <div class="session-strip"><div><span class="strip-label">Aktivitas check-in sesi ini</span><strong>{String(scan.scanCount).padStart(2, "0")}</strong></div><div><span class="strip-label">Aktivitas terakhir</span><strong>{scan.lastScan}</strong></div></div>

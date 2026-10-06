@@ -4,6 +4,7 @@
   import Countdown from "../components/ticket/Countdown.svelte";
   import { ApiError, getTicket, type ApiTicket } from "../lib/api.ts";
   import { getOrderAccessForTicket } from "../lib/order-access.ts";
+  import { ticketQrSource } from "../lib/ticket-qr.ts";
   import Toast from "../components/Toast.svelte";
 
   let { id }: { id: string } = $props();
@@ -14,6 +15,7 @@
   let toast = $state<{ id: number; message: string; tone: "success" | "error" } | null>(null);
   let toastId = 0;
   let controller: AbortController | undefined;
+  const qrSource = $derived(ticketQrSource(ticket?.code));
   const errorMessage = $derived(error instanceof ApiError && error.code === "ACCESS_TOKEN_EXPIRED"
     ? "Akses tiket pada browser ini sudah kedaluwarsa."
     : error instanceof ApiError && error.code === "TICKET_NOT_FOUND"
@@ -65,10 +67,10 @@
       <section class="pass-main"><div class="pass-top"><span class="pass-label">Tiket Online</span><span class="pass-status">E-ticket</span></div><h2 id="ticket-title">{ticket.eventArtist}</h2><p class="pass-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
         <div class="pass-grid"><div class="pass-row"><span>Pengunjung</span><b>{ticket.attendeeName}</b></div><div class="pass-row"><span>Tanggal event</span><b>{eventDate(ticket.eventStartsAt)}</b></div><div class="pass-row"><span>Lokasi</span><b>{ticket.eventVenue}, {ticket.eventCity}</b></div><div class="pass-row"><span>Alamat</span><b>{ticket.eventAddress}</b></div><div class="pass-row"><span>Jenis tiket</span><b>{ticket.tierName}</b></div><div class="pass-row"><span>Gate</span><b>{ticket.gate}</b></div><div class="pass-row"><span>Reference pesanan</span><b>{ticket.orderReference}</b></div><div class="pass-row"><span>Diterbitkan</span><b>{eventDate(ticket.issuedAt)}</b></div></div>
       </section>
-      <aside class="pass-stub"><div><span class="pass-label">Kode e-ticket</span><p class="ticket-code">{ticket.code}</p><button class="button button-secondary" type="button" onclick={copyCode}>Salin kode</button></div><Countdown startsAt={ticket.eventStartsAt} /></aside>
+      <aside class="pass-stub"><div><span class="pass-label">Kode e-ticket</span>{#if qrSource}<img class="qr-code" src={qrSource} alt={`QR code untuk kode e-ticket ${ticket.code}`} />{:else}<p role="status">QR tidak tersedia. Gunakan kode e-ticket di bawah.</p>{/if}<p class="ticket-code">{ticket.code}</p><button class="button button-secondary" type="button" onclick={copyCode}>Salin kode</button></div><Countdown startsAt={ticket.eventStartsAt} /></aside>
     </article>
     <div class="ticket-actions"><button class="button" type="button" onclick={() => window.print()}>Cetak / Simpan PDF</button><a class="button button-secondary" href="/tiket-saya">Tiket Saya</a></div>
-    <p class="ticket-caption">Akses tiket berlaku di browser yang sama. Kode ini belum mendukung pemindaian QR.</p>
+    <p class="ticket-caption">Akses tiket berlaku di browser yang sama. Tunjukkan QR atau kode e-ticket kepada petugas di gate.</p>
     {#if toast}<Toast id={toast.id} message={toast.message} tone={toast.tone} onDismiss={() => toast = null} />{/if}
   </section>
 {/if}
