@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminCheckInHistory, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, replaceStaffAssignments, resetStaffPassword, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
+import { ApiError, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminCheckInHistory, getAdminOrder, getAdminOrders, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, replaceStaffAssignments, resetStaffPassword, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -30,6 +30,25 @@ test("admin event APIs use the private admin routes and preserve publication sta
     expect(calls.map((call) => call.url)).toEqual(["/api/v1/admin/events", "/api/v1/admin/events", "/api/v1/admin/events/nusa-malam"]);
     expect(calls.every((call) => new Headers(call.init?.headers).get("Authorization") === "Bearer staff-token")).toBe(true);
     expect(JSON.parse(String(calls[1]?.init?.body)).publicationStatus).toBe("PUBLISHED");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("admin order APIs send filters and staff authorization to the admin endpoints", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const page = { items: [], nextCursor: null, filterOptions: { events: [] } };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify(page), { status: 200 });
+  }) as typeof fetch;
+  try {
+    expect(await getAdminOrders("staff-token", { q: "TO-123", eventId: "nusa-malam", status: "PAID", dateFrom: "2026-10-06", dateTo: "2026-10-07", cursor: "next" })).toEqual(page);
+    await getAdminOrder("staff-token", "0123456789abcdef0123456789abcdef");
+    expect(calls.map((call) => call.url)).toEqual([
+      "/api/v1/admin/orders?q=TO-123&eventId=nusa-malam&status=PAID&dateFrom=2026-10-06&dateTo=2026-10-07&cursor=next",
+      "/api/v1/admin/orders/0123456789abcdef0123456789abcdef",
+    ]);
+    expect(calls.every((call) => new Headers(call.init?.headers).get("Authorization") === "Bearer staff-token")).toBe(true);
   } finally { globalThis.fetch = originalFetch; }
 });
 

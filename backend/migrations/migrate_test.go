@@ -19,8 +19,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 17 {
-		t.Fatalf("migration count = %d, want 17", len(items))
+	if len(items) != 18 {
+		t.Fatalf("migration count = %d, want 18", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -38,6 +38,9 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	}
 	if !strings.Contains(string(items[16].data), "CREATE TABLE IF NOT EXISTS admin_audit_log") {
 		t.Fatal("admin audit migration was not loaded")
+	}
+	if !strings.Contains(string(items[17].data), "idx_orders_admin_created") {
+		t.Fatal("admin order pagination index was not loaded")
 	}
 }
 

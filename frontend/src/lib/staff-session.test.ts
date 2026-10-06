@@ -61,6 +61,8 @@ test("routes valid staff sessions to their own role and rejects cross-role pages
   expect(roleMatchesPage("staff", { role: "ADMIN" })).toBe(true);
   expect(roleMatchesPage("staff", { role: "STAFF" })).toBe(false);
   expect(roleMatchesPage("history", { role: "ADMIN" })).toBe(true);
+  expect(roleMatchesPage("orders", { role: "ADMIN" })).toBe(true);
+  expect(roleMatchesPage("orders", { role: "STAFF" })).toBe(false);
   expect(roleMatchesPage("history", { role: "STAFF" })).toBe(false);
   expect(roleMatchesPage("scan", { role: "STAFF" })).toBe(true);
   expect(roleMatchesPage("scan", { role: "ADMIN" })).toBe(false);

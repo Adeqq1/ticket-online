@@ -41,6 +41,12 @@ export type CheckInHistoryItem = { id: string; code: string | null; eventId: str
 export type CheckInHistoryEvent = { id: string; name: string; gates: string[] };
 export type CheckInHistoryPage = { items: CheckInHistoryItem[]; nextCursor: string | null; filterOptions: CheckInHistoryEvent[] };
 export type CheckInHistoryFilter = { eventId?: string; gate?: string; q?: string; beforeId?: string };
+export type AdminOrder = { id: string; reference: string; status: OrderStatus; eventId: string; eventName: string; buyerName: string; createdAt: string; ticketCount: number; total: number };
+export type AdminOrderItem = { tierId: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
+export type AdminOrderTicket = { id: string; code: string; attendeeName: string; tierName: string; gate: string; status: "CHECKED_IN" | "NOT_CHECKED_IN"; checkedInAt: string | null; checkedInBy: string | null };
+export type AdminOrderDetail = AdminOrder & { buyer: { name: string; email: string; phone: string; identityMasked: string }; subtotal: number; adminFee: number; discount: number; expiresAt: string; items: AdminOrderItem[]; payment: { method: PaymentMethod; amount: number; status: PaymentStatus; paidAt: string | null } | null; tickets: AdminOrderTicket[] };
+export type AdminOrderFilter = { q?: string; eventId?: string; status?: OrderStatus; dateFrom?: string; dateTo?: string; cursor?: string };
+export type AdminOrderPage = { items: AdminOrder[]; nextCursor: string | null; filterOptions: { events: Array<{ id: string; name: string }> } };
 
 export class ApiError extends Error {
   code: string;
@@ -106,6 +112,16 @@ export function getReservationEvent(reservationId: string, idempotencyKey: strin
 
 export function getAdminEvents(accessToken: string, signal?: AbortSignal) {
   return request<{ events: AdminApiEvent[] }>("/api/v1/admin/events", signal, { headers: privateHeaders(accessToken) }).then((value) => value.events);
+}
+
+export function getAdminOrders(accessToken: string, filters: AdminOrderFilter = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+  return request<AdminOrderPage>(`/api/v1/admin/orders${query.size ? `?${query}` : ""}`, signal, { headers: privateHeaders(accessToken) });
+}
+
+export function getAdminOrder(accessToken: string, orderId: string, signal?: AbortSignal) {
+  return request<AdminOrderDetail>(`/api/v1/admin/orders/${encodeURIComponent(orderId)}`, signal, { headers: privateHeaders(accessToken) });
 }
 
 export function createAdminEvent(accessToken: string, payload: AdminEventInput, signal?: AbortSignal) {

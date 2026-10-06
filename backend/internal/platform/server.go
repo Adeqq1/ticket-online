@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/adminorders"
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkin"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
@@ -41,6 +42,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	staffService := staffauth.New(db)
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
+	adminorders.NewHandler(adminorders.NewService(db, staffService), logger).Register(mux)
 	recovery.NewHandler(db, access, logger, trustedProxies...).Register(mux)
 	checkinHandler := checkin.NewHandler(checkin.NewService(db, staffService), logger)
 	mux.HandleFunc("POST /api/v1/staff/check-ins", checkinHandler.CheckIn)
