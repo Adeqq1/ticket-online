@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { findOrderForActiveReservation } from "./checkout-recovery.ts";
-import { parseOrderAccess } from "./order-access.ts";
+import { getOrderAccessForTicket, hasPersistentTicketAccess, parseOrderAccess, saveOrderAccess } from "./order-access.ts";
 import { isRecoveryResult, recoveredOrderAccess, recoveryToken, type RecoveryResult } from "./ticket-recovery.ts";
 
 const result: RecoveryResult = {
@@ -29,4 +29,30 @@ test("recovered record round-trips storage and is never used by checkout", () =>
   expect(parseOrderAccess(JSON.stringify(record))).toEqual(record);
   expect(parseOrderAccess(JSON.stringify({ ...record, idempotencyKey: "only-one-field" }))).toBeNull();
   expect(findOrderForActiveReservation([record], { reservationId: result.reservationId, idempotencyKey: "k", eventId: "e", basketKey: "b" }, "b")).toBeNull();
+});
+
+test("a recovered order is usable on a browser with empty storage", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() { return values.size; },
+    },
+  });
+  try {
+    const record = recoveredOrderAccess(result);
+    expect(saveOrderAccess(record)).toBe(true);
+    expect(values.size).toBe(1);
+    expect(hasPersistentTicketAccess(result.orderId, result.ticketIds[0]!)).toBe(true);
+    expect(getOrderAccessForTicket(result.ticketIds[0]!)?.accessToken).toBe(result.accessToken);
+    expect(getOrderAccessForTicket("f".repeat(32))).toBeNull();
+  } finally {
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
 });

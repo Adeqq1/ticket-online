@@ -157,7 +157,7 @@ go vet ./...
 go build ./cmd/api ./cmd/migrate ./cmd/staff
 ```
 
-Tes integrasi checkout, pembayaran, expiry, sesi petugas, dan check-in/riwayat memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variabel tersebut, tes integrasi dilewati. Gunakan database tes yang dapat dibuang, lalu jalankan dari `backend/`:
+Tes integrasi checkout, pembayaran, expiry, sesi petugas, check-in/riwayat, serta email dan pemulihan tiket (SMTP gagal sampai batas tiga percobaan, webhook Midtrans berulang, token kedaluwarsa/dipakai ulang, dan pemulihan dari perangkat tanpa akses tersimpan; SMTP disimulasikan server lokal di dalam tes) memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variabel tersebut, tes integrasi dilewati. Gunakan database tes yang dapat dibuang, lalu jalankan dari `backend/`:
 
 ```bash
 MYSQL_TEST_DSN="$MYSQL_DSN" go test -v ./...

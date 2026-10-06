@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,8 +34,9 @@ import (
 
 type capturedMail struct{ to, subject, plain string }
 
-// fakeSMTP accepts every message and hands back its decoded text/plain part.
-func fakeSMTP(t *testing.T) (int, <-chan capturedMail) {
+// fakeSMTP hands back the decoded text/plain part of every message. While reject is set it still
+// captures the message but answers the final DATA with 451, like a server that lost the acknowledgement.
+func fakeSMTP(t *testing.T, reject *atomic.Bool) (int, <-chan capturedMail) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -47,13 +49,13 @@ func fakeSMTP(t *testing.T) (int, <-chan capturedMail) {
 			if err != nil {
 				return
 			}
-			go serveSMTP(conn, mails)
+			go serveSMTP(conn, mails, reject)
 		}
 	}()
 	return listener.Addr().(*net.TCPAddr).Port, mails
 }
 
-func serveSMTP(conn net.Conn, mails chan<- capturedMail) {
+func serveSMTP(conn net.Conn, mails chan<- capturedMail, reject *atomic.Bool) {
 	defer conn.Close()
 	text := textproto.NewConn(conn)
 	_ = text.PrintfLine("220 test")
@@ -84,6 +86,10 @@ func serveSMTP(conn net.Conn, mails chan<- capturedMail) {
 				}
 			}
 			mails <- captured
+			if reject != nil && reject.Load() {
+				_ = text.PrintfLine("451 temporary failure")
+				continue
+			}
 			_ = text.PrintfLine("250 queued")
 		default:
 			_ = text.PrintfLine("250 ok")
@@ -203,7 +209,7 @@ func TestTicketRecoveryAndResendEmail(t *testing.T) {
 	orderID, reference = order.ID, order.Reference
 	expect(call(handler, clientIP, http.MethodPost, "/api/v1/orders/"+orderID+"/simulate-payment", map[string]string{"method": "QRIS", "result": "SUCCEEDED"}, order.AccessToken), http.StatusCreated)
 
-	port, mails := fakeSMTP(t)
+	port, mails := fakeSMTP(t, nil)
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
 	go func() {

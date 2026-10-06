@@ -467,7 +467,11 @@ paths:
       operationId: midtransNotification
       tags: [Pembayaran]
       summary: Terima notifikasi status pembayaran Midtrans
-      description: Endpoint memverifikasi signature_key dan nominal sebelum mengubah status order atau menerbitkan tiket.
+      description: >-
+        Endpoint memverifikasi signature_key dan nominal sebelum mengubah status order atau menerbitkan tiket.
+        Notifikasi yang sama boleh dikirim berulang atau bersamaan; order tetap PAID dengan satu set e-ticket,
+        dan email tiket tetap satu pekerjaan antrean. Pengiriman email terjadi di worker terpisah, sehingga
+        kegagalan SMTP tidak memengaruhi respons webhook, status pembayaran, atau tiket.
       requestBody:
         required: true
         content:
