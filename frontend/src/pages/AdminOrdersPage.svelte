@@ -1,0 +1,115 @@
+<script lang="ts">
+  import { onDestroy, onMount } from "svelte";
+  import { ApiError, getAdminOrder, getAdminOrders, type AdminOrder, type AdminOrderDetail, type AdminOrderFilter, type AdminOrderPage, type OrderStatus } from "../lib/api.ts";
+
+  let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
+  let items = $state<AdminOrder[]>([]);
+  let events = $state<AdminOrderPage["filterOptions"]["events"]>([]);
+  let nextCursor = $state<string | null>(null);
+  let selected = $state<AdminOrderDetail | null>(null);
+  let selectedId = $state("");
+  let query = $state("");
+  let eventId = $state("");
+  let status = $state<"" | OrderStatus>("");
+  let dateFrom = $state("");
+  let dateTo = $state("");
+  let applied: AdminOrderFilter = {};
+  let loading = $state(true);
+  let loadingMore = $state(false);
+  let detailLoading = $state(false);
+  let error = $state("");
+  let detailError = $state("");
+  let request: AbortController | undefined;
+  let detailRequest: AbortController | undefined;
+  let generation = 0;
+  let detailGeneration = 0;
+
+  function filters(): AdminOrderFilter { return { ...(query.trim() ? { q: query.trim() } : {}), ...(eventId ? { eventId } : {}), ...(status ? { status } : {}), ...(dateFrom ? { dateFrom } : {}), ...(dateTo ? { dateTo } : {}) }; }
+
+  async function load(value = applied, more = false) {
+    request?.abort();
+    const controller = new AbortController(); request = controller;
+    const current = ++generation;
+    if (more) loadingMore = true; else { loading = true; items = []; nextCursor = null; }
+    error = "";
+    try {
+      const result = await getAdminOrders(accessToken, { ...value, ...(more && nextCursor ? { cursor: nextCursor } : {}) }, controller.signal);
+      if (current !== generation) return;
+      events = result.filterOptions.events;
+      items = more ? [...items, ...result.items] : result.items;
+      nextCursor = result.nextCursor;
+    } catch (cause) {
+      if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
+      if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
+      else if (cause instanceof ApiError && cause.status === 403) error = "Akses pesanan hanya tersedia untuk admin.";
+      else error = cause instanceof ApiError ? cause.message : "Pesanan belum dapat dimuat. Periksa koneksi lalu coba lagi.";
+    } finally { if (current === generation) { loading = false; loadingMore = false; if (request === controller) request = undefined; } }
+  }
+
+  function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); closeDetail(); void load(applied); }
+  function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; closeDetail(); void load(applied); }
+
+  function closeDetail() { detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; }
+
+  async function openDetail(id: string) {
+    detailRequest?.abort();
+    const controller = new AbortController(); detailRequest = controller;
+    const current = ++detailGeneration;
+    selectedId = id; selected = null; detailLoading = true; detailError = "";
+    try { selected = await getAdminOrder(accessToken, id, controller.signal); }
+    catch (cause) {
+      if (current !== detailGeneration || (cause instanceof DOMException && cause.name === "AbortError")) return;
+      if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
+      else detailError = cause instanceof ApiError ? cause.message : "Detail pesanan belum dapat dimuat.";
+    } finally { if (current === detailGeneration) { detailLoading = false; if (detailRequest === controller) detailRequest = undefined; } }
+  }
+
+  function money(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value); }
+  function localTime(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" }) + " WIB"; }
+  function statusLabel(value: OrderStatus) { return ({ PENDING: "Menunggu pembayaran", PAID: "Lunas", CANCELLED: "Dibatalkan", EXPIRED: "Kedaluwarsa" })[value]; }
+
+  onMount(() => { void load({}); });
+  onDestroy(() => { generation++; detailGeneration++; request?.abort(); detailRequest?.abort(); });
+</script>
+
+<svelte:head><title>Pesanan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
+
+<div class="scan-shell staff-admin-shell">
+  <a class="skip-link" href="#order-admin-content">Lewati ke pengelolaan pesanan</a>
+  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
+  <main id="order-admin-content" class="staff-admin-content">
+    <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMIN</p><h1>Pengelolaan pesanan.</h1><p>Telusuri pembayaran dan status tiket pesanan.</p></div></div>
+    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a aria-current="page" href="/admin/orders">Pesanan</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+    <section class="staff-admin-panel checkin-history-panel" aria-labelledby="order-filter-title">
+      <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="order-filter-title">Cari pesanan</h2></div></div>
+      <form class="order-filter-form" onsubmit={search} aria-busy={loading}>
+        <label>Reference<input bind:value={query} maxlength="32" placeholder="Cari reference pesanan" disabled={loading} /></label>
+        <label>Event<select bind:value={eventId} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
+        <label>Status<select bind:value={status} disabled={loading}><option value="">Semua status</option><option value="PENDING">Menunggu pembayaran</option><option value="PAID">Lunas</option><option value="CANCELLED">Dibatalkan</option><option value="EXPIRED">Kedaluwarsa</option></select></label>
+        <label>Dibuat sejak (WIB)<input type="date" bind:value={dateFrom} disabled={loading} /></label>
+        <label>Dibuat sampai (WIB)<input type="date" bind:value={dateTo} disabled={loading} /></label>
+        <div class="history-filter-actions"><button class="scan-submit" type="submit" disabled={loading}>Cari</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
+      </form>
+    </section>
+    <section class="staff-admin-panel checkin-history-panel" aria-labelledby="order-results-title">
+      <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="order-results-title">Daftar pesanan</h2></div><button class="staff-text-button" type="button" onclick={() => load(applied)} disabled={loading}>Muat ulang</button></div>
+      {#if loading}<p class="staff-muted" role="status">Memuat pesanan…</p>
+      {:else if error && !items.length}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => load(applied)}>Coba lagi</button></p>
+      {:else if !items.length}<p class="staff-muted" role="status">Belum ada pesanan yang cocok.</p>
+      {:else}<div class="history-table-wrap"><table class="history-table"><caption class="visually-hidden">Daftar pesanan terbaru</caption><thead><tr><th scope="col">Reference</th><th scope="col">Event</th><th scope="col">Pembeli</th><th scope="col">Dibuat (WIB)</th><th scope="col">Tiket</th><th scope="col">Total</th><th scope="col">Status</th><th scope="col">Detail</th></tr></thead><tbody>{#each items as item (item.id)}<tr><td data-label="Reference"><code>{item.reference}</code></td><td data-label="Event">{item.eventName}</td><td data-label="Pembeli">{item.buyerName}</td><td data-label="Dibuat (WIB)"><time datetime={item.createdAt}>{localTime(item.createdAt)}</time></td><td data-label="Tiket">{item.ticketCount}</td><td data-label="Total">{money(item.total)}</td><td data-label="Status">{statusLabel(item.status)}</td><td data-label="Detail"><button class="staff-text-button" type="button" aria-label={`Buka pesanan ${item.reference}`} aria-expanded={selectedId === item.id} onclick={() => selectedId === item.id ? closeDetail() : openDetail(item.id)}>Lihat</button></td></tr>{/each}</tbody></table></div>
+        {#if nextCursor}<button class="staff-secondary-button order-load-more" type="button" disabled={loadingMore} onclick={() => load(applied, true)}>{loadingMore ? "Memuat…" : "Muat berikutnya"}</button>{/if}
+      {/if}
+      {#if error && items.length}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
+    </section>
+    {#if selectedId}<section class="staff-admin-panel checkin-history-panel" aria-labelledby="order-detail-title" aria-busy={detailLoading}><div class="staff-panel-heading"><div><span class="panel-index">03</span><h2 id="order-detail-title">Detail pesanan</h2></div><button class="staff-text-button" type="button" onclick={closeDetail}>Tutup</button></div>
+      {#if detailLoading}<p class="staff-muted" role="status">Memuat detail pesanan…</p>
+      {:else if detailError}<p class="staff-form-message staff-form-error" role="alert">{detailError} <button class="staff-text-button" type="button" onclick={() => openDetail(selectedId)}>Coba lagi</button></p>
+      {:else if selected}<div class="order-detail-grid">
+        <div><h3>Pesanan</h3><dl><dt>Reference</dt><dd>{selected.reference}</dd><dt>Event</dt><dd>{selected.eventName}</dd><dt>Status</dt><dd>{statusLabel(selected.status)}</dd><dt>Dibuat</dt><dd>{localTime(selected.createdAt)}</dd><dt>Batas pembayaran</dt><dd>{localTime(selected.expiresAt)}</dd></dl></div>
+        <div><h3>Pembeli</h3><dl><dt>Nama</dt><dd>{selected.buyer.name}</dd><dt>Email</dt><dd><a href={`mailto:${selected.buyer.email}`}>{selected.buyer.email}</a></dd><dt>Telepon</dt><dd>{selected.buyer.phone}</dd><dt>Identitas</dt><dd>{selected.buyer.identityMasked}</dd></dl></div>
+        <div><h3>Rincian biaya</h3><dl><dt>Subtotal</dt><dd>{money(selected.subtotal)}</dd><dt>Biaya admin</dt><dd>{money(selected.adminFee)}</dd><dt>Diskon</dt><dd>−{money(selected.discount)}</dd><dt>Total</dt><dd><strong>{money(selected.total)}</strong></dd></dl><h3>Pembayaran</h3>{#if selected.payment}<dl><dt>Metode</dt><dd>{selected.payment.method}</dd><dt>Jumlah</dt><dd>{money(selected.payment.amount)}</dd><dt>Status</dt><dd>{selected.payment.status}</dd><dt>Dibayar</dt><dd>{selected.payment.paidAt ? localTime(selected.payment.paidAt) : "Belum dibayar"}</dd></dl>{:else}<p class="staff-muted">Belum ada pembayaran.</p>{/if}</div>
+        <div><h3>Kategori tiket</h3><ul class="order-detail-list">{#each selected.items as item (`${item.tierId}-${item.name}`)}<li><strong>{item.name}</strong><span>{item.quantity} × {money(item.unitPrice)} = {money(item.lineTotal)}</span></li>{/each}</ul><h3>E-ticket dan check-in</h3>{#if selected.tickets.length}<ul class="order-detail-list">{#each selected.tickets as ticket (ticket.id)}<li><strong>{ticket.attendeeName} · {ticket.tierName}</strong><code>{ticket.code}</code><span>{ticket.gate} · {ticket.status === "CHECKED_IN" ? `Check-in ${ticket.checkedInAt ? localTime(ticket.checkedInAt) : "berhasil"}${ticket.checkedInBy ? ` · ${ticket.checkedInBy}` : ""}` : "Belum check-in"}</span></li>{/each}</ul>{:else}<p class="staff-muted">E-ticket belum diterbitkan.</p>{/if}</div>
+      </div>{/if}
+    </section>{/if}
+  </main>
+</div>
