@@ -57,6 +57,6 @@ export function parseCheckoutQuantities(concert: Concert, params: URLSearchParam
     const value = params.get(tier.id);
     if (!value || !/^\d+$/.test(value)) return [];
     const quantity = Number(value);
-    return quantity > 0 && Number.isSafeInteger(quantity) ? [[tier.id, quantity]] : [];
+    return quantity > 0 && Number.isSafeInteger(quantity) && quantity <= tier.maxPerOrder ? [[tier.id, quantity]] : [];
   }));
 }

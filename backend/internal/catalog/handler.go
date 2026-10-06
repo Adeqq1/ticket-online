@@ -54,7 +54,8 @@ type AdminTicketTier struct {
 
 type AdminEvent struct {
 	Event
-	TicketTiers []AdminTicketTier `json:"ticketTiers"`
+	TicketTiers    []AdminTicketTier `json:"ticketTiers"`
+	LocationLocked bool              `json:"locationLocked"`
 }
 
 type Handler struct {

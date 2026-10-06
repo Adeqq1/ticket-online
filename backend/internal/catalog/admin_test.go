@@ -1,6 +1,9 @@
 package catalog
 
 import (
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -14,6 +17,16 @@ func TestAdminEventValidationDefaultsToDraftAndSeparatesSaleStatus(t *testing.T)
 	}
 	if input.repositoryInput().Status != "EARLY_BIRD" {
 		t.Fatal("sale label was not mapped separately")
+	}
+}
+
+func TestAdminCatalogRejectsMissingSession(t *testing.T) {
+	mux := http.NewServeMux()
+	NewAdminHandler(nil, nil, slog.Default()).Register(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/admin/events", nil))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
 	}
 }
 

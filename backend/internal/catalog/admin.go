@@ -54,31 +54,31 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/admin/events/{eventID}/ticket-tiers/{tierID}", h.updateTier)
 }
 
-func (h *AdminHandler) authorize(w http.ResponseWriter, r *http.Request) bool {
+func (h *AdminHandler) authorize(w http.ResponseWriter, r *http.Request) (staffauth.Principal, bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	token, ok := orderaccess.Bearer(r.Header.Get("Authorization"))
 	if !ok {
 		adminError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Autentikasi petugas diperlukan")
-		return false
+		return staffauth.Principal{}, false
 	}
 	principal, err := h.staff.Authenticate(r.Context(), token)
 	if errors.Is(err, staffauth.ErrUnauthorized) {
 		adminError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Sesi petugas tidak valid atau sudah berakhir")
-		return false
+		return staffauth.Principal{}, false
 	}
 	if err != nil {
 		h.internalError(w, r, err)
-		return false
+		return staffauth.Principal{}, false
 	}
 	if principal.Role != "ADMIN" {
 		adminError(w, http.StatusForbidden, "FORBIDDEN", "Akses administrator diperlukan")
-		return false
+		return staffauth.Principal{}, false
 	}
-	return true
+	return principal, true
 }
 
 func (h *AdminHandler) list(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(w, r) {
+	if _, ok := h.authorize(w, r); !ok {
 		return
 	}
 	events, err := h.repository.ListAdminEvents(r.Context())
@@ -90,7 +90,8 @@ func (h *AdminHandler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) create(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(w, r) {
+	principal, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 	var input adminEventInput
@@ -101,7 +102,7 @@ func (h *AdminHandler) create(w http.ResponseWriter, r *http.Request) {
 		adminError(w, http.StatusUnprocessableEntity, "INVALID_REQUEST", "Data konser tidak valid")
 		return
 	}
-	if err := h.repository.CreateEvent(r.Context(), input.repositoryInput()); err != nil {
+	if err := h.repository.CreateEvent(r.Context(), input.repositoryInput(), AdminActor{ID: principal.ID, Name: principal.Name}); err != nil {
 		h.respondError(w, r, err)
 		return
 	}
@@ -114,7 +115,8 @@ func (h *AdminHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) update(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(w, r) {
+	principal, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("eventID"))
@@ -131,7 +133,7 @@ func (h *AdminHandler) update(w http.ResponseWriter, r *http.Request) {
 		adminError(w, http.StatusUnprocessableEntity, "INVALID_REQUEST", "Data konser tidak valid")
 		return
 	}
-	if err := h.repository.UpdateEvent(r.Context(), id, input.repositoryInput()); err != nil {
+	if err := h.repository.UpdateEvent(r.Context(), id, input.repositoryInput(), AdminActor{ID: principal.ID, Name: principal.Name}); err != nil {
 		h.respondError(w, r, err)
 		return
 	}
@@ -161,7 +163,8 @@ type adminTierInput struct {
 }
 
 func (h *AdminHandler) zone(w http.ResponseWriter, r *http.Request, create bool) {
-	if !h.authorize(w, r) {
+	principal, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 	eventID := r.PathValue("eventID")
@@ -184,7 +187,7 @@ func (h *AdminHandler) zone(w http.ResponseWriter, r *http.Request, create bool)
 		adminError(w, 422, "INVALID_REQUEST", "Data zona tidak valid")
 		return
 	}
-	if err := h.repository.SaveZone(r.Context(), eventID, ZoneInput{ID: in.ID, Name: in.Name, Description: in.Description}, create); err != nil {
+	if err := h.repository.SaveZone(r.Context(), eventID, ZoneInput{ID: in.ID, Name: in.Name, Description: in.Description}, create, AdminActor{ID: principal.ID, Name: principal.Name}); err != nil {
 		h.respondError(w, r, err)
 		return
 	}
@@ -194,7 +197,8 @@ func (h *AdminHandler) createZone(w http.ResponseWriter, r *http.Request) { h.zo
 func (h *AdminHandler) updateZone(w http.ResponseWriter, r *http.Request) { h.zone(w, r, false) }
 
 func (h *AdminHandler) tier(w http.ResponseWriter, r *http.Request, create bool) {
-	if !h.authorize(w, r) {
+	principal, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 	eventID := r.PathValue("eventID")
@@ -219,7 +223,7 @@ func (h *AdminHandler) tier(w http.ResponseWriter, r *http.Request, create bool)
 		return
 	}
 	seating := map[string]string{"assigned": "ASSIGNED", "free-standing": "FREE_STANDING"}[in.Seating]
-	err := h.repository.SaveTier(r.Context(), eventID, TierInput{ID: in.ID, Name: in.Name, ZoneID: in.ZoneID, Price: in.Price, Capacity: in.Capacity, MaxPerOrder: in.MaxPerOrder, Benefit: in.Benefit, Gate: in.Gate, Seating: seating}, create)
+	err := h.repository.SaveTier(r.Context(), eventID, TierInput{ID: in.ID, Name: in.Name, ZoneID: in.ZoneID, Price: in.Price, Capacity: in.Capacity, MaxPerOrder: in.MaxPerOrder, Benefit: in.Benefit, Gate: in.Gate, Seating: seating}, create, AdminActor{ID: principal.ID, Name: principal.Name})
 	if err != nil {
 		h.respondError(w, r, err)
 		return
@@ -317,6 +321,8 @@ func (h *AdminHandler) respondError(w http.ResponseWriter, r *http.Request, err 
 		adminError(w, http.StatusUnprocessableEntity, "INVALID_ZONE", "Zona kategori tidak ditemukan untuk konser ini")
 	case errors.Is(err, ErrEventHasReservations):
 		adminError(w, http.StatusConflict, "EVENT_HAS_RESERVATIONS", "Informasi jadwal dan lokasi tidak dapat dikosongkan setelah reservasi dibuat")
+	case errors.Is(err, ErrLocationLocked):
+		adminError(w, http.StatusConflict, "LOCATION_LOCKED", "Lokasi tidak dapat diubah setelah reservasi pertama")
 	case errors.Is(err, ErrDuplicateTier):
 		adminError(w, http.StatusConflict, "DUPLICATE_TIER", "ID kategori tiket sudah digunakan")
 	case errors.Is(err, ErrDuplicateZone):
