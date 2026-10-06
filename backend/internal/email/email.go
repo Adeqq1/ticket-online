@@ -444,7 +444,7 @@ func (s *Service) deliver(ctx context.Context, body []byte, from, to string) err
 	if err := command(250, "MAIL FROM:<%s>", from); err != nil {
 		return cleanError(err, "pengirim")
 	}
-	if err := command(250, "RCPT TO:<%s>", to); err != nil {
+	if err := command(25, "RCPT TO:<%s>", to); err != nil {
 		return cleanError(err, "penerima")
 	}
 	if err := command(354, "DATA"); err != nil {

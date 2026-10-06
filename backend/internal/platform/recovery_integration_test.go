@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
+	"net/netip"
 	"net/textproto"
 	"os"
 	"regexp"
@@ -351,5 +352,72 @@ func TestTicketRecoveryAndResendEmail(t *testing.T) {
 	expect(blocked, http.StatusTooManyRequests)
 	if blocked.Header().Get("Retry-After") == "" {
 		t.Fatal("IP limit has no Retry-After")
+	}
+}
+
+func TestRecoveryLimitsBehindTrustedProxy(t *testing.T) {
+	dsn := os.Getenv("MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set MYSQL_TEST_DSN to a disposable MySQL database")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := migrations.Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandlerWithPaymentConfig(db, logger, time.Minute, "", false, secret, "", "", netip.MustParsePrefix("172.20.0.3/32"))
+	var references []string
+	defer func() {
+		for _, ref := range references {
+			_, _ = db.Exec("DELETE FROM email_queue WHERE recovery_request_id IN (SELECT id FROM recovery_requests WHERE reference = ?)", ref)
+			_, _ = db.Exec("DELETE FROM recovery_requests WHERE reference = ?", ref)
+		}
+	}()
+	for _, tc := range []struct {
+		path          string
+		max, accepted int
+	}{
+		{"/api/v1/ticket-recovery", 10, http.StatusAccepted},
+		{"/api/v1/ticket-recovery/verify", 30, http.StatusBadRequest},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			call := func(remote, forwarded string) *httptest.ResponseRecorder {
+				ref := "TO-" + randomHex(t, 10)
+				references = append(references, ref)
+				body := fmt.Sprintf(`{"email":"limit@example.com","reference":%q}`, ref)
+				if strings.HasSuffix(tc.path, "/verify") {
+					body = `{"token":"invalid"}`
+				}
+				r := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(body))
+				r.RemoteAddr = remote
+				r.Header.Set("X-Forwarded-For", forwarded)
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				return w
+			}
+			for range tc.max {
+				if w := call("172.20.0.3:41000", "192.0.2.1"); w.Code != tc.accepted {
+					t.Fatalf("client A: %d %s", w.Code, w.Body.String())
+				}
+			}
+			blocked := call("172.20.0.3:42000", "192.0.2.1")
+			if blocked.Code != http.StatusTooManyRequests || blocked.Header().Get("Retry-After") == "" {
+				t.Fatalf("client A limit: %d, %v", blocked.Code, blocked.Header())
+			}
+			if w := call("172.20.0.3:41000", "192.0.2.2"); w.Code != tc.accepted {
+				t.Fatalf("client B blocked: %d %s", w.Code, w.Body.String())
+			}
+			if w := call("192.0.2.1:41000", "192.0.2.99"); w.Code != http.StatusTooManyRequests {
+				t.Fatalf("direct spoof bypassed limit: %d", w.Code)
+			}
+		})
 	}
 }

@@ -42,7 +42,7 @@ func main() {
 
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithPaymentConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL))
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithPaymentConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL, cfg.TrustedProxyCIDRs...))
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
 	go worker.Run(serverCtx)
 	go payment.NewRepository(db).RunExpiryWorker(serverCtx, cfg.ExpiryInterval, cfg.MidtransServerKey, logger)

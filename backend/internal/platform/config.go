@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/mail"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -28,6 +29,7 @@ type Config struct {
 	SMTPPassword      string
 	SMTPFrom          string
 	SMTPTLSMode       string
+	TrustedProxyCIDRs []netip.Prefix
 }
 
 func LoadConfig() (Config, error) {
@@ -53,6 +55,15 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.MySQLDSN == "" {
 		return Config{}, fmt.Errorf("MYSQL_DSN is required")
+	}
+	if value := strings.TrimSpace(os.Getenv("TRUSTED_PROXY_CIDRS")); value != "" {
+		for _, raw := range strings.Split(value, ",") {
+			prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+			if err != nil {
+				return Config{}, fmt.Errorf("invalid TRUSTED_PROXY_CIDRS: %w", err)
+			}
+			cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, prefix.Masked())
+		}
 	}
 	if value := os.Getenv("SMTP_PORT"); value != "" {
 		var port int
@@ -87,7 +98,7 @@ func LoadConfig() (Config, error) {
 			return Config{}, fmt.Errorf("invalid SMTP_FROM")
 		}
 		frontend, err := url.Parse(cfg.FrontendURL)
-		if err != nil || frontend.Host == "" || frontend.User != nil || frontend.RawQuery != "" || frontend.Fragment != "" || (cfg.AppEnv == "production" && frontend.Scheme != "https") {
+		if err != nil || frontend.Host == "" || frontend.Path != "" || (frontend.Scheme != "http" && frontend.Scheme != "https") || frontend.User != nil || frontend.RawQuery != "" || frontend.Fragment != "" || (cfg.AppEnv == "production" && frontend.Scheme != "https") {
 			return Config{}, fmt.Errorf("FRONTEND_URL must be an origin and use HTTPS in production when email is enabled")
 		}
 	}

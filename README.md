@@ -21,7 +21,7 @@ Order `PENDING` memakai deadline reservasi, tersedia sebagai `expiresAt` pada re
 
 Setelah pembayaran berhasil dan semua e-ticket diterbitkan, worker membuat antrean email dan mengirim ringkasan pesanan beserta tautan untuk setiap peserta. Tautan membawa akses privat pada fragment URL yang dibersihkan dari address bar setelah dibuka; tiket dapat dimuat di perangkat lain selama akses order belum kedaluwarsa. Email dikirim maksimal tiga kali. Status antrean yang dapat dilihat di database adalah `PENDING`, `PROCESSING`, `SENT`, dan `FAILED`; `SENT` berarti server SMTP menerima pesan.
 
-Pembeli yang berganti browser dapat membuka `/pulihkan-tiket`, mengisi email dan reference pesanan, lalu menerima tautan pemulihan di email pembeli yang tersimpan. Tautan berlaku 15 menit, dipakai sekali setelah tombol **Pulihkan tiket** ditekan, dan menyimpan akses order di browser tersebut. Respons `POST /api/v1/ticket-recovery` selalu sama untuk data yang cocok maupun tidak; pencocokan dilakukan worker dan hanya pesanan `PAID` dengan tiket lengkap serta akses aktif yang dikirimi email. Database hanya menyimpan hash SHA-256 token. Halaman `/pesanan/{id}` menampilkan ringkasan, tautan tiket, dan tombol **Kirim ulang email** (`POST /api/v1/orders/{orderID}/resend-email`, satu kali per menit per order). Batas permintaan disimpan di tabel `rate_limits`, sehingga tetap berlaku setelah restart. Migration 014 mengubah primary key `email_queue`; hentikan API lama sebelum menjalankan versi ini agar worker lama tidak ikut memproses antrean.
+Pembeli yang berganti browser dapat membuka `/pulihkan-tiket`, mengisi email dan reference pesanan, lalu menerima tautan pemulihan di email pembeli yang tersimpan. Tautan berlaku 15 menit, dipakai sekali setelah tombol **Pulihkan tiket** ditekan, dan menyimpan akses order di browser tersebut. Respons `POST /api/v1/ticket-recovery` selalu sama untuk data yang cocok maupun tidak; pencocokan dilakukan worker dan hanya pesanan `PAID` dengan tiket lengkap serta akses aktif yang dikirimi email. Database hanya menyimpan hash SHA-256 token. Halaman `/pesanan/{id}` menampilkan ringkasan, tautan tiket, dan tombol **Kirim ulang email** (`POST /api/v1/orders/{orderID}/resend-email`, satu kali per menit per order). Batas permintaan disimpan di tabel `rate_limits`, sehingga tetap berlaku setelah restart. Migration 014 dapat dilanjutkan setelah interupsi DDL tanpa mengubah checksum SQL historis; jalankan ulang migration runner sebelum API menerima traffic. Migration 014 mengubah primary key `email_queue`; hentikan API lama sebelum menjalankan versi ini agar worker lama tidak ikut memproses antrean.
 
 Checkout juga memerlukan header `Idempotency-Key` yang sama dengan key reservasi. Respons menyertakan `accessToken` privat order serta `accessExpiresAt`. Simpan token dengan aman; token dipakai sebagai `Authorization: Bearer <accessToken>` pada API order dan tiket, serta pembayaran simulasi. Token kedaluwarsa pukul 00.00 WIB setelah tanggal konser. Server memakai `ORDER_ACCESS_SECRET` yang tetap untuk menandatangani token.
 
@@ -88,13 +88,16 @@ Environment variable backend:
 | `SMTP_PASSWORD` | kosong | Password SMTP |
 | `SMTP_FROM` | kosong | Alamat pengirim; wajib saat `SMTP_HOST` diisi |
 | `SMTP_TLS_MODE` | `starttls` | `starttls` atau `tls`; `none` hanya untuk development tanpa kredensial |
+| `TRUSTED_PROXY_CIDRS` | kosong | Daftar CIDR proxy tepercaya dipisahkan koma untuk limiter pemulihan |
 | `STATIC_DIR` | kosong | Direktori frontend production |
 | `RESERVATION_TTL` | `10m` | Lama reservation |
 | `EXPIRY_INTERVAL` | `15s` | Interval expiry worker |
 
 `go run ./cmd/api` juga menjalankan migration sebelum menerima traffic. `go run ./cmd/migrate` aman dijalankan berulang kali. Backend terpisah juga memerlukan `ORDER_ACCESS_SECRET` yang sama setiap kali proses API dijalankan.
 
-Untuk mengaktifkan email, set `SMTP_HOST`, `SMTP_FROM`, dan kredensial yang diberikan server SMTP. `SMTP_USERNAME` dan `SMTP_PASSWORD` harus hadir bersama. Set `FRONTEND_URL` ke origin aplikasi ber-HTTPS sebelum mengaktifkan SMTP pada production. Compose meneruskan variabel ini ke API; simpan password melalui secret environment deployment, bukan Git.
+Untuk mengaktifkan email, set `SMTP_HOST`, `SMTP_FROM`, dan kredensial yang diberikan server SMTP. `SMTP_USERNAME` dan `SMTP_PASSWORD` harus hadir bersama. Set `FRONTEND_URL` ke origin aplikasi tanpa subpath, query, userinfo, atau fragment; HTTP hanya diperbolehkan pada development dan HTTPS wajib pada production sebelum mengaktifkan SMTP. Compose meneruskan variabel ini ke API; simpan password melalui secret environment deployment, bukan Git.
+
+Proxy Vite meneruskan IP klien melalui `X-Forwarded-For`. Compose memakai subnet `172.30.18.0/24` dan IP frontend tetap `172.30.18.3`; API hanya mempercayai `172.30.18.3/32` secara default. Untuk backend lokal di belakang Vite lokal, set `TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128`. Pada deployment lain, isi hanya CIDR proxy yang dikendalikan aplikasi dan sesuaikan jika subnet Compose diubah; jangan mempercayai seluruh internet atau jaringan yang juga digunakan klien langsung. Default loader kosong mengabaikan header forwarding. Rantai header diperiksa dari kanan ke kiri sampai IP pertama di luar proxy tepercaya; nilai bukan IP diabaikan dengan memakai alamat koneksi. Batas request dan verifikasi memakai identitas yang sama.
 
 Untuk sandbox, isi `MIDTRANS_SERVER_KEY` dengan Server Key sandbox dari dashboard Midtrans dan set `FRONTEND_URL` ke origin aplikasi, lalu jalankan Compose. Daftarkan notifikasi Midtrans ke `POST /api/v1/payments/midtrans/notification`. Checkout meminta sesi Snap melalui `POST /api/v1/orders/{orderID}/payments`, lalu mengarahkan pembeli ke halaman pembayaran Midtrans. Order hanya ditandai lunas dan e-ticket diterbitkan setelah notifikasi bertanda tangan valid dengan nominal yang cocok; status order dapat dimuat ulang setelah pembeli kembali ke checkout. Worker memeriksa status Midtrans sebelum melepas stok order dengan sesi aktif; jika provider tidak dapat dihubungi, stok tetap ditahan sampai status dapat dipastikan. Settlement yang datang setelah stok telanjur dilepas dicatat sebagai kasus rekonsiliasi durable dan tidak menerbitkan tiket melebihi kapasitas. Snap sandbox memakai QRIS, transfer bank, dan GoPay. Jangan gunakan server key production untuk sandbox.
 
@@ -163,6 +166,8 @@ Tes integrasi checkout, pembayaran, expiry, sesi petugas, check-in/riwayat, sert
 MYSQL_TEST_DSN="$MYSQL_DSN" go test -v ./...
 ```
 
+Tes interupsi migration 014 memakai `MYSQL_MIGRATION_TEST_DSN` terpisah dengan izin membuat database sementara. Tes membuat dan menghapus database miliknya sendiri pada setiap batas DDL, serta memeriksa job lama, schema akhir, dan checksum; CI menjalankannya otomatis.
+
 CI menjalankan perintah yang sama terhadap service MySQL job, dengan secret order sementara yang dibuat per job.
 
 Frontend:
@@ -197,4 +202,4 @@ docker compose up --build
 - Final backend image berjalan sebagai non-root user.
 - Gunakan password, DSN, dan secret berbeda untuk production melalui secret manager atau environment deployment.
 - Jangan commit `.env`, password production, generated binary, atau database volume.
-- QR e-ticket berisi kode `ET-…` saja; pembayaran memakai simulasi development. Payment gateway asli, pengiriman email, login pembeli, pemulihan lintas perangkat, dan refund belum tersedia.
+- QR e-ticket berisi kode `ET-…` saja. Pembayaran tersedia melalui Midtrans sandbox; simulasi hanya pada development. Pengiriman email SMTP dan pemulihan tiket lintas perangkat tersedia. Integrasi Midtrans production, login pembeli, dan refund belum tersedia.

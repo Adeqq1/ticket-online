@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,13 +19,14 @@ import (
 )
 
 type Handler struct {
-	db     *sql.DB
-	access *orderaccess.Access
-	logger *slog.Logger
+	db             *sql.DB
+	access         *orderaccess.Access
+	logger         *slog.Logger
+	trustedProxies []netip.Prefix
 }
 
-func NewHandler(db *sql.DB, access *orderaccess.Access, logger *slog.Logger) *Handler {
-	return &Handler{db: db, access: access, logger: logger}
+func NewHandler(db *sql.DB, access *orderaccess.Access, logger *slog.Logger, trustedProxies ...netip.Prefix) *Handler {
+	return &Handler{db: db, access: access, logger: logger, trustedProxies: trustedProxies}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -47,7 +49,7 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 	}
 	pair := PairKey(h.access, email, reference)
 	blocked, wait, err := allow(r.Context(), h.db,
-		limit{h.access.Digest("limit/recovery-ip", clientIP(r)), 10, 15 * time.Minute},
+		limit{h.access.Digest("limit/recovery-ip", clientIP(r, h.trustedProxies)), 10, 15 * time.Minute},
 		limit{h.access.Digest("limit/recovery-pair-cooldown", pair), 1, time.Minute},
 		limit{h.access.Digest("limit/recovery-pair", pair), 3, 15 * time.Minute},
 	)
@@ -115,7 +117,7 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	blocked, wait, err := allow(r.Context(), h.db, limit{h.access.Digest("limit/recovery-verify-ip", clientIP(r)), 30, 15 * time.Minute})
+	blocked, wait, err := allow(r.Context(), h.db, limit{h.access.Digest("limit/recovery-verify-ip", clientIP(r, h.trustedProxies)), 30, 15 * time.Minute})
 	if err != nil {
 		h.internal(w, r, err)
 		return

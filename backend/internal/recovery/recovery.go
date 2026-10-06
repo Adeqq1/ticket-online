@@ -13,7 +13,9 @@ import (
 	"net"
 	"net/http"
 	"net/mail"
+	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -172,11 +174,32 @@ func allowOnce(ctx context.Context, db *sql.DB, limits []limit) (int, int, error
 	return -1, 0, tx.Commit()
 }
 
-func clientIP(r *http.Request) string {
-	// ponytail: RemoteAddr is the proxy address behind a load balancer; read a trusted forwarding header when one is deployed.
+func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	return host
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		return "unknown"
+	}
+	peer = peer.Unmap()
+	isTrusted := func(ip netip.Addr) bool {
+		return slices.ContainsFunc(trusted, func(prefix netip.Prefix) bool { return prefix.Contains(ip) })
+	}
+	if !isTrusted(peer) || len(r.Header.Values("X-Forwarded-For")) == 0 {
+		return peer.String()
+	}
+	chain := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(chain) - 1; i >= 0; i-- {
+		ip, err := netip.ParseAddr(strings.TrimSpace(chain[i]))
+		if err != nil || ip.Zone() != "" {
+			return peer.String()
+		}
+		ip = ip.Unmap()
+		if !isTrusted(ip) || i == 0 {
+			return ip.String()
+		}
+	}
+	return peer.String()
 }

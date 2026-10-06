@@ -1,6 +1,8 @@
 package recovery
 
 import (
+	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -55,5 +57,38 @@ func TestEligible(t *testing.T) {
 		if changed.Eligible(now) {
 			t.Fatalf("ineligible order accepted: %+v", changed)
 		}
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("172.20.0.3/32"), netip.MustParsePrefix("2001:db8::3/128")}
+	for _, tc := range []struct{ name, remote, forwarded, want string }{
+		{"client A", "172.20.0.3:41000", "192.0.2.1", "192.0.2.1"},
+		{"client B", "172.20.0.3:42000", "192.0.2.2", "192.0.2.2"},
+		{"direct spoof", "192.0.2.1:41000", "192.0.2.2", "192.0.2.1"},
+		{"trusted chain", "172.20.0.3:41000", "192.0.2.1, 2001:db8::3", "192.0.2.1"},
+		{"untrusted intermediate", "172.20.0.3:41000", "192.0.2.1, 192.0.2.2", "192.0.2.2"},
+		{"spoofed prefix", "172.20.0.3:41000", "attacker, 192.0.2.1", "192.0.2.1"},
+		{"malformed", "172.20.0.3:41000", "192.0.2.1, attacker", "172.20.0.3"},
+		{"empty", "172.20.0.3:41000", "", "172.20.0.3"},
+		{"IPv6", "[2001:db8::3]:41000", "2001:db8::1", "2001:db8::1"},
+		{"mapped IPv4", "[::ffff:172.20.0.3]:41000", "::ffff:192.0.2.1", "192.0.2.1"},
+		{"invalid peer", "invalid", "192.0.2.1", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "/", nil)
+			r.RemoteAddr = tc.remote
+			r.Header.Set("X-Forwarded-For", tc.forwarded)
+			if got := clientIP(r, trusted); got != tc.want {
+				t.Fatalf("clientIP = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	r := httptest.NewRequest("POST", "/", nil)
+	r.RemoteAddr = "172.20.0.3:41000"
+	r.Header.Add("X-Forwarded-For", "192.0.2.1")
+	r.Header.Add("X-Forwarded-For", "192.0.2.2")
+	if clientIP(r, nil) != "172.20.0.3" || clientIP(r, trusted) != "192.0.2.2" {
+		t.Fatal("default trust or multiple forwarding headers handled incorrectly")
 	}
 }
