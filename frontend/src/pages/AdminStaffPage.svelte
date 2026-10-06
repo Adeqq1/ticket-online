@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import StaffAssignmentsEditor from "../components/StaffAssignmentsEditor.svelte";
-  import { ApiError, createStaff, getAdminEvents, mapApiEvent, listStaff, resetStaffPassword, updateStaff, replaceStaffAssignments, type Staff, type StaffAssignment } from "../lib/api.ts";
-  import type { Concert } from "../lib/concerts.ts";
+  import { ApiError, createStaff, getAdminEvents, listStaff, resetStaffPassword, updateStaff, replaceStaffAssignments, type Staff, type StaffAssignment } from "../lib/api.ts";
+  import type { AdminApiEvent } from "../lib/api.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let staff = $state<Staff[]>([]);
-  let events = $state<Concert[]>([]);
+  let events = $state<AdminApiEvent[]>([]);
   let loadingStaff = $state(true);
   let loadingEvents = $state(true);
   let staffError = $state("");
@@ -34,7 +34,7 @@
 
   async function loadEvents() {
     loadingEvents = true; eventsError = "";
-    try { events = (await getAdminEvents(accessToken)).map(mapApiEvent); }
+    try { events = await getAdminEvents(accessToken); }
     catch { eventsError = "Katalog event belum dapat dimuat."; }
     finally { loadingEvents = false; }
   }

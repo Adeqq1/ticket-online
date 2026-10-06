@@ -22,7 +22,8 @@
   function adjust(tierId: string, delta: -1 | 1) { if (concertData) detailState = changeQuantity(concertData, detailState, tierId, delta); }
   function selectZone(zoneId: string, event: MouseEvent | KeyboardEvent) {
     detailState.selectedZoneId = zoneId;
-    const tier = concertData?.ticketTiers.find((item) => item.zoneId === zoneId);
+    const zoneTiers = concertData?.ticketTiers.filter((item) => item.zoneId === zoneId) ?? [];
+    const tier = zoneTiers.find((item) => item.stock > 0) ?? zoneTiers[0];
     requestAnimationFrame(() => { const element = document.getElementById(`tier-${tier?.id}`); element?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); if (event instanceof KeyboardEvent) element?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); });
   }
   function checkout() { if (concertData && count) location.assign(`/checkout/${concertData.id}?${quantityParams(detailState.quantities)}`); }

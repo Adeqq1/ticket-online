@@ -17,18 +17,19 @@ import (
 )
 
 type adminEventInput struct {
-	ID                string    `json:"id"`
-	Artist            string    `json:"artist"`
-	City              string    `json:"city"`
-	Venue             string    `json:"venue"`
-	Address           string    `json:"address"`
-	StartsAt          time.Time `json:"startsAt"`
-	Genre             string    `json:"genre"`
-	Status            string    `json:"status"`
-	PublicationStatus string    `json:"publicationStatus"`
-	Image             string    `json:"image"`
-	Description       string    `json:"description"`
-	Lineup            []string  `json:"lineup"`
+	ID                string   `json:"id"`
+	Artist            string   `json:"artist"`
+	City              string   `json:"city"`
+	Venue             string   `json:"venue"`
+	Address           string   `json:"address"`
+	StartsAt          string   `json:"startsAt"`
+	Genre             string   `json:"genre"`
+	Status            string   `json:"status"`
+	PublicationStatus string   `json:"publicationStatus"`
+	Image             string   `json:"image"`
+	Description       string   `json:"description"`
+	Lineup            []string `json:"lineup"`
+	startsAt          *time.Time
 }
 
 type AdminHandler struct {
@@ -47,6 +48,10 @@ func (h *AdminHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/events", h.list)
 	mux.HandleFunc("POST /api/v1/admin/events", h.create)
 	mux.HandleFunc("PUT /api/v1/admin/events/{eventID}", h.update)
+	mux.HandleFunc("POST /api/v1/admin/events/{eventID}/zones", h.createZone)
+	mux.HandleFunc("PUT /api/v1/admin/events/{eventID}/zones/{zoneID}", h.updateZone)
+	mux.HandleFunc("POST /api/v1/admin/events/{eventID}/ticket-tiers", h.createTier)
+	mux.HandleFunc("PUT /api/v1/admin/events/{eventID}/ticket-tiers/{tierID}", h.updateTier)
 }
 
 func (h *AdminHandler) authorize(w http.ResponseWriter, r *http.Request) bool {
@@ -100,7 +105,7 @@ func (h *AdminHandler) create(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, r, err)
 		return
 	}
-	event, err := h.repository.adminEvent(r.Context(), input.ID)
+	event, err := h.repository.adminDetail(r.Context(), input.ID)
 	if err != nil {
 		h.internalError(w, r, err)
 		return
@@ -113,7 +118,7 @@ func (h *AdminHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("eventID"))
-	if !eventSlug.MatchString(id) {
+	if len(id) > 64 || !eventSlug.MatchString(id) {
 		adminError(w, http.StatusBadRequest, "INVALID_REQUEST", "ID konser tidak valid")
 		return
 	}
@@ -130,13 +135,109 @@ func (h *AdminHandler) update(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, r, err)
 		return
 	}
-	event, err := h.repository.adminEvent(r.Context(), id)
+	event, err := h.repository.adminDetail(r.Context(), id)
 	if err != nil {
 		h.internalError(w, r, err)
 		return
 	}
 	adminJSON(w, http.StatusOK, event)
 }
+
+type adminZoneInput struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+type adminTierInput struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	ZoneID      string `json:"zoneId"`
+	Price       uint64 `json:"price"`
+	Capacity    uint64 `json:"capacity"`
+	MaxPerOrder uint64 `json:"maxPerOrder"`
+	Benefit     string `json:"benefit"`
+	Gate        string `json:"gate"`
+	Seating     string `json:"seating"`
+}
+
+func (h *AdminHandler) zone(w http.ResponseWriter, r *http.Request, create bool) {
+	if !h.authorize(w, r) {
+		return
+	}
+	eventID := r.PathValue("eventID")
+	if len(eventID) > 64 || !eventSlug.MatchString(eventID) {
+		adminError(w, 400, "INVALID_REQUEST", "ID konser tidak valid")
+		return
+	}
+	var in adminZoneInput
+	if !decodeAdmin(w, r, &in) {
+		return
+	}
+	if create {
+		in.ID = strings.ToLower(strings.TrimSpace(in.ID))
+	} else {
+		in.ID = r.PathValue("zoneID")
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	in.Description = strings.TrimSpace(in.Description)
+	if !eventSlug.MatchString(in.ID) || len(in.ID) > 64 || utf8.RuneCountInString(in.Name) < 1 || utf8.RuneCountInString(in.Name) > 100 || utf8.RuneCountInString(in.Description) > 255 {
+		adminError(w, 422, "INVALID_REQUEST", "Data zona tidak valid")
+		return
+	}
+	if err := h.repository.SaveZone(r.Context(), eventID, ZoneInput{ID: in.ID, Name: in.Name, Description: in.Description}, create); err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	adminJSON(w, map[bool]int{true: 201, false: 200}[create], map[string]any{"id": in.ID, "name": in.Name, "description": in.Description})
+}
+func (h *AdminHandler) createZone(w http.ResponseWriter, r *http.Request) { h.zone(w, r, true) }
+func (h *AdminHandler) updateZone(w http.ResponseWriter, r *http.Request) { h.zone(w, r, false) }
+
+func (h *AdminHandler) tier(w http.ResponseWriter, r *http.Request, create bool) {
+	if !h.authorize(w, r) {
+		return
+	}
+	eventID := r.PathValue("eventID")
+	if len(eventID) > 64 || !eventSlug.MatchString(eventID) {
+		adminError(w, 400, "INVALID_REQUEST", "ID konser tidak valid")
+		return
+	}
+	var in adminTierInput
+	if !decodeAdmin(w, r, &in) {
+		return
+	}
+	if create {
+		in.ID = strings.ToLower(strings.TrimSpace(in.ID))
+	} else {
+		in.ID = r.PathValue("tierID")
+	}
+	for _, p := range []*string{&in.Name, &in.ZoneID, &in.Benefit, &in.Gate, &in.Seating} {
+		*p = strings.TrimSpace(*p)
+	}
+	if !eventSlug.MatchString(in.ID) || len(in.ID) > 64 || utf8.RuneCountInString(in.Name) < 1 || utf8.RuneCountInString(in.Name) > 100 || !eventSlug.MatchString(in.ZoneID) || in.Price == 0 || in.Price > 9007199254740991 || in.Capacity > 4294967295 || in.MaxPerOrder == 0 || in.MaxPerOrder > 4294967295 || utf8.RuneCountInString(in.Benefit) > 255 || utf8.RuneCountInString(in.Gate) < 1 || utf8.RuneCountInString(in.Gate) > 100 || (in.Seating != "assigned" && in.Seating != "free-standing") {
+		adminError(w, 422, "INVALID_REQUEST", "Data kategori tiket tidak valid")
+		return
+	}
+	seating := map[string]string{"assigned": "ASSIGNED", "free-standing": "FREE_STANDING"}[in.Seating]
+	err := h.repository.SaveTier(r.Context(), eventID, TierInput{ID: in.ID, Name: in.Name, ZoneID: in.ZoneID, Price: in.Price, Capacity: in.Capacity, MaxPerOrder: in.MaxPerOrder, Benefit: in.Benefit, Gate: in.Gate, Seating: seating}, create)
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	event, err := h.repository.adminDetail(r.Context(), eventID)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	for _, tier := range event.TicketTiers {
+		if tier.ID == in.ID {
+			adminJSON(w, map[bool]int{true: 201, false: 200}[create], tier)
+			return
+		}
+	}
+}
+func (h *AdminHandler) createTier(w http.ResponseWriter, r *http.Request) { h.tier(w, r, true) }
+func (h *AdminHandler) updateTier(w http.ResponseWriter, r *http.Request) { h.tier(w, r, false) }
 
 func (in *adminEventInput) valid(requireID bool) bool {
 	in.ID = strings.ToLower(strings.TrimSpace(in.ID))
@@ -149,6 +250,12 @@ func (in *adminEventInput) valid(requireID bool) bool {
 	if requireID && (len(in.ID) > 64 || !eventSlug.MatchString(in.ID)) {
 		return false
 	}
+	if in.Genre == "" {
+		in.Genre = "Pop"
+	}
+	if in.Status == "" {
+		in.Status = "Presale"
+	}
 	if in.Genre != "Rock" && in.Genre != "Pop" && in.Genre != "Indie" {
 		return false
 	}
@@ -158,14 +265,24 @@ func (in *adminEventInput) valid(requireID bool) bool {
 	if in.PublicationStatus != "DRAFT" && in.PublicationStatus != "PUBLISHED" && in.PublicationStatus != "ARCHIVED" {
 		return false
 	}
-	if utf8.RuneCountInString(in.Artist) < 2 || utf8.RuneCountInString(in.Artist) > 160 || utf8.RuneCountInString(in.City) < 2 || utf8.RuneCountInString(in.City) > 100 || utf8.RuneCountInString(in.Venue) < 2 || utf8.RuneCountInString(in.Venue) > 160 || utf8.RuneCountInString(in.Address) < 2 || utf8.RuneCountInString(in.Address) > 255 || utf8.RuneCountInString(in.Description) > 16000 || len(in.Lineup) > 100 {
+	if utf8.RuneCountInString(in.Artist) < 2 || utf8.RuneCountInString(in.Artist) > 160 || utf8.RuneCountInString(in.City) > 100 || utf8.RuneCountInString(in.Venue) > 160 || utf8.RuneCountInString(in.Address) > 255 || utf8.RuneCountInString(in.Description) > 16000 || len(in.Lineup) > 100 {
 		return false
 	}
-	if in.StartsAt.IsZero() {
-		return false
+	if in.StartsAt != "" {
+		value, err := time.Parse(time.RFC3339, in.StartsAt)
+		if err != nil {
+			return false
+		}
+		parsed := value.UTC()
+		in.startsAt = &parsed
 	}
-	poster, err := url.ParseRequestURI(in.Image)
-	if err != nil || (poster.Scheme != "http" && poster.Scheme != "https") || poster.Host == "" || poster.User != nil || len(in.Image) > 500 {
+	if in.Image != "" {
+		poster, err := url.ParseRequestURI(in.Image)
+		if err != nil || (poster.Scheme != "http" && poster.Scheme != "https") || poster.Host == "" || poster.User != nil {
+			return false
+		}
+	}
+	if len(in.Image) > 500 {
 		return false
 	}
 	for i := range in.Lineup {
@@ -174,15 +291,12 @@ func (in *adminEventInput) valid(requireID bool) bool {
 			return false
 		}
 	}
-	if len(in.Lineup) == 0 {
-		in.Lineup = []string{in.Artist}
-	}
 	return true
 }
 
 func (in adminEventInput) repositoryInput() EventInput {
 	status := map[string]string{"Early Bird": "EARLY_BIRD", "Presale": "PRESALE", "Sold Out": "SOLD_OUT"}[in.Status]
-	return EventInput{ID: in.ID, Artist: in.Artist, City: in.City, Venue: in.Venue, Address: in.Address, StartsAt: in.StartsAt.UTC(), Genre: in.Genre, Status: status, PublicationStatus: in.PublicationStatus, Image: in.Image, Description: in.Description, Lineup: in.Lineup}
+	return EventInput{ID: in.ID, Artist: in.Artist, City: in.City, Venue: in.Venue, Address: in.Address, StartsAt: in.startsAt, Genre: in.Genre, Status: status, PublicationStatus: in.PublicationStatus, Image: in.Image, Description: in.Description, Lineup: in.Lineup}
 }
 
 func (h *AdminHandler) respondError(w http.ResponseWriter, r *http.Request, err error) {
@@ -193,6 +307,20 @@ func (h *AdminHandler) respondError(w http.ResponseWriter, r *http.Request, err 
 		adminError(w, http.StatusConflict, "DUPLICATE_EVENT", "ID konser sudah digunakan")
 	case errors.Is(err, ErrScheduleLocked):
 		adminError(w, http.StatusConflict, "SCHEDULE_LOCKED", "Jadwal terkunci karena konser sudah memiliki pesanan")
+	case errors.Is(err, ErrCapacityBelowBound):
+		adminError(w, http.StatusConflict, "CAPACITY_BELOW_BOUND", "Kapasitas tidak boleh di bawah tiket terjual atau tertahan")
+	case errors.Is(err, ErrGateLocked):
+		adminError(w, http.StatusConflict, "GATE_LOCKED", "Gate terkunci setelah reservasi pertama")
+	case errors.Is(err, ErrPublicationIncomplete):
+		adminError(w, http.StatusUnprocessableEntity, "PUBLICATION_INCOMPLETE", "Lengkapi informasi konser, lineup, zona, dan kategori tiket sebelum publikasi")
+	case errors.Is(err, ErrInvalidZone):
+		adminError(w, http.StatusUnprocessableEntity, "INVALID_ZONE", "Zona kategori tidak ditemukan untuk konser ini")
+	case errors.Is(err, ErrEventHasReservations):
+		adminError(w, http.StatusConflict, "EVENT_HAS_RESERVATIONS", "Informasi jadwal dan lokasi tidak dapat dikosongkan setelah reservasi dibuat")
+	case errors.Is(err, ErrDuplicateTier):
+		adminError(w, http.StatusConflict, "DUPLICATE_TIER", "ID kategori tiket sudah digunakan")
+	case errors.Is(err, ErrDuplicateZone):
+		adminError(w, http.StatusConflict, "DUPLICATE_ZONE", "ID zona sudah digunakan")
 	default:
 		h.internalError(w, r, err)
 	}

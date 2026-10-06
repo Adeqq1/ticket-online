@@ -5,15 +5,23 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 )
 
 var (
-	ErrEventNotFound  = errors.New("event not found")
-	ErrScheduleLocked = errors.New("event schedule locked after first order")
-	ErrDuplicateEvent = errors.New("duplicate event id")
+	ErrEventNotFound         = errors.New("event not found")
+	ErrScheduleLocked        = errors.New("event schedule locked after first order")
+	ErrDuplicateEvent        = errors.New("duplicate event id")
+	ErrEventHasReservations  = errors.New("event fields are required while reservations exist")
+	ErrCapacityBelowBound    = errors.New("capacity is below sold or held ticket quantity")
+	ErrGateLocked            = errors.New("gate cannot change after a reservation")
+	ErrPublicationIncomplete = errors.New("event is incomplete for publication")
+	ErrInvalidZone           = errors.New("ticket zone does not belong to event")
+	ErrDuplicateTier         = errors.New("duplicate ticket tier id")
+	ErrDuplicateZone         = errors.New("duplicate event zone id")
 )
 
 type Repository struct {
@@ -22,7 +30,7 @@ type Repository struct {
 
 type eventRecord struct {
 	id, artist, city, venue, address                        string
-	startsAt                                                time.Time
+	startsAt                                                sql.NullTime
 	genre, status, publicationStatus, imageURL, description string
 }
 
@@ -31,8 +39,8 @@ type zoneRecord struct {
 }
 
 type tierRecord struct {
-	slug, name, zoneSlug, benefit, gate, seating string
-	price, availableQuantity, maxPerOrder        uint64
+	slug, name, zoneSlug, benefit, gate, seating    string
+	price, availableQuantity, maxPerOrder, capacity uint64
 }
 
 func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
@@ -91,6 +99,14 @@ func (r *Repository) adminEvent(ctx context.Context, id string) (Event, error) {
 	return r.buildEvent(ctx, record)
 }
 
+func (r *Repository) adminDetail(ctx context.Context, id string) (AdminEvent, error) {
+	event, err := r.adminEvent(ctx, id)
+	if err != nil {
+		return AdminEvent{}, err
+	}
+	return r.adminDTO(ctx, event)
+}
+
 func (r *Repository) ReservationEvent(ctx context.Context, reservationID, key string) (Event, error) {
 	var eventID string
 	err := r.db.QueryRowContext(ctx, "SELECT event_id FROM reservations WHERE id = ? AND idempotency_key = ?", reservationID, key).Scan(&eventID)
@@ -103,7 +119,7 @@ func (r *Repository) ReservationEvent(ctx context.Context, reservationID, key st
 	return r.adminEvent(ctx, eventID)
 }
 
-func (r *Repository) ListAdminEvents(ctx context.Context) ([]Event, error) {
+func (r *Repository) ListAdminEvents(ctx context.Context) ([]AdminEvent, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT id, artist, city, venue, address, starts_at, genre, status, publication_status, image_url, description FROM events ORDER BY starts_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list admin events: %w", err)
@@ -123,20 +139,24 @@ func (r *Repository) ListAdminEvents(ctx context.Context) ([]Event, error) {
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close admin events: %w", err)
 	}
-	events := make([]Event, 0, len(records))
+	events := make([]AdminEvent, 0, len(records))
 	for _, record := range records {
 		event, err := r.buildEvent(ctx, record)
 		if err != nil {
 			return nil, err
 		}
-		events = append(events, event)
+		admin, err := r.adminDTO(ctx, event)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, admin)
 	}
 	return events, nil
 }
 
 type EventInput struct {
 	ID, Artist, City, Venue, Address                     string
-	StartsAt                                             time.Time
+	StartsAt                                             *time.Time
 	Genre, Status, PublicationStatus, Image, Description string
 	Lineup                                               []string
 }
@@ -148,6 +168,11 @@ func (r *Repository) CreateEvent(ctx context.Context, input EventInput) error {
 		return fmt.Errorf("begin create event: %w", err)
 	}
 	defer tx.Rollback()
+	if input.PublicationStatus == "PUBLISHED" {
+		if err := validatePublication(ctx, tx, input.ID, input); err != nil {
+			return err
+		}
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO events (id, artist, city, venue, address, starts_at, genre, status, publication_status, image_url, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, input.ID, input.Artist, input.City, input.Venue, input.Address, input.StartsAt, input.Genre, input.Status, input.PublicationStatus, input.Image, input.Description, now, now)
 	if err != nil {
 		var mysqlErr *mysql.MySQLError
@@ -171,7 +196,7 @@ func (r *Repository) UpdateEvent(ctx context.Context, id string, input EventInpu
 		return fmt.Errorf("begin update event: %w", err)
 	}
 	defer tx.Rollback()
-	var existing time.Time
+	var existing sql.NullTime
 	err = tx.QueryRowContext(ctx, "SELECT starts_at FROM events WHERE id = ? FOR UPDATE", id).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrEventNotFound
@@ -179,7 +204,7 @@ func (r *Repository) UpdateEvent(ctx context.Context, id string, input EventInpu
 	if err != nil {
 		return fmt.Errorf("lock event: %w", err)
 	}
-	if !existing.Equal(input.StartsAt) {
+	if existing.Valid != (input.StartsAt != nil) || (existing.Valid && !existing.Time.Equal(*input.StartsAt)) {
 		var ordered bool
 		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM orders o JOIN reservations r ON r.id = o.reservation_id WHERE r.event_id = ?)`, id).Scan(&ordered)
 		if err != nil {
@@ -187,6 +212,20 @@ func (r *Repository) UpdateEvent(ctx context.Context, id string, input EventInpu
 		}
 		if ordered {
 			return ErrScheduleLocked
+		}
+	}
+	if input.Artist == "" || input.City == "" || input.Venue == "" || input.Address == "" || input.StartsAt == nil {
+		var hasReservations bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM reservations WHERE event_id = ?)`, id).Scan(&hasReservations); err != nil {
+			return fmt.Errorf("check event reservations: %w", err)
+		}
+		if hasReservations {
+			return ErrEventHasReservations
+		}
+	}
+	if input.PublicationStatus == "PUBLISHED" {
+		if err := validatePublication(ctx, tx, id, input); err != nil {
+			return err
 		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE events SET artist = ?, city = ?, venue = ?, address = ?, starts_at = ?, genre = ?, status = ?, publication_status = ?, image_url = ?, description = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, input.Artist, input.City, input.Venue, input.Address, input.StartsAt, input.Genre, input.Status, input.PublicationStatus, input.Image, input.Description, id)
@@ -245,9 +284,174 @@ func (r *Repository) buildEvent(ctx context.Context, record eventRecord) (Event,
 	}
 	return Event{
 		ID: record.id, Artist: record.artist, City: record.city, Venue: record.venue, Address: record.address,
-		StartsAt: record.startsAt.UTC().Format(time.RFC3339), Genre: record.genre, Status: displayStatus(record.status), PublicationStatus: record.publicationStatus,
+		StartsAt: formatStartsAt(record.startsAt), Genre: record.genre, Status: displayStatus(record.status), PublicationStatus: record.publicationStatus,
 		Image: record.imageURL, Description: record.description, Lineup: lineup, Price: price, Zones: zones, TicketTiers: tiers, ScheduleLocked: scheduleLocked,
 	}, nil
+}
+
+func formatStartsAt(value sql.NullTime) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.Time.UTC().Format(time.RFC3339)
+}
+
+func (r *Repository) adminDTO(ctx context.Context, event Event) (AdminEvent, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT slug, name, zone_slug, price, available_quantity, max_per_order, benefit, gate, seating_mode, capacity,
+		EXISTS(SELECT 1 FROM reservation_items ri JOIN reservations r ON r.id = ri.reservation_id WHERE ri.ticket_tier_id = ticket_tiers.id) AS gate_locked
+		FROM ticket_tiers WHERE event_id = ? ORDER BY id`, event.ID)
+	if err != nil {
+		return AdminEvent{}, fmt.Errorf("list admin ticket tiers: %w", err)
+	}
+	defer rows.Close()
+	var tiers []AdminTicketTier
+	for rows.Next() {
+		var item AdminTicketTier
+		var seating string
+		if err := rows.Scan(&item.ID, &item.Name, &item.ZoneID, &item.Price, &item.AvailableQuantity, &item.MaxPerOrder, &item.Benefit, &item.Gate, &seating, &item.Capacity, &item.GateLocked); err != nil {
+			return AdminEvent{}, err
+		}
+		item.Seating = displaySeating(seating)
+		item.BoundQuantity = item.Capacity - item.AvailableQuantity
+		tiers = append(tiers, item)
+	}
+	if err := rows.Err(); err != nil {
+		return AdminEvent{}, err
+	}
+	return AdminEvent{Event: event, TicketTiers: tiers}, nil
+}
+
+type dbQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func validatePublication(ctx context.Context, q dbQueryer, eventID string, input EventInput) error {
+	var zones, tiers int
+	var invalidZone, invalidTier bool
+	if input.StartsAt == nil || strings.TrimSpace(input.Artist) == "" || strings.TrimSpace(input.City) == "" || strings.TrimSpace(input.Venue) == "" || strings.TrimSpace(input.Address) == "" || strings.TrimSpace(input.Description) == "" || strings.TrimSpace(input.Image) == "" || len(input.Lineup) == 0 {
+		return ErrPublicationIncomplete
+	}
+	if err := q.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM event_zones WHERE event_id = ?),
+		(SELECT COUNT(*) FROM ticket_tiers WHERE event_id = ?),
+		EXISTS(SELECT 1 FROM event_zones WHERE event_id = ? AND CHAR_LENGTH(TRIM(name)) = 0),
+		EXISTS(SELECT 1 FROM ticket_tiers WHERE event_id = ? AND (CHAR_LENGTH(TRIM(name)) = 0 OR CHAR_LENGTH(TRIM(gate)) = 0))`, eventID, eventID, eventID, eventID).Scan(&zones, &tiers, &invalidZone, &invalidTier); err != nil {
+		return fmt.Errorf("check publication completeness: %w", err)
+	}
+	if zones == 0 || tiers == 0 || invalidZone || invalidTier {
+		return ErrPublicationIncomplete
+	}
+	return nil
+}
+
+type ZoneInput struct{ ID, Name, Description string }
+type TierInput struct {
+	ID, Name, ZoneID, Benefit, Gate, Seating string
+	Price, Capacity, MaxPerOrder             uint64
+}
+
+func lockAdminEvent(ctx context.Context, tx *sql.Tx, eventID string) error {
+	var id string
+	err := tx.QueryRowContext(ctx, "SELECT id FROM events WHERE id = ? FOR UPDATE", eventID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEventNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock admin event: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) SaveZone(ctx context.Context, eventID string, input ZoneInput, create bool) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockAdminEvent(ctx, tx, eventID); err != nil {
+		return err
+	}
+	if create {
+		_, err = tx.ExecContext(ctx, "INSERT INTO event_zones (event_id, slug, name, description) VALUES (?, ?, ?, ?)", eventID, input.ID, input.Name, input.Description)
+	} else {
+		result, updateErr := tx.ExecContext(ctx, "UPDATE event_zones SET name = ?, description = ? WHERE event_id = ? AND slug = ?", input.Name, input.Description, eventID, input.ID)
+		err = updateErr
+		if err == nil {
+			n, _ := result.RowsAffected()
+			if n == 0 {
+				var exists bool
+				if e := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM event_zones WHERE event_id = ? AND slug = ?)", eventID, input.ID).Scan(&exists); e != nil {
+					return e
+				}
+				if !exists {
+					return ErrEventNotFound
+				}
+			}
+		}
+	}
+	if err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			return ErrDuplicateZone
+		}
+		return fmt.Errorf("save event zone: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) SaveTier(ctx context.Context, eventID string, input TierInput, create bool) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockAdminEvent(ctx, tx, eventID); err != nil {
+		return err
+	}
+	var oldCapacity, available uint64
+	var oldGate string
+	var tierID uint64
+	if !create {
+		err = tx.QueryRowContext(ctx, "SELECT id, capacity, available_quantity, gate FROM ticket_tiers WHERE event_id = ? AND slug = ? FOR UPDATE", eventID, input.ID).Scan(&tierID, &oldCapacity, &available, &oldGate)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEventNotFound
+		}
+		if err != nil {
+			return err
+		}
+	}
+	var zoneExists bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM event_zones WHERE event_id = ? AND slug = ?)", eventID, input.ZoneID).Scan(&zoneExists); err != nil {
+		return err
+	}
+	if !zoneExists {
+		return ErrInvalidZone
+	}
+	if !create {
+		var gateLocked bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM reservation_items WHERE ticket_tier_id = ?)`, tierID).Scan(&gateLocked); err != nil {
+			return err
+		}
+		if gateLocked && input.Gate != oldGate {
+			return ErrGateLocked
+		}
+		bound := oldCapacity - available
+		if input.Capacity < bound {
+			return ErrCapacityBelowBound
+		}
+		available = input.Capacity - bound
+		_, err = tx.ExecContext(ctx, `UPDATE ticket_tiers SET name=?, zone_slug=?, price=?, capacity=?, available_quantity=?, max_per_order=?, benefit=?, gate=?, seating_mode=?, updated_at=UTC_TIMESTAMP(6) WHERE id=?`, input.Name, input.ZoneID, input.Price, input.Capacity, available, input.MaxPerOrder, input.Benefit, input.Gate, input.Seating, tierID)
+	} else {
+		_, err = tx.ExecContext(ctx, `INSERT INTO ticket_tiers (event_id, slug, name, zone_slug, price, capacity, available_quantity, max_per_order, benefit, gate, seating_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, eventID, input.ID, input.Name, input.ZoneID, input.Price, input.Capacity, input.Capacity, input.MaxPerOrder, input.Benefit, input.Gate, input.Seating)
+	}
+	if err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			return ErrDuplicateTier
+		}
+		return fmt.Errorf("save ticket tier: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) zones(ctx context.Context, eventID string) ([]Zone, error) {
@@ -285,7 +489,7 @@ func (r *Repository) lineup(ctx context.Context, eventID string) ([]string, erro
 }
 
 func (r *Repository) tiers(ctx context.Context, eventID string) ([]TicketTier, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT slug, name, zone_slug, price, available_quantity, max_per_order, benefit, gate, seating_mode FROM ticket_tiers WHERE event_id = ? ORDER BY id`, eventID)
+	rows, err := r.db.QueryContext(ctx, `SELECT slug, name, zone_slug, price, available_quantity, max_per_order, benefit, gate, seating_mode, capacity FROM ticket_tiers WHERE event_id = ? ORDER BY id`, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("list ticket tiers: %w", err)
 	}
@@ -293,7 +497,7 @@ func (r *Repository) tiers(ctx context.Context, eventID string) ([]TicketTier, e
 	var result []TicketTier
 	for rows.Next() {
 		var tier tierRecord
-		if err := rows.Scan(&tier.slug, &tier.name, &tier.zoneSlug, &tier.price, &tier.availableQuantity, &tier.maxPerOrder, &tier.benefit, &tier.gate, &tier.seating); err != nil {
+		if err := rows.Scan(&tier.slug, &tier.name, &tier.zoneSlug, &tier.price, &tier.availableQuantity, &tier.maxPerOrder, &tier.benefit, &tier.gate, &tier.seating, &tier.capacity); err != nil {
 			return nil, fmt.Errorf("scan ticket tier: %w", err)
 		}
 		result = append(result, TicketTier{ID: tier.slug, Name: tier.name, ZoneID: tier.zoneSlug, Price: tier.price, AvailableQuantity: tier.availableQuantity, MaxPerOrder: tier.maxPerOrder, Benefit: tier.benefit, Gate: tier.gate, Seating: displaySeating(tier.seating)})

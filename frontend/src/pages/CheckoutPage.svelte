@@ -35,12 +35,15 @@
   const simulationEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATION === "true";
   function savedReservationForEvent(): StoredReservation | null {
     try {
-      const prefix = `ticket-online:reservation:${encodeURIComponent(id)}:`;
-      for (let index = 0; index < sessionStorage.length; index++) {
-        const key = sessionStorage.key(index);
-        if (!key?.startsWith(prefix)) continue;
+      const quantities = Object.fromEntries([...new URLSearchParams(location.search)].flatMap(([tierId, raw]) => {
+        if (!/^[1-9]\d*$/.test(raw)) return [];
+        const quantity = Number(raw);
+        return Number.isSafeInteger(quantity) ? [[tierId, quantity]] : [];
+      }));
+      const key = reservationBasketKey(id, quantities);
+      if (!key.endsWith(":")) {
         const saved = parseStoredReservation(sessionStorage.getItem(key));
-        if (saved?.eventId === id && saved.reservationId) return saved;
+        if (saved?.eventId === id && saved.basketKey === key.slice(key.lastIndexOf(":") + 1) && saved.reservationId) return saved;
       }
     } catch { /* browser storage may be unavailable */ }
     return null;

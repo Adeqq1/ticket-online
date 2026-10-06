@@ -1,8 +1,7 @@
 <script lang="ts">
-  import type { Concert } from "../lib/concerts.ts";
-  import type { StaffAssignment } from "../lib/api.ts";
+  import type { AdminApiEvent, StaffAssignment } from "../lib/api.ts";
 
-  let { events, value = $bindable(), disabled = false }: { events: Concert[]; value: StaffAssignment[]; disabled?: boolean } = $props();
+  let { events, value = $bindable(), disabled = false }: { events: AdminApiEvent[]; value: StaffAssignment[]; disabled?: boolean } = $props();
   let eventId = $state("");
   let gate = $state("");
   let selectedEvent = $derived(events.find((event) => event.id === eventId));

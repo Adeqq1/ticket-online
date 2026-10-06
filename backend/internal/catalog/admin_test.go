@@ -2,11 +2,10 @@ package catalog
 
 import (
 	"testing"
-	"time"
 )
 
 func TestAdminEventValidationDefaultsToDraftAndSeparatesSaleStatus(t *testing.T) {
-	input := adminEventInput{ID: "ruang-senja", Artist: "Ruang Senja", City: "Bandung", Venue: "Gudang Bunyi", Address: "Jalan Musik", StartsAt: time.Date(2027, 8, 30, 12, 30, 0, 0, time.UTC), Genre: "Rock", Status: "Early Bird", Image: "https://example.test/poster.jpg", Lineup: []string{"Ruang Senja"}}
+	input := adminEventInput{ID: "ruang-senja", Artist: "Ruang Senja", City: "Bandung", Venue: "Gudang Bunyi", Address: "Jalan Musik", StartsAt: "2027-08-30T12:30:00Z", Genre: "Rock", Status: "Early Bird", Image: "https://example.test/poster.jpg", Lineup: []string{"Ruang Senja"}}
 	if !input.valid(true) {
 		t.Fatal("valid admin event rejected")
 	}
@@ -19,7 +18,7 @@ func TestAdminEventValidationDefaultsToDraftAndSeparatesSaleStatus(t *testing.T)
 }
 
 func TestAdminEventValidationRejectsUnsafePosterAndUnknownPublicationStatus(t *testing.T) {
-	base := adminEventInput{ID: "nusa-malam", Artist: "Nusa Malam", City: "Jakarta", Venue: "Ruang Selatan", Address: "Jalan Musik", StartsAt: time.Now(), Genre: "Indie", Status: "Presale", PublicationStatus: "PUBLISHED", Image: "https://example.test/poster.jpg"}
+	base := adminEventInput{ID: "nusa-malam", Artist: "Nusa Malam", City: "Jakarta", Venue: "Ruang Selatan", Address: "Jalan Musik", StartsAt: "2027-08-30T12:30:00Z", Genre: "Indie", Status: "Presale", PublicationStatus: "PUBLISHED", Image: "https://example.test/poster.jpg"}
 	unsafe := base
 	unsafe.Image = "javascript:alert(1)"
 	if unsafe.valid(true) {

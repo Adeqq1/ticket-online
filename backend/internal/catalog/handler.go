@@ -45,6 +45,18 @@ type TicketTier struct {
 	Seating           string `json:"seating"`
 }
 
+type AdminTicketTier struct {
+	TicketTier
+	Capacity      uint64 `json:"capacity"`
+	BoundQuantity uint64 `json:"boundQuantity"`
+	GateLocked    bool   `json:"gateLocked"`
+}
+
+type AdminEvent struct {
+	Event
+	TicketTiers []AdminTicketTier `json:"ticketTiers"`
+}
+
 type Handler struct {
 	service *Service
 	logger  *slog.Logger

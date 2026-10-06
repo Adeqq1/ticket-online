@@ -132,6 +132,13 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 16 {
+		if err := resumeAdminCatalog(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -150,6 +157,38 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		return fmt.Errorf("commit migration %s: %w", item.name, err)
 	}
 	return nil
+}
+
+func resumeAdminCatalog(ctx context.Context, db *sql.Conn) error {
+	var nullable string
+	err := db.QueryRowContext(ctx, `SELECT IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME='starts_at'`).Scan(&nullable)
+	if err != nil {
+		return err
+	}
+	if nullable != "YES" {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE events MODIFY starts_at DATETIME(6) NULL"); err != nil {
+			return err
+		}
+	}
+	var checkExists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='ticket_tiers' AND CONSTRAINT_NAME='chk_ticket_tiers_capacity')`).Scan(&checkExists); err != nil {
+		return err
+	}
+	if checkExists {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE ticket_tiers DROP CHECK chk_ticket_tiers_capacity"); err != nil {
+			return err
+		}
+	}
+	if _, err := db.ExecContext(ctx, "ALTER TABLE ticket_tiers ADD CONSTRAINT chk_ticket_tiers_capacity CHECK (capacity >= 0)"); err != nil && !strings.Contains(err.Error(), "Duplicate check constraint") {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `UPDATE events e SET publication_status='DRAFT' WHERE publication_status='PUBLISHED' AND (
+		e.starts_at IS NULL OR CHAR_LENGTH(TRIM(e.artist)) < 2 OR CHAR_LENGTH(TRIM(e.city)) < 2 OR CHAR_LENGTH(TRIM(e.venue)) < 2 OR CHAR_LENGTH(TRIM(e.address)) < 2 OR
+		CHAR_LENGTH(TRIM(e.description))=0 OR e.image_url NOT REGEXP '^https?://[^/ ]+' OR
+		NOT EXISTS(SELECT 1 FROM event_lineups l WHERE l.event_id=e.id AND CHAR_LENGTH(TRIM(l.name)) > 0) OR
+		NOT EXISTS(SELECT 1 FROM event_zones z WHERE z.event_id=e.id) OR EXISTS(SELECT 1 FROM event_zones z WHERE z.event_id=e.id AND CHAR_LENGTH(TRIM(z.name))=0) OR
+		NOT EXISTS(SELECT 1 FROM ticket_tiers t WHERE t.event_id=e.id) OR EXISTS(SELECT 1 FROM ticket_tiers t WHERE t.event_id=e.id AND (CHAR_LENGTH(TRIM(t.name))=0 OR CHAR_LENGTH(TRIM(t.gate))=0)))`)
+	return err
 }
 
 func resumeEventPublication(ctx context.Context, db *sql.Conn) error {
