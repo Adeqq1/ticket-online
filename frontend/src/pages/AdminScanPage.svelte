@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { getEvents } from "../lib/api.ts";
   import type { Staff } from "../lib/api.ts";
   import { checkTicketStatus, continueToNextScan, submitScan, type ScannerState } from "../lib/scanner.ts";
   import CameraScanner from "./CameraScanner.svelte";
@@ -14,6 +15,7 @@
     loggingOut: boolean;
   } = $props();
   let assignmentKey = $state("");
+  let eventNames = $state<Record<string, string>>({});
   let code = $state("");
   let codeInput: HTMLInputElement | undefined;
   let scan = $state<ScannerState>({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan", locked: false, lastAttempt: null, statusChecking: false, ticketStatus: null, statusCheckError: "" });
@@ -24,6 +26,8 @@
   $effect(() => {
     if (assignmentKey && !staff.assignments.some((item) => `${item.eventId}:${item.gate}` === assignmentKey)) assignmentKey = "";
   });
+
+  $effect(() => { if (sessionReady) void getEvents().then((events) => { eventNames = Object.fromEntries(events.map((event) => [event.id, event.artist])); }).catch(() => {}); });
 
   const copy = {
     idle: { label: "Siap menerima tiket", title: "Scan tiket untuk membuka gate", detail: "Masukkan kode ET- pada e-ticket pengunjung." },
@@ -88,7 +92,7 @@
     <section class="scan-heading" aria-labelledby="scan-title">
       <div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> CHECK-IN</p><h1 id="scan-title">Buka pintu.<br /><em>Jaga momen.</em></h1><p class="scan-intro">Verifikasi tiket pengunjung dengan penugasan gate yang terdaftar.</p></div>
         <div class="scan-event-meta"><label class="meta-label" for="staff-assignment">Penugasan aktif</label>
-        {#if staff.assignments.length}<select id="staff-assignment" bind:value={assignmentKey} disabled={scan.busy || scan.locked || scan.statusChecking}><option value="">Pilih event dan gate</option>{#each staff.assignments as item (`${item.eventId}:${item.gate}`)}<option value={`${item.eventId}:${item.gate}`}>{item.eventId} · {item.gate}</option>{/each}</select>
+        {#if staff.assignments.length}<select id="staff-assignment" bind:value={assignmentKey} disabled={scan.busy || scan.locked || scan.statusChecking}><option value="">Pilih event dan gate</option>{#each staff.assignments as item (`${item.eventId}:${item.gate}`)}<option value={`${item.eventId}:${item.gate}`}>{eventNames[item.eventId] ?? item.eventId} · {item.gate}</option>{/each}</select>
         {:else}<strong>Tidak ada penugasan</strong><span>Hubungi administrator untuk mengaktifkan akses gate.</span>{/if}
       </div>
     </section>

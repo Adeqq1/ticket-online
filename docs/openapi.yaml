@@ -20,6 +20,8 @@ tags:
     description: Sesi petugas berlaku delapan jam. Token disimpan terpisah dari token akses order.
   - name: Admin Petugas
     description: Operasi ini memerlukan sesi dengan role ADMIN; hanya akun STAFF yang dapat dikelola.
+  - name: Admin Konser
+    description: Pengelolaan metadata dan status publikasi konser khusus ADMIN.
   - name: Check-in
     description: Check-in hanya dapat dilakukan STAFF pada event dan gate yang ditugaskan. ADMIN dapat membaca status dan riwayat sesuai endpoint.
 paths:
@@ -52,7 +54,8 @@ paths:
                         address: Jl. Musik Raya, Jakarta
                         startsAt: '2027-08-24T19:30:00Z'
                         genre: Indie
-                        status: EARLY_BIRD
+                        status: Early Bird
+                        publicationStatus: PUBLISHED
                         image: https://example.test/nusa-malam.jpg
                         description: Konser Nusa Malam.
                         lineup: [Nusa Malam, Pembuka Sore]
@@ -85,7 +88,8 @@ paths:
                 address: Jl. Musik Raya, Jakarta
                 startsAt: '2027-08-24T19:30:00Z'
                 genre: Indie
-                status: EARLY_BIRD
+                status: Early Bird
+                publicationStatus: PUBLISHED
                 image: https://example.test/nusa-malam.jpg
                 description: Konser Nusa Malam.
                 lineup: [Nusa Malam, Pembuka Sore]
@@ -104,6 +108,191 @@ paths:
                 error: {code: EVENT_NOT_FOUND, message: Event tidak ditemukan}
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/reservations/{reservationID}/event:
+    get:
+      operationId: getReservedEvent
+      tags: [Reservasi]
+      summary: Memuat event dari reservasi yang sudah dibuat
+      description: >-
+        Untuk memulihkan checkout reservasi yang masih tersimpan setelah event
+        disembunyikan dari katalog. Membutuhkan ID reservasi dan Idempotency-Key.
+      parameters:
+        - name: reservationID
+          in: path
+          required: true
+          schema: {type: string, minLength: 32, maxLength: 32}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Informasi konser terkait reservasi.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Event'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/admin/events:
+    get:
+      operationId: listAdminEvents
+      tags: [Admin Konser]
+      summary: Daftar seluruh konser, termasuk draft dan arsip
+      security: [{StaffSessionToken: []}]
+      responses:
+        '200':
+          description: Daftar konser untuk dashboard admin. Semua daftar, lineup, dan zona kosong dikembalikan sebagai array kosong.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events: {type: array, items: {$ref: '#/components/schemas/AdminEvent'}}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    post:
+      operationId: createAdminEvent
+      tags: [Admin Konser]
+      summary: Membuat konser dalam status draft secara default
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminEventInput'}
+      responses:
+        '201':
+          description: Konser dibuat.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminEvent'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/InvalidRequest'}
+  /api/v1/admin/events/{eventID}:
+    parameters:
+      - $ref: '#/components/parameters/EventID'
+    put:
+      operationId: updateAdminEvent
+      tags: [Admin Konser]
+      summary: Mengubah informasi, lineup, dan status publikasi konser
+      description: Jadwal dan lokasi terkunci sejak reservasi pertama. Mengirim nilai jadwal/lokasi yang sama tetap diizinkan.
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminEventInput'}
+      responses:
+        '200':
+          description: Konser diperbarui.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminEvent'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/InvalidRequest'}
+  /api/v1/admin/events/{eventID}/zones:
+    parameters:
+      - $ref: '#/components/parameters/EventID'
+    post:
+      operationId: createAdminZone
+      tags: [Admin Konser]
+      summary: Menambahkan zona konser
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminZoneInput'}
+      responses:
+        '201':
+          description: Zona dibuat.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Zone'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/admin/events/{eventID}/zones/{zoneID}:
+    parameters:
+      - $ref: '#/components/parameters/EventID'
+      - name: zoneID
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$', maxLength: 64}
+    put:
+      operationId: updateAdminZone
+      tags: [Admin Konser]
+      summary: Mengubah nama dan deskripsi zona
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminZoneUpdateInput'}
+      responses:
+        '200':
+          description: Zona diperbarui.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Zone'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/admin/events/{eventID}/ticket-tiers:
+    parameters:
+      - $ref: '#/components/parameters/EventID'
+    post:
+      operationId: createAdminTicketTier
+      tags: [Admin Konser]
+      summary: Menambahkan kategori tiket, kapasitas, harga, benefit, dan gate
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminTicketTierInput'}
+      responses:
+        '201':
+          description: Kategori tiket dibuat.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminTicketTier'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/InvalidRequest'}
+  /api/v1/admin/events/{eventID}/ticket-tiers/{tierID}:
+    parameters:
+      - $ref: '#/components/parameters/EventID'
+      - name: tierID
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$', maxLength: 64}
+    put:
+      operationId: updateAdminTicketTier
+      tags: [Admin Konser]
+      summary: Mengubah kategori tiket dan kapasitas secara aman
+      description: Kapasitas minimum adalah tiket terjual ditambah stok reservasi aktif. Gate dikunci sejak kategori pernah direservasi.
+      security: [{StaffSessionToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminTicketTierUpdateInput'}
+      responses:
+        '200':
+          description: Kategori tiket diperbarui.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminTicketTier'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/InvalidRequest'}
   /api/v1/reservations:
     post:
       operationId: createReservation
@@ -1185,6 +1374,16 @@ components:
             $ref: '#/components/schemas/Error'
           example:
             error: {code: NOT_FOUND, message: Data tidak ditemukan}
+    Conflict:
+      description: Konflik dengan konser yang sudah ada atau jadwal terkunci setelah order dibuat.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    InvalidRequest:
+      description: Data konser tidak memenuhi aturan validasi.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
   schemas:
     Error:
       type: object
@@ -1356,9 +1555,16 @@ components:
         status: {type: string, const: ALREADY_USED}
         ticket: {$ref: '#/components/schemas/CheckInTicket'}
         checkedInAt: {type: string, format: date-time}
+    Zone:
+      type: object
+      required: [id, name, description]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
     Event:
       type: object
-      required: [id, artist, city, venue, address, startsAt, genre, status, image, description, lineup, price, zones, ticketTiers]
+      required: [id, artist, city, venue, address, startsAt, genre, status, publicationStatus, image, description, lineup, price, zones, ticketTiers, scheduleLocked]
       properties:
         id: {type: string}
         artist: {type: string}
@@ -1367,7 +1573,8 @@ components:
         address: {type: string}
         startsAt: {type: string, format: date-time}
         genre: {type: string}
-        status: {type: string, enum: [EARLY_BIRD, PRESALE, SOLD_OUT]}
+        status: {type: string, enum: [Early Bird, Presale, Sold Out]}
+        publicationStatus: {type: string, enum: [DRAFT, PUBLISHED, ARCHIVED]}
         image: {type: string}
         description: {type: string}
         lineup:
@@ -1377,12 +1584,7 @@ components:
         zones:
           type: array
           items:
-            type: object
-            required: [id, name, description]
-            properties:
-              id: {type: string}
-              name: {type: string}
-              description: {type: string}
+            $ref: '#/components/schemas/Zone'
         ticketTiers:
           type: array
           items:
@@ -1398,6 +1600,78 @@ components:
               benefit: {type: string}
               gate: {type: string}
               seating: {type: string, enum: [assigned, free-standing]}
+        scheduleLocked: {type: boolean, description: Jadwal tidak dapat diubah setelah order pertama dibuat.}
+    AdminEventInput:
+      type: object
+      additionalProperties: false
+      required: [id, artist, city, venue, address, startsAt, genre, status, image, description, lineup]
+      properties:
+        id: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$', maxLength: 64}
+        artist: {type: string, minLength: 2, maxLength: 160}
+        city: {type: string, minLength: 2, maxLength: 100}
+        venue: {type: string, minLength: 2, maxLength: 160}
+        address: {type: string, minLength: 2, maxLength: 255}
+        startsAt: {type: string, format: date-time}
+        genre: {type: string, enum: [Rock, Pop, Indie]}
+        status: {type: string, enum: [Early Bird, Presale, Sold Out]}
+        publicationStatus: {type: string, enum: [DRAFT, PUBLISHED, ARCHIVED], default: DRAFT}
+        image: {type: string, format: uri, maxLength: 500}
+        description: {type: string, maxLength: 16000}
+        lineup: {type: array, maxItems: 100, items: {type: string, maxLength: 160}}
+    AdminEvent:
+      allOf:
+        - {$ref: '#/components/schemas/Event'}
+        - type: object
+          required: [locationLocked]
+          properties:
+            locationLocked: {type: boolean, description: Lokasi terkunci sejak reservasi pertama.}
+            ticketTiers:
+              type: array
+              items: {$ref: '#/components/schemas/AdminTicketTier'}
+    AdminTicketTier:
+      allOf:
+        - {$ref: '#/components/schemas/Event/properties/ticketTiers/items'}
+        - type: object
+          required: [capacity, boundQuantity, gateLocked]
+          properties:
+            capacity: {type: integer, minimum: 0}
+            boundQuantity: {type: integer, minimum: 0, description: Tiket terjual ditambah stok reservasi aktif.}
+            gateLocked: {type: boolean}
+    AdminZoneInput:
+      type: object
+      additionalProperties: false
+      required: [id, name, description]
+      properties:
+        id: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$', maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 100}
+        description: {type: string, maxLength: 255}
+    AdminZoneUpdateInput:
+      type: object
+      additionalProperties: false
+      required: [name, description]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        description: {type: string, maxLength: 255}
+    AdminTicketTierInput:
+      type: object
+      additionalProperties: false
+      required: [id, name, zoneId, price, capacity, maxPerOrder, benefit, gate, seating]
+      properties:
+        id: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$', maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 100}
+        zoneId: {type: string, minLength: 1, maxLength: 64}
+        price: {type: integer, minimum: 1, maximum: 9007199254740991}
+        capacity: {type: integer, minimum: 0, maximum: 4294967295}
+        maxPerOrder: {type: integer, minimum: 1, maximum: 4294967295}
+        benefit: {type: string, maxLength: 255}
+        gate: {type: string, minLength: 1, maxLength: 100}
+        seating: {type: string, enum: [assigned, free-standing]}
+    AdminTicketTierUpdateInput:
+      allOf:
+        - {$ref: '#/components/schemas/AdminTicketTierInput'}
+        - type: object
+          properties:
+            id: {type: string, readOnly: true}
     CreateReservationRequest:
       type: object
       additionalProperties: false

@@ -48,8 +48,8 @@ func TestPurchaseIssuesTicketThenCheckInSucceedsOnlyOnce(t *testing.T) {
 	const zoneID, gate = "checkin-flow", "Workflow Gate"
 	now := time.Now().UTC()
 	if _, err := db.ExecContext(ctx, `INSERT INTO events
-		(id, artist, city, venue, address, starts_at, genre, status, image_url, description, created_at, updated_at)
-		VALUES (?, 'Workflow Test', 'Jakarta', 'Test Venue', 'Test Address', ?, 'Test', 'PRESALE', '', '', ?, ?)`, eventID, now.Add(24*time.Hour), now, now); err != nil {
+		(id, artist, city, venue, address, starts_at, genre, status, publication_status, image_url, description, created_at, updated_at)
+		VALUES (?, 'Workflow Test', 'Jakarta', 'Test Venue', 'Test Address', ?, 'Test', 'PRESALE', 'PUBLISHED', '', '', ?, ?)`, eventID, now.Add(24*time.Hour), now, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO event_zones (event_id, slug, name, description) VALUES (?, ?, 'Test Zone', '')", eventID, zoneID); err != nil {

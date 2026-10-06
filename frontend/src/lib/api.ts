@@ -4,7 +4,11 @@ import { isRecoveryResult } from "./ticket-recovery.ts";
 
 export type ApiZone = { id: string; name: string; description: string };
 export type ApiTicketTier = { id: string; name: string; zoneId: string; price: number; availableQuantity: number; maxPerOrder: number; benefit: string; gate: string; seating: "assigned" | "free-standing" };
-export type ApiEvent = { id: string; artist: string; city: string; venue: string; address: string; startsAt: string; genre: string; status: string; image: string; description: string; lineup: string[]; price: number; zones: ApiZone[]; ticketTiers: ApiTicketTier[] };
+export type AdminTicketTier = ApiTicketTier & { capacity: number; boundQuantity: number; gateLocked: boolean };
+export type PublicationStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+export type ApiEvent = { id: string; artist: string; city: string; venue: string; address: string; startsAt: string; genre: string; status: string; publicationStatus: PublicationStatus; image: string; description: string; lineup: string[]; price: number; zones: ApiZone[]; ticketTiers: ApiTicketTier[]; scheduleLocked: boolean };
+export type AdminApiEvent = Omit<ApiEvent, "ticketTiers"> & { ticketTiers: AdminTicketTier[]; locationLocked: boolean };
+export type AdminEventInput = Pick<ApiEvent, "id" | "artist" | "city" | "venue" | "address" | "startsAt" | "genre" | "status" | "publicationStatus" | "image" | "description" | "lineup">;
 export type ApiErrorBody = { error?: { code?: string; message?: string; expectedGate?: string }; status?: string; ticket?: CheckInTicket; checkedInAt?: string };
 export type ReservationItem = { tierId: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
 export type Reservation = { id: string; status: string; expiresAt: string; event: { id: string; artist: string }; items: ReservationItem[]; subtotal: number; reference?: string };
@@ -95,6 +99,28 @@ export async function getEvents(signal?: AbortSignal): Promise<Concert[]> {
 export async function getEvent(id: string, signal?: AbortSignal): Promise<Concert> {
   return mapApiEvent(await request<ApiEvent>(`/api/v1/events/${encodeURIComponent(id)}`, signal));
 }
+
+export function getReservationEvent(reservationId: string, idempotencyKey: string, signal?: AbortSignal) {
+  return request<ApiEvent>(`/api/v1/reservations/${encodeURIComponent(reservationId)}/event`, signal, { headers: { "Idempotency-Key": idempotencyKey } }).then(mapApiEvent);
+}
+
+export function getAdminEvents(accessToken: string, signal?: AbortSignal) {
+  return request<{ events: AdminApiEvent[] }>("/api/v1/admin/events", signal, { headers: privateHeaders(accessToken) }).then((value) => value.events);
+}
+
+export function createAdminEvent(accessToken: string, payload: AdminEventInput, signal?: AbortSignal) {
+  return request<AdminApiEvent>("/api/v1/admin/events", signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function updateAdminEvent(accessToken: string, id: string, payload: AdminEventInput, signal?: AbortSignal) {
+  return request<AdminApiEvent>(`/api/v1/admin/events/${encodeURIComponent(id)}`, signal, { method: "PUT", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function createAdminZone(accessToken: string, eventId: string, payload: ApiZone) { return request<ApiZone>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/zones`, undefined, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 201); }
+export function updateAdminZone(accessToken: string, eventId: string, zoneId: string, payload: Omit<ApiZone,"id">) { return request<ApiZone>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/zones/${encodeURIComponent(zoneId)}`, undefined, { method: "PUT", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
+export type AdminTierInput = Omit<AdminTicketTier,"availableQuantity"|"boundQuantity"|"gateLocked">;
+export function createAdminTier(accessToken: string, eventId: string, payload: AdminTierInput) { return request<AdminTicketTier>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/ticket-tiers`, undefined, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 201); }
+export function updateAdminTier(accessToken: string, eventId: string, tierId: string, payload: Omit<AdminTierInput,"id">) { return request<AdminTicketTier>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/ticket-tiers/${encodeURIComponent(tierId)}`, undefined, { method: "PUT", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
 
 export function createReservation(eventId: string, items: Array<{ tierId: string; quantity: number }>, idempotencyKey: string, signal?: AbortSignal) {
   return request<Reservation>("/api/v1/reservations", signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ eventId, items }) });

@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import StaffAssignmentsEditor from "../components/StaffAssignmentsEditor.svelte";
-  import { ApiError, createStaff, getEvents, listStaff, resetStaffPassword, updateStaff, replaceStaffAssignments, type Staff, type StaffAssignment } from "../lib/api.ts";
-  import type { Concert } from "../lib/concerts.ts";
+  import { ApiError, createStaff, getAdminEvents, listStaff, resetStaffPassword, updateStaff, replaceStaffAssignments, type Staff, type StaffAssignment } from "../lib/api.ts";
+  import type { AdminApiEvent } from "../lib/api.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let staff = $state<Staff[]>([]);
-  let events = $state<Concert[]>([]);
+  let events = $state<AdminApiEvent[]>([]);
   let loadingStaff = $state(true);
   let loadingEvents = $state(true);
   let staffError = $state("");
@@ -34,7 +34,7 @@
 
   async function loadEvents() {
     loadingEvents = true; eventsError = "";
-    try { events = await getEvents(); }
+    try { events = await getAdminEvents(accessToken); }
     catch { eventsError = "Katalog event belum dapat dimuat."; }
     finally { loadingEvents = false; }
   }
@@ -110,7 +110,7 @@
   <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={saving || loggingOut} onclick={onLogout}>Keluar</button></header>
   <main id="staff-admin-content" class="staff-admin-content">
     <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMINISTRASI</p><h1>Kelola petugas.</h1><p>Atur akses tim pada event dan gate yang ditugaskan.</p></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a aria-current="page" href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a aria-current="page" href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
 
     {#if notice}<p class="staff-form-message staff-form-success" role="status">{notice}</p>{/if}
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}

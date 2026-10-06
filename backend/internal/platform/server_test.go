@@ -110,6 +110,21 @@ func TestCheckInRouteIsAvailableInProductionAndRequiresStaffSession(t *testing.T
 	}
 }
 
+func TestAdminEventRoutesRequireAdministratorSession(t *testing.T) {
+	handler := testHandler(testDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)), "", false)
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/admin/events"},
+		{http.MethodPost, "/api/v1/admin/events"},
+		{http.MethodPut, "/api/v1/admin/events/nusa-malam"},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(route.method, route.path, strings.NewReader(`{}`)))
+		if response.Code != http.StatusUnauthorized || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s %s returned %d with Cache-Control %q, want private 401", route.method, route.path, response.Code, response.Header().Get("Cache-Control"))
+		}
+	}
+}
+
 func TestStaticHandlerFallsBackToIndexForBrowserRoutes(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("spa"), 0o644); err != nil {

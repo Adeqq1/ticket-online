@@ -14,8 +14,8 @@
   <article class:is-sold-out={concert.status === "Sold Out"} class="concert-card">
     <a class="concert-card-link" href={`/konser/${concert.id}`}>
       <img src={concert.image} alt={`Poster contoh konser ${concert.artist}`} width="900" height="1100" loading="lazy" />
-      <span class="concert-status">{concert.status}</span>
-      <div class="concert-card-body"><p class="concert-meta">{eventDate(concert.startsAt)}, {concert.genre}</p><h2>{concert.artist}</h2><p class="concert-venue">{concert.venue}, {concert.city}</p><p class="concert-price">Mulai {formatRupiah.format(concert.price)}</p></div>
+      <span class="concert-status">{concert.ticketTiers.length ? concert.status : "Tiket belum tersedia"}</span>
+      <div class="concert-card-body"><p class="concert-meta">{eventDate(concert.startsAt)}, {concert.genre}</p><h2>{concert.artist}</h2><p class="concert-venue">{concert.venue}, {concert.city}</p>{#if concert.ticketTiers.length}<p class="concert-price">Mulai {formatRupiah.format(concert.price)}</p>{:else}<p class="concert-price">Tiket belum tersedia</p>{/if}</div>
     </a>
   </article>
 {/if}

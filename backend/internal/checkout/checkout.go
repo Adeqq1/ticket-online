@@ -203,6 +203,14 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Order{}, false, fmt.Errorf("find existing order: %w", err)
 	}
+	var eventID string
+	if err := tx.QueryRowContext(ctx, "SELECT event_id FROM reservations WHERE id = ?", reservationID).Scan(&eventID); err != nil {
+		return Order{}, false, fmt.Errorf("find checkout event: %w", err)
+	}
+	var lockedEvent string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM events WHERE id = ? FOR SHARE", eventID).Scan(&lockedEvent); err != nil {
+		return Order{}, false, fmt.Errorf("lock checkout event: %w", err)
+	}
 	switch status {
 	case "CANCELLED":
 		return Order{}, false, ErrReservationCancelled
