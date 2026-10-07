@@ -27,3 +27,26 @@ func TestIssueInputHelpersRejectMalformedValues(t *testing.T) {
 		t.Fatalf("cursor timestamp = %v, err = %v", at, err)
 	}
 }
+
+func TestRefundEmailSnapshotRequiresKnownOutcomeAndCompleteTarget(t *testing.T) {
+	var snapshot refundEmailSnapshot
+	valid := `{"status":"SUCCEEDED","amount":17500,"reason":"approved","reference":"TO-123"}`
+	if err := decodeRefundEmailSnapshot([]byte(valid), &snapshot); err != nil || snapshot.Amount != 17500 {
+		t.Fatalf("valid refund snapshot rejected: %#v, %v", snapshot, err)
+	}
+	for _, value := range []string{
+		`{"status":"UNKNOWN","amount":17500,"reason":"approved","reference":"TO-123"}`,
+		`{"status":"FAILED","amount":0,"reason":"approved","reference":"TO-123"}`,
+		`{"status":"FAILED","amount":17500,"reason":"x","reference":"TO-123"}`,
+		`{"status":"FAILED","amount":17500,"reason":"approved","reference":"TO-123","orderId":"other"}`,
+		valid + ` {}`,
+		"null",
+	} {
+		t.Run(value, func(t *testing.T) {
+			var result refundEmailSnapshot
+			if err := decodeRefundEmailSnapshot([]byte(value), &result); err == nil {
+				t.Fatal("invalid refund snapshot accepted")
+			}
+		})
+	}
+}

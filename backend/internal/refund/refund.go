@@ -175,8 +175,8 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 		return result, err
 	}
 	now := time.Now().UTC()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO order_refunds (id,order_id,status,original_order_status,amount,reason,requested_by_staff_id,refund_key,gateway_order_id,provider_transaction_id,requested_at,updated_at)
-		VALUES (?,?,'PROCESSING',?,?,?,?,?,?,?,?,?)`, key, orderID, status, amount, reason, principal.ID, key, gatewayID, providerStatus.TransactionID, now, now); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO order_refunds (id,order_id,status,original_order_status,amount,reason,requested_by_staff_id,refund_key,gateway_order_id,provider_transaction_id,attempts,last_error,requested_at,updated_at,next_attempt_at,retry_deadline)
+		VALUES (?,?,'REQUESTED',?,?,?,?,?,?,?,0,'',?,?,?,DATE_ADD(?, INTERVAL 7 DAY))`, key, orderID, status, amount, reason, principal.ID, key, gatewayID, providerStatus.TransactionID, now, now, now, now); err != nil {
 		return result, err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO order_refund_audit (refund_id,staff_id,action,reason,created_at) VALUES (?,?,'REQUESTED',?,?)", key, principal.ID, reason, now); err != nil {
@@ -188,12 +188,7 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 	if err = tx.Commit(); err != nil {
 		return result, err
 	}
-	result = Result{Status: "UNKNOWN", Amount: amount, Reason: reason}
-	if err = s.send(ctx, gatewayID, key); err != nil {
-		_, _ = s.db.ExecContext(ctx, "UPDATE order_refunds SET status='UNKNOWN',attempts=attempts+1,last_error=?,updated_at=? WHERE order_id=? AND status='PROCESSING'", clip(err.Error()), time.Now().UTC(), orderID)
-		return result, nil
-	}
-	_, _ = s.db.ExecContext(ctx, "UPDATE order_refunds SET attempts=attempts+1,updated_at=? WHERE order_id=? AND status='PROCESSING'", time.Now().UTC(), orderID)
+	result = Result{Status: "REQUESTED", Amount: amount, Reason: reason}
 	return result, nil
 }
 
@@ -209,6 +204,30 @@ type providerStatus struct {
 	TransactionStatus string `json:"transaction_status"`
 	PaymentType       string `json:"payment_type"`
 	SettlementTime    string `json:"settlement_time"`
+	RefundAmount      string `json:"refund_amount"`
+}
+
+type refundSendState uint8
+
+const (
+	refundSendUnknown refundSendState = iota
+	refundSendAccepted
+	refundSendRejected
+)
+
+type refundSendResult struct {
+	state   refundSendState
+	message string
+}
+
+type providerRefundResponse struct {
+	StatusCode        string `json:"status_code"`
+	StatusMessage     string `json:"status_message"`
+	OrderID           string `json:"order_id"`
+	TransactionID     string `json:"transaction_id"`
+	RefundKey         string `json:"refund_key"`
+	RefundAmount      string `json:"refund_amount"`
+	TransactionStatus string `json:"transaction_status"`
 }
 
 func (s *Service) readStatus(ctx context.Context, gatewayID string) (providerStatus, error) {
@@ -226,28 +245,66 @@ func (s *Service) readStatus(ctx context.Context, gatewayID string) (providerSta
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return value, fmt.Errorf("Midtrans status returned %d", resp.StatusCode)
 	}
-	err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&value)
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	err = decoder.Decode(&value)
+	if err == nil {
+		var trailing any
+		if decodeErr := decoder.Decode(&trailing); !errors.Is(decodeErr, io.EOF) {
+			if decodeErr == nil {
+				err = errors.New("Midtrans status response contains trailing data")
+			} else {
+				err = decodeErr
+			}
+		}
+	}
 	return value, err
 }
 
-func (s *Service) send(ctx context.Context, gatewayID, key string) error {
+func (s *Service) send(ctx context.Context, gatewayID, transactionID, key string, amount uint64) (refundSendResult, error) {
+	var result refundSendResult
 	body, _ := json.Marshal(map[string]string{"refund_key": key})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base+"/v2/"+url.PathEscape(gatewayID)+"/refund", strings.NewReader(string(body)))
 	if err != nil {
-		return err
+		return result, err
 	}
 	req.SetBasicAuth(s.key, "")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return err
+		return result, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("Midtrans refund returned %d: %s", resp.StatusCode, clip(string(raw)))
+	var bodyResult providerRefundResponse
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	if err := decoder.Decode(&bodyResult); err != nil {
+		return result, fmt.Errorf("decode Midtrans refund response (HTTP %d): %w", resp.StatusCode, err)
 	}
-	return nil
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return result, errors.New("Midtrans refund response contains trailing data")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || bodyResult.StatusCode != "200" {
+		message := bodyResult.StatusMessage
+		if message == "" {
+			message = fmt.Sprintf("Midtrans refund returned HTTP %d", resp.StatusCode)
+		}
+		if definiteRefundRejection(bodyResult.StatusCode, message) {
+			return refundSendResult{state: refundSendRejected, message: clip(message)}, nil
+		}
+		return result, fmt.Errorf("Midtrans refund result is uncertain: %s", clip(message))
+	}
+	if bodyResult.OrderID != gatewayID || bodyResult.TransactionID != transactionID || bodyResult.RefundKey != key || bodyResult.RefundAmount != fmt.Sprintf("%d.00", amount) {
+		return result, fmt.Errorf("Midtrans refund response identity or amount did not match the request")
+	}
+	return refundSendResult{state: refundSendAccepted, message: clip(bodyResult.StatusMessage)}, nil
+}
+
+func definiteRefundRejection(statusCode, message string) bool {
+	if statusCode != "406" && statusCode != "412" && statusCode != "414" {
+		return false
+	}
+	message = strings.ToLower(message)
+	return !strings.Contains(message, "duplicate") && !strings.Contains(message, "already used") && !strings.Contains(message, "already exists")
 }
 
 func (s *Service) finish(ctx context.Context, orderID string, success bool, message string) error {
@@ -343,7 +400,7 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) {
 			return
 		case <-ticker.C:
 			operations.Process.Begin("refund", time.Now())
-			err := s.reconcile(ctx)
+			err := errors.Join(s.deliverRequested(ctx), s.reconcile(ctx))
 			operations.Process.Finish("refund", time.Now(), err)
 			if err != nil && s.logger != nil {
 				s.logger.ErrorContext(ctx, "refund reconciliation failed", "error", err)
@@ -351,64 +408,207 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) {
 		}
 	}
 }
-func (s *Service) reconcile(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT order_id,gateway_order_id,provider_transaction_id,amount FROM order_refunds WHERE status IN ('UNKNOWN','PROCESSING') ORDER BY updated_at LIMIT 50")
+
+type queuedRefund struct {
+	orderID, gatewayID, transactionID, refundKey, status, claimToken string
+	amount                                                           uint64
+	retryDeadline                                                    sql.NullTime
+}
+
+func (s *Service) claimRefunds(ctx context.Context, status string) ([]queuedRefund, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var query string
+	if status == "UNKNOWN" {
+		query = `SELECT order_id,gateway_order_id,provider_transaction_id,refund_key,amount,status,retry_deadline
+			FROM order_refunds WHERE status='UNKNOWN' AND next_attempt_at<=UTC_TIMESTAMP(6)
+			AND (lease_until IS NULL OR lease_until<=UTC_TIMESTAMP(6)) ORDER BY next_attempt_at,id LIMIT 50 FOR UPDATE SKIP LOCKED`
+	} else {
+		query = `SELECT order_id,gateway_order_id,provider_transaction_id,refund_key,amount,status,retry_deadline
+			FROM order_refunds WHERE ((status='REQUESTED' AND next_attempt_at<=UTC_TIMESTAMP(6)) OR
+			(status='PROCESSING' AND (lease_until IS NULL OR lease_until<=UTC_TIMESTAMP(6))))
+			ORDER BY next_attempt_at,id LIMIT 10 FOR UPDATE SKIP LOCKED`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	var items []queuedRefund
+	for rows.Next() {
+		var item queuedRefund
+		if err := rows.Scan(&item.orderID, &item.gatewayID, &item.transactionID, &item.refundKey, &item.amount, &item.status, &item.retryDeadline); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		token, err := newID()
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		item.claimToken = token
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range items {
+		item := &items[i]
+		if item.status != "UNKNOWN" {
+			if _, err := tx.ExecContext(ctx, `UPDATE order_refunds SET status='PROCESSING',claim_token=?,lease_until=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 3 MINUTE),
+				next_attempt_at=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 3 MINUTE),updated_at=UTC_TIMESTAMP(6) WHERE order_id=?`, item.claimToken, item.orderID); err != nil {
+				return nil, err
+			}
+		} else if _, err := tx.ExecContext(ctx, `UPDATE order_refunds SET claim_token=?,lease_until=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 3 MINUTE),
+			next_attempt_at=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 1 MINUTE),last_checked_at=UTC_TIMESTAMP(6),updated_at=UTC_TIMESTAMP(6) WHERE order_id=?`, item.claimToken, item.orderID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Service) deliverRequested(ctx context.Context) error {
+	items, err := s.claimRefunds(ctx, "REQUESTED")
 	if err != nil {
 		return err
 	}
-	type item struct {
-		id, gateway, transaction string
-		amount                   uint64
-	}
-	var items []item
-	for rows.Next() {
-		var v item
-		if rows.Scan(&v.id, &v.gateway, &v.transaction, &v.amount) != nil {
-			continue
-		}
-		items = append(items, v)
-	}
-	rows.Close()
 	var failures []error
-	for _, v := range items {
-		req, e := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/v2/"+url.PathEscape(v.gateway)+"/status", nil)
-		if e != nil {
-			failures = append(failures, e)
-			continue
-		}
-		req.SetBasicAuth(s.key, "")
-		resp, e := s.client.Do(req)
-		if e != nil {
-			failures = append(failures, e)
-			continue
-		}
-		var data struct {
-			OrderID           string `json:"order_id"`
-			TransactionID     string `json:"transaction_id"`
-			TransactionStatus string `json:"transaction_status"`
-			RefundAmount      string `json:"refund_amount"`
-			GrossAmount       string `json:"gross_amount"`
-		}
-		e = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&data)
-		resp.Body.Close()
-		if e != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 || data.OrderID != v.gateway || data.TransactionID != v.transaction || data.GrossAmount != fmt.Sprintf("%d.00", v.amount) {
-			if e == nil {
-				e = fmt.Errorf("Midtrans refund status did not match order %s", v.id)
+	for _, item := range items {
+		if item.status == "PROCESSING" {
+			provider, checkErr := s.readStatus(ctx, item.gatewayID)
+			if checkErr == nil {
+				checkErr = validateProviderStatus(provider, item)
 			}
-			failures = append(failures, e)
-			continue
-		}
-		if data.TransactionStatus == "refund" && data.RefundAmount == fmt.Sprintf("%d.00", v.amount) {
-			if e = s.finish(ctx, v.id, true, ""); e != nil {
+			if checkErr != nil {
+				failures = append(failures, s.releaseClaim(ctx, item, checkErr.Error(), false))
+				continue
+			}
+			finished, e := s.finishFromProvider(ctx, item, provider)
+			if e != nil {
 				failures = append(failures, e)
+				continue
 			}
-		} else if data.TransactionStatus == "refund_failed" && (data.RefundAmount == "" || data.RefundAmount == "0.00") {
-			if e = s.finish(ctx, v.id, false, "Midtrans mengonfirmasi refund gagal"); e != nil {
-				failures = append(failures, e)
+			if finished {
+				continue
 			}
+			if provider.TransactionStatus != "settlement" || provider.RefundAmount != "" && provider.RefundAmount != "0.00" {
+				failures = append(failures, s.releaseClaim(ctx, item, "Refund provider masih diproses; perlu diperiksa ulang.", false))
+				continue
+			}
+		}
+		if !item.retryDeadline.Valid || !time.Now().Before(item.retryDeadline.Time) {
+			failures = append(failures, s.releaseClaim(ctx, item, "Batas retry refund tujuh hari terlewati; perlu pemeriksaan admin.", false))
+			continue
+		}
+		result, sendErr := s.send(ctx, item.gatewayID, item.transactionID, item.refundKey, item.amount)
+		if sendErr != nil {
+			if err := s.releaseClaim(ctx, item, sendErr.Error(), true); err != nil {
+				failures = append(failures, err)
+			}
+			continue
+		}
+		if result.state == refundSendRejected {
+			provider, checkErr := s.readStatus(ctx, item.gatewayID)
+			if checkErr == nil {
+				checkErr = validateProviderStatus(provider, item)
+			}
+			if checkErr == nil && provider.TransactionStatus == "settlement" && (provider.RefundAmount == "" || provider.RefundAmount == "0.00") {
+				if err := s.finish(ctx, item.orderID, false, result.message); err != nil {
+					failures = append(failures, err)
+				}
+				continue
+			}
+			if checkErr != nil {
+				result.message += "; status check: " + checkErr.Error()
+			}
+		}
+		if err := s.releaseClaim(ctx, item, result.message, true); err != nil {
+			failures = append(failures, err)
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (s *Service) releaseClaim(ctx context.Context, item queuedRefund, message string, attempted bool) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE order_refunds SET status='UNKNOWN',claim_token=NULL,lease_until=NULL,
+		next_attempt_at=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 30 SECOND),attempts=LEAST(255,attempts+?),last_error=?,updated_at=UTC_TIMESTAMP(6)
+		WHERE order_id=? AND claim_token=? AND status IN ('PROCESSING','UNKNOWN')`, boolToInt(attempted), clip(message), item.orderID, item.claimToken)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return err
+	} else if count != 1 {
+		return fmt.Errorf("refund claim for order %s was not saved", item.orderID)
+	}
+	return nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func validateProviderStatus(value providerStatus, item queuedRefund) error {
+	if value.OrderID != item.gatewayID || value.TransactionID != item.transactionID || value.GrossAmount != fmt.Sprintf("%d.00", item.amount) {
+		return fmt.Errorf("Midtrans refund status did not match order %s", item.orderID)
+	}
+	return nil
+}
+
+func (s *Service) finishFromProvider(ctx context.Context, item queuedRefund, provider providerStatus) (bool, error) {
+	if provider.TransactionStatus == "refund" && provider.RefundAmount == fmt.Sprintf("%d.00", item.amount) {
+		return true, s.finish(ctx, item.orderID, true, "")
+	}
+	if provider.TransactionStatus == "refund_failed" && (provider.RefundAmount == "" || provider.RefundAmount == "0.00") {
+		return true, s.finish(ctx, item.orderID, false, "Midtrans mengonfirmasi refund gagal")
+	}
+	return false, nil
+}
+
+func (s *Service) reconcile(ctx context.Context) error {
+	items, err := s.claimRefunds(ctx, "UNKNOWN")
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, v := range items {
+		provider, e := s.readStatus(ctx, v.gatewayID)
+		if e == nil {
+			e = validateProviderStatus(provider, v)
+		}
+		finished := false
+		if e == nil {
+			finished, e = s.finishFromProvider(ctx, v, provider)
+		}
+		if !finished {
+			if releaseErr := s.releaseClaim(ctx, v, errorString(e), false); releaseErr != nil {
+				failures = append(failures, releaseErr)
+			}
+		}
+		if e != nil {
+			failures = append(failures, e)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func refundWindow(method string) time.Duration {

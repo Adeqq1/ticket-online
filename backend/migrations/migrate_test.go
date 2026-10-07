@@ -19,8 +19,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 21 {
-		t.Fatalf("migration count = %d, want 21", len(items))
+	if len(items) != 22 {
+		t.Fatalf("migration count = %d, want 22", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -51,12 +51,91 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if !strings.Contains(string(items[20].data), "CREATE TABLE order_refunds") || !strings.Contains(string(items[20].data), "REFUND_PENDING") {
 		t.Fatal("refund migration was not loaded")
 	}
+	if !strings.Contains(string(items[21].data), "next_attempt_at") || !strings.Contains(string(items[21].data), "claim_token") {
+		t.Fatal("resumable refund queue migration was not loaded")
+	}
 }
 
 func TestStatementsIgnoresEmptyStatements(t *testing.T) {
 	got := statements(" CREATE TABLE example (id INT); ; ")
 	if len(got) != 1 || got[0] != "CREATE TABLE example (id INT)" {
 		t.Fatalf("unexpected statements: %#v", got)
+	}
+}
+
+func TestMySQLNonAtomicMigrationsResume(t *testing.T) {
+	dsn := os.Getenv("MYSQL_MIGRATION_TEST_DSN")
+	if dsn == "" {
+		t.Skip("set MYSQL_MIGRATION_TEST_DSN to a MySQL account that can create disposable databases")
+	}
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DBName = ""
+	admin, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	items, err := load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []int{18, 20, 21, 22} {
+		item := items[version-1]
+		steps := statements(string(item.data))
+		for interruptedAfter := 0; interruptedAfter < len(steps); interruptedAfter++ {
+			t.Run(fmt.Sprintf("version_%d_after_%d", version, interruptedAfter), func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				name := fmt.Sprintf("ticket_resume_%d_%d", version, time.Now().UnixNano())
+				if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if _, err := admin.Exec("DROP DATABASE " + name); err != nil {
+						t.Error(err)
+					}
+				})
+				testCfg := *cfg
+				testCfg.DBName = name
+				db, err := sql.Open("mysql", testCfg.FormatDSN())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				conn, err := db.Conn(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer conn.Close()
+				if _, err := conn.ExecContext(ctx, `CREATE TABLE schema_migrations (
+					version BIGINT UNSIGNED PRIMARY KEY,name VARCHAR(255) NOT NULL,checksum CHAR(64) NOT NULL,applied_at DATETIME(6) NOT NULL)`); err != nil {
+					t.Fatal(err)
+				}
+				for _, previous := range items[:version-1] {
+					if err := apply(ctx, conn, previous); err != nil {
+						t.Fatalf("apply version %d: %v", previous.version, err)
+					}
+				}
+				for _, statement := range steps[:interruptedAfter] {
+					if _, err := conn.ExecContext(ctx, statement); err != nil {
+						t.Fatalf("partial version %d: %v", version, err)
+					}
+				}
+				if err := apply(ctx, conn, item); err != nil {
+					t.Fatalf("resume version %d: %v", version, err)
+				}
+				if err := apply(ctx, conn, item); err != nil {
+					t.Fatalf("rerun version %d: %v", version, err)
+				}
+				var count int
+				if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", version).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("version %d recorded %d times, error %v", version, count, err)
+				}
+			})
+		}
 	}
 }
 

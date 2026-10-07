@@ -1405,7 +1405,7 @@ paths:
       security: [{StaffSessionToken: []}]
       parameters:
         - {name: q, in: query, schema: {type: string, maxLength: 32}}
-        - {name: kind, in: query, schema: {type: string, enum: [TICKETS, RECOVERY]}}
+        - {name: kind, in: query, schema: {type: string, enum: [TICKETS, RECOVERY, REFUND]}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 256}}
       responses:
         '200':
@@ -1437,7 +1437,7 @@ paths:
       operationId: retryAdminEmailJob
       tags: [Admin Operasional]
       summary: Jadwalkan ulang email gagal
-      description: Memakai cooldown yang sama dengan pengiriman ulang publik; retry pemulihan membuat request dan tautan baru.
+      description: Memakai cooldown yang sama dengan pengiriman ulang publik; retry pemulihan membuat request dan tautan baru. Retry REFUND hanya mengirim ulang email hasil refund dan tidak mengirim refund ke provider.
       security: [{StaffSessionToken: []}]
       parameters:
         - {name: jobID, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}}
@@ -1940,7 +1940,7 @@ components:
       required: [id, kind, status, reference, recipient, attempts, lastError, updatedAt, supersededBy]
       properties:
         id: {type: string, pattern: '^[0-9a-f]{32}$'}
-        kind: {type: string, enum: [TICKETS, RECOVERY]}
+        kind: {type: string, enum: [TICKETS, RECOVERY, REFUND]}
         status: {type: string, enum: [FAILED, PENDING, SENT, PROCESSING]}
         reference: {type: string}
         recipient: {type: string, description: Email sebagian disamarkan pada daftar; nilai lengkap hanya tersedia pada detail admin.}

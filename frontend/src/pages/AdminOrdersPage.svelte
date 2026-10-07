@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { ApiError, getAdminOrder, getAdminOrders, requestAdminRefund, type AdminOrder, type AdminOrderDetail, type AdminOrderFilter, type AdminOrderPage, type OrderStatus } from "../lib/api.ts";
+  import { applyIfCurrent } from "../lib/admin-order-requests.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let items = $state<AdminOrder[]>([]);
@@ -52,14 +53,17 @@
   function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); closeDetail(); void load(applied); }
   function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; closeDetail(); void load(applied); }
 
-  function closeDetail() { detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; }
+  function closeDetail() { detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; }
 
   async function openDetail(id: string) {
     detailRequest?.abort();
     const controller = new AbortController(); detailRequest = controller;
     const current = ++detailGeneration;
+    if (selectedId !== id) { refundReason = ""; refundMessage = ""; }
     selectedId = id; selected = null; detailLoading = true; detailError = "";
-    try { selected = await getAdminOrder(accessToken, id, controller.signal); }
+    try {
+      await applyIfCurrent(() => current === detailGeneration, () => getAdminOrder(accessToken, id, controller.signal), (result) => { selected = result; });
+    }
     catch (cause) {
       if (current !== detailGeneration || (cause instanceof DOMException && cause.name === "AbortError")) return;
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
@@ -73,12 +77,18 @@
 
   async function submitRefund() {
     if (!selected || refundBusy || refundReason.trim().length < 3) return;
+    const orderId = selected.id;
+    const reason = refundReason;
     refundBusy = true; refundMessage = "";
     try {
-      const result = await requestAdminRefund(accessToken, selected.id, refundReason);
-      refundMessage = `Refund ${result.status.toLowerCase()} · ${money(result.amount)}. Status diperbarui setelah konfirmasi Midtrans.`;
-      await openDetail(selected.id); await load(applied);
-    } catch (cause) { refundMessage = cause instanceof ApiError ? cause.message : "Status refund belum dapat dipastikan. Periksa kembali detail pesanan."; }
+      await applyIfCurrent(() => selectedId === orderId, () => requestAdminRefund(accessToken, orderId, reason), async (result) => {
+        refundMessage = `Refund ${result.status.toLowerCase()} · ${money(result.amount)}. Status diperbarui setelah konfirmasi Midtrans.`;
+        await openDetail(orderId);
+      });
+      await load(applied);
+    } catch (cause) {
+      if (selectedId === orderId) refundMessage = cause instanceof ApiError ? cause.message : "Status refund belum dapat dipastikan. Periksa kembali detail pesanan.";
+    }
     finally { refundBusy = false; }
   }
 

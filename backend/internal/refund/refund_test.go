@@ -26,12 +26,13 @@ func TestRefundRequestUsesStableKeyAndServerAuth(t *testing.T) {
 		if body["refund_key"] != "refund-stable-key" {
 			t.Errorf("refund key = %q", body["refund_key"])
 		}
-		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status_code":"200","status_message":"accepted","order_id":"order-1","transaction_id":"txn-1","refund_key":"refund-stable-key","refund_amount":"100.00"}`))
 	}))
 	defer server.Close()
 	s := New(nil, nil, "server-key", "sandbox", nil, nil)
 	s.base = server.URL
-	if err := s.send(context.Background(), "order-1", "refund-stable-key"); err != nil {
+	result, err := s.send(context.Background(), "order-1", "txn-1", "refund-stable-key", 100)
+	if err != nil || result.state != refundSendAccepted {
 		t.Fatal(err)
 	}
 }
@@ -45,7 +46,7 @@ func TestRefundRequestHonorsTimeoutAndDoesNotFollowRedirects(t *testing.T) {
 	s := New(nil, nil, "key", "sandbox", nil, nil)
 	s.base = slow.URL
 	s.client = &http.Client{Timeout: 5 * time.Millisecond}
-	if err := s.send(context.Background(), "order", "key"); err == nil {
+	if _, err := s.send(context.Background(), "order", "txn", "key", 100); err == nil {
 		t.Fatal("provider timeout was treated as success")
 	}
 
@@ -55,8 +56,31 @@ func TestRefundRequestHonorsTimeoutAndDoesNotFollowRedirects(t *testing.T) {
 	defer redirect.Close()
 	s.base = redirect.URL
 	s.client = &http.Client{Timeout: time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	if err := s.send(context.Background(), "order", "key"); err == nil || !strings.Contains(err.Error(), "302") {
+	if _, err := s.send(context.Background(), "order", "txn", "key", 100); err == nil || !strings.Contains(err.Error(), "302") {
 		t.Fatalf("redirect result = %v", err)
+	}
+}
+
+func TestRefundResponseDistinguishesDefiniteRejectionAndIdentityMismatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		state      refundSendState
+		wantErr    bool
+	}{
+		{"business rejection", `{"status_code":"412","status_message":"Merchant cannot modify the status of the transaction"}`, refundSendRejected, false},
+		{"duplicate is uncertain", `{"status_code":"412","status_message":"Duplicate refund key"}`, refundSendUnknown, true},
+		{"identity mismatch", `{"status_code":"200","status_message":"accepted","order_id":"other","transaction_id":"txn-1","refund_key":"stable","refund_amount":"100.00"}`, refundSendUnknown, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) }))
+			defer server.Close()
+			s := New(nil, nil, "key", "sandbox", nil, nil)
+			s.base = server.URL
+			result, err := s.send(context.Background(), "order", "txn-1", "stable", 100)
+			if (err != nil) != tc.wantErr || result.state != tc.state {
+				t.Fatalf("send result=%#v error=%v", result, err)
+			}
+		})
 	}
 }
 
