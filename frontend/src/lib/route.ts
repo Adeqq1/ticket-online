@@ -14,6 +14,7 @@ export type Route =
   | { name: "admin-orders" }
   | { name: "admin-issues" }
   | { name: "admin-operations" }
+  | { name: "admin-reports" }
   | { name: "admin-check-ins" }
   | { name: "admin-scan" }
   | { name: "not-found" };
@@ -31,6 +32,7 @@ export function matchRoute(pathname: string): Route {
   if (path === "/admin/orders") return { name: "admin-orders" };
   if (path === "/admin/issues") return { name: "admin-issues" };
   if (path === "/admin/operations") return { name: "admin-operations" };
+  if (path === "/admin/reports") return { name: "admin-reports" };
   if (path === "/admin/check-ins") return { name: "admin-check-ins" };
   if (path === "/admin/scan") return { name: "admin-scan" };
   for (const [prefix, name] of [["/konser/", "concert-detail"], ["/checkout/", "checkout"], ["/tiket/", "ticket"], ["/pesanan/", "order"]] as const) {

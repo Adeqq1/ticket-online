@@ -28,6 +28,8 @@ tags:
     description: Check-in hanya dapat dilakukan STAFF pada event dan gate yang ditugaskan. ADMIN dapat membaca status dan riwayat sesuai endpoint.
   - name: Admin Operasional
     description: Pemantauan API, worker, email gagal, dan kasus pembayaran terbuka khusus ADMIN.
+  - name: Admin Laporan
+    description: Ringkasan pembayaran berhasil dan refund berdasarkan waktu transaksi keuangan.
   - name: Admin Pesanan
     description: Detail dan refund penuh order oleh ADMIN. Refund hanya untuk QRIS/GoPay yang diaktifkan lewat allowlist konfigurasi.
 paths:
@@ -1451,6 +1453,34 @@ paths:
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '409': {description: Job tidak lagi gagal, telah digantikan, atau order tidak memenuhi syarat.}
         '429': {description: Batas kirim ulang tercapai.}
+  /api/v1/admin/reports/sales:
+    get:
+      operationId: getAdminSalesReport
+      tags: [Admin Laporan]
+      summary: Ringkasan penjualan dan refund
+      description: >-
+        Hanya ADMIN aktif. Filter tanggal memakai hari kalender Asia/Jakarta, inklusif, default 30 hari terakhir,
+        maksimal 366 hari. Jika hanya satu batas tanggal diisi, batas lainnya berjarak 29 hari.
+        Pembayaran dikelompokkan menurut paid_at dan refund menurut completed_at. Refund berjalan dan kasus
+        rekonsiliasi terbuka mengikuti kondisi pada snapshot laporan dan tidak dibatasi rentang tanggal.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: eventId, in: query, required: false, schema: {type: string, maxLength: 64}}
+        - {name: dateFrom, in: query, required: false, description: Awal inklusif dalam hari WIB., schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: false, description: Akhir inklusif dalam hari WIB., schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Ringkasan konsisten dari snapshot database.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSalesReport'}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {description: Event tidak ditemukan.}
+        '500': {$ref: '#/components/responses/InternalError'}
   /api/v1/admin/operations:
     get:
       operationId: getAdminOperations
@@ -1701,6 +1731,56 @@ components:
               lastFailureAt: {type: [string, 'null'], format: date-time}
               consecutiveFailures: {type: integer, minimum: 0}
         alerts: {type: array, items: {type: string}}
+    AdminSalesAmounts:
+      type: object
+      required: [successfulTransactions, paymentAmount, refundAmount, netAmount, unfinishedRefunds, openReconciliationCases]
+      properties:
+        successfulTransactions: {type: integer, minimum: 0}
+        paymentAmount: {type: integer, minimum: 0}
+        refundAmount: {type: integer, minimum: 0}
+        netAmount: {type: integer}
+        unfinishedRefunds: {type: integer, minimum: 0}
+        openReconciliationCases: {type: integer, minimum: 0}
+    AdminSalesReport:
+      type: object
+      required: [period, summary, daily, byEvent, filterOptions, dataUpdatedAt]
+      properties:
+        period:
+          type: object
+          required: [eventId, dateFrom, dateTo, timeZone]
+          properties:
+            eventId: {type: [string, 'null']}
+            dateFrom: {type: string, format: date}
+            dateTo: {type: string, format: date}
+            timeZone: {type: string, const: Asia/Jakarta}
+        summary: {$ref: '#/components/schemas/AdminSalesAmounts'}
+        daily:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AdminSalesAmounts'}
+              - type: object
+                required: [date]
+                properties: {date: {type: string, format: date}}
+        byEvent:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AdminSalesAmounts'}
+              - type: object
+                required: [id, name]
+                properties: {id: {type: string}, name: {type: string}}
+        filterOptions:
+          type: object
+          required: [events]
+          properties:
+            events:
+              type: array
+              items:
+                type: object
+                required: [id, name]
+                properties: {id: {type: string}, name: {type: string}}
+        dataUpdatedAt: {type: string, format: date-time}
     Error:
       type: object
       required: [error]

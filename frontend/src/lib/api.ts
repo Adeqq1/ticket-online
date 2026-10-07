@@ -54,6 +54,8 @@ export type AdminEmailJob = { id: string; kind: "TICKETS" | "RECOVERY" | "REFUND
 export type AdminEmailDetail = AdminEmailJob & { orderStatus: string; canRetry: boolean; retryReason: string; retryJobId: string | null; history: AdminIssueAudit[] };
 export type AdminWorkerStatus = { name: string; running: boolean; startedAt: string | null; lastFinishedAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; consecutiveFailures: number };
 export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; openRefunds: number; heldTickets: number; pendingPayments: number; workers: AdminWorkerStatus[]; alerts: string[] };
+export type AdminSalesAmounts = { successfulTransactions: number; paymentAmount: number; refundAmount: number; netAmount: number; unfinishedRefunds: number; openReconciliationCases: number };
+export type AdminSalesReport = { period: { eventId: string | null; dateFrom: string; dateTo: string; timeZone: "Asia/Jakarta" }; summary: AdminSalesAmounts; daily: Array<{ date: string } & AdminSalesAmounts>; byEvent: Array<{ id: string; name: string } & AdminSalesAmounts>; filterOptions: { events: Array<{ id: string; name: string }> }; dataUpdatedAt: string };
 
 export class ApiError extends Error {
   code: string;
@@ -146,6 +148,11 @@ export function getAdminEmailJobs(accessToken: string, signal?: AbortSignal, cur
 export function getAdminEmailJob(accessToken: string, id: string, signal?: AbortSignal) { return adminIssueRequest<AdminEmailDetail>(accessToken, `/api/v1/admin/email-jobs/${encodeURIComponent(id)}`, signal); }
 export function retryAdminEmailJob(accessToken: string, id: string) { return adminIssueRequest<{ jobId: string; retryJobId: string; status: string }>(accessToken, `/api/v1/admin/email-jobs/${encodeURIComponent(id)}/retry`, undefined, "POST"); }
 export function getAdminOperations(accessToken: string, signal?: AbortSignal) { return adminIssueRequest<AdminOperations>(accessToken, "/api/v1/admin/operations", signal); }
+export function getAdminSalesReport(accessToken: string, filters: { eventId?: string; dateFrom?: string; dateTo?: string } = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+  return adminIssueRequest<AdminSalesReport>(accessToken, `/api/v1/admin/reports/sales${query.size ? `?${query}` : ""}`, signal);
+}
 
 export function createAdminEvent(accessToken: string, payload: AdminEventInput, signal?: AbortSignal) {
   return request<AdminApiEvent>("/api/v1/admin/events", signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) });

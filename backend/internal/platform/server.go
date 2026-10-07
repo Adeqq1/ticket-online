@@ -15,6 +15,7 @@ import (
 
 	"github.com/Adeqq1/ticket-online/backend/internal/adminissues"
 	"github.com/Adeqq1/ticket-online/backend/internal/adminorders"
+	"github.com/Adeqq1/ticket-online/backend/internal/adminreports"
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkin"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
@@ -59,6 +60,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
 	adminorders.NewHandler(adminorders.NewService(db, staffService), logger).Register(mux)
+	adminreports.NewHandler(adminreports.NewService(db, staffService), logger).Register(mux)
 	refundService := refund.New(db, staffService, midtransKey, environment, refundMethods, logger)
 	refund.NewHandler(refundService, logger).Register(mux)
 	adminissues.NewHandler(adminissues.NewService(db, staffService, access, paymentRepository, midtransKey), logger).Register(mux)
