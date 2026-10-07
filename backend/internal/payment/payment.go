@@ -74,7 +74,15 @@ type Repository struct {
 }
 
 func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db, midtransBaseURL: "https://api.sandbox.midtrans.com"}
+	return NewRepositoryWithMidtransEnvironment(db, "sandbox")
+}
+
+func NewRepositoryWithMidtransEnvironment(db *sql.DB, environment string) *Repository {
+	baseURL := "https://api.sandbox.midtrans.com"
+	if environment == "production" {
+		baseURL = "https://api.midtrans.com"
+	}
+	return &Repository{db: db, midtransBaseURL: baseURL}
 }
 
 func (r *Repository) Simulate(ctx context.Context, orderID string, request Request) (Payment, bool, error) {
@@ -314,11 +322,14 @@ func loadTickets(ctx context.Context, tx *sql.Tx, predicate string, args ...any)
 }
 
 func (r *Repository) TicketsForOrder(ctx context.Context, orderID string) ([]Ticket, error) {
-	var exists int
-	if err := r.db.QueryRowContext(ctx, "SELECT 1 FROM orders WHERE id = ?", orderID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+	var status string
+	if err := r.db.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = ?", orderID).Scan(&status); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrOrderNotFound
 	} else if err != nil {
 		return nil, fmt.Errorf("find order for e-tickets: %w", err)
+	}
+	if status != "PAID" {
+		return nil, ErrOrderNotFound
 	}
 	rows, err := r.db.QueryContext(ctx, "SELECT snapshot FROM etickets WHERE order_id = ? ORDER BY issued_at, id", orderID)
 	if err != nil {
@@ -330,7 +341,7 @@ func (r *Repository) TicketsForOrder(ctx context.Context, orderID string) ([]Tic
 
 func (r *Repository) Ticket(ctx context.Context, ticketID string) (Ticket, error) {
 	var snapshot []byte
-	if err := r.db.QueryRowContext(ctx, "SELECT snapshot FROM etickets WHERE id = ?", ticketID).Scan(&snapshot); errors.Is(err, sql.ErrNoRows) {
+	if err := r.db.QueryRowContext(ctx, "SELECT t.snapshot FROM etickets t JOIN orders o ON o.id=t.order_id WHERE t.id = ? AND o.status='PAID'", ticketID).Scan(&snapshot); errors.Is(err, sql.ErrNoRows) {
 		return Ticket{}, ErrTicketNotFound
 	} else if err != nil {
 		return Ticket{}, fmt.Errorf("read e-ticket: %w", err)

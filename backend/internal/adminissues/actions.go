@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -263,8 +264,9 @@ func (s *Service) RetryEmailJob(ctx context.Context, token, id string) (map[stri
 	defer tx.Rollback()
 	var kind, status string
 	var orderID, requestID sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT kind, status, order_id, recovery_request_id
-		FROM email_queue WHERE id = ? FOR UPDATE`, id).Scan(&kind, &status, &orderID, &requestID); errors.Is(err, sql.ErrNoRows) {
+	var refundSnapshot []byte
+	if err := tx.QueryRowContext(ctx, `SELECT kind, status, order_id, recovery_request_id, refund_snapshot
+		FROM email_queue WHERE id = ? FOR UPDATE`, id).Scan(&kind, &status, &orderID, &requestID, &refundSnapshot); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	} else if err != nil {
 		return nil, err
@@ -364,6 +366,43 @@ func (s *Service) RetryEmailJob(ctx context.Context, token, id string) (map[stri
 		if _, err := tx.ExecContext(ctx, "UPDATE email_queue SET superseded_by = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND status = 'FAILED' AND superseded_by IS NULL", retryID, id); err != nil {
 			return nil, err
 		}
+	} else if kind == "REFUND" {
+		if !orderID.Valid {
+			return nil, ErrConflict
+		}
+		var snapshot refundEmailSnapshot
+		if err := decodeRefundEmailSnapshot(refundSnapshot, &snapshot); err != nil {
+			return nil, ErrConflict
+		}
+		var buyerEmail string
+		var totalValue string
+		var reference string
+		if err := tx.QueryRowContext(ctx, `SELECT b.email,CAST(o.total AS CHAR),o.reference FROM orders o
+			JOIN order_buyers b ON b.order_id=o.id WHERE o.id=? FOR UPDATE`, orderID.String).Scan(&buyerEmail, &totalValue, &reference); errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrConflict
+		} else if err != nil {
+			return nil, err
+		}
+		total, parseErr := strconv.ParseUint(totalValue, 10, 64)
+		if buyerEmail == "" || parseErr != nil || snapshot.Reference != reference || snapshot.Amount != total {
+			return nil, ErrConflict
+		}
+		blocked, wait, err := recovery.CheckRateLimitsTx(ctx, tx, recovery.RateLimit{Bucket: s.access.Digest("limit/refund-email-retry", orderID.String), Max: 1, Period: time.Minute})
+		if err != nil {
+			return nil, err
+		}
+		if blocked >= 0 {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return nil, rateLimitError{wait: wait}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE email_queue SET recipient=?, attempts=0, next_attempt_at=UTC_TIMESTAMP(6),
+			sent_at=NULL, last_error='', claim_token=NULL, lease_until=NULL, status='PENDING', updated_at=UTC_TIMESTAMP(6)
+			WHERE id=? AND status='FAILED' AND superseded_by IS NULL`, buyerEmail, id); err != nil {
+			return nil, err
+		}
+		retryID = id
 	} else {
 		return nil, ErrConflict
 	}

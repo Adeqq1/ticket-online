@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -146,6 +147,34 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 18 {
+		if err := resumeAdminOrders(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
+	if item.version == 20 {
+		if err := resumePaymentEnvironment(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
+	if item.version == 21 {
+		if err := resumeRefunds(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
+	if item.version == 22 {
+		if err := resumeRefundQueue(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -164,6 +193,143 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		return fmt.Errorf("commit migration %s: %w", item.name, err)
 	}
 	return nil
+}
+
+func resumeRefundQueue(ctx context.Context, db *sql.Conn) error {
+	columns := []struct{ name, definition string }{
+		{"next_attempt_at", "DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)"},
+		{"last_checked_at", "DATETIME(6) NULL"},
+		{"last_check_error", "VARCHAR(512) NOT NULL DEFAULT ''"},
+		{"claim_token", "CHAR(32) NULL"},
+		{"lease_until", "DATETIME(6) NULL"},
+		{"retry_deadline", "DATETIME(6) NULL"},
+	}
+	for _, column := range columns {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_refunds' AND COLUMN_NAME = ?)`, column.name).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.ExecContext(ctx, "ALTER TABLE order_refunds ADD COLUMN "+column.name+" "+column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_refunds' AND INDEX_NAME = 'ix_order_refunds_due')`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		_, err := db.ExecContext(ctx, "ALTER TABLE order_refunds ADD KEY ix_order_refunds_due (status, next_attempt_at, id)")
+		return err
+	}
+	return nil
+}
+
+func resumeAdminOrders(ctx context.Context, db *sql.Conn) error {
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'orders' AND INDEX_NAME = 'idx_orders_admin_created')`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		_, err := db.ExecContext(ctx, "ALTER TABLE orders ADD KEY idx_orders_admin_created (created_at, id)")
+		return err
+	}
+	return nil
+}
+
+func resumePaymentEnvironment(ctx context.Context, db *sql.Conn) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS payment_environment (
+		singleton TINYINT UNSIGNED NOT NULL PRIMARY KEY CHECK (singleton = 1),
+		environment ENUM('sandbox', 'production') NOT NULL,
+		created_at DATETIME(6) NOT NULL
+	)`); err != nil {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `INSERT IGNORE INTO payment_environment (singleton, environment, created_at)
+		SELECT 1, 'sandbox', UTC_TIMESTAMP(6) WHERE EXISTS (SELECT 1 FROM payments WHERE gateway_order_id IS NOT NULL)`)
+	return err
+}
+
+func resumeRefunds(ctx context.Context, db *sql.Conn) error {
+	if _, err := db.ExecContext(ctx, `ALTER TABLE orders MODIFY status ENUM('PENDING', 'PAID', 'CANCELLED', 'EXPIRED', 'REFUND_PENDING', 'REFUNDED') NOT NULL DEFAULT 'PENDING'`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS order_refunds (
+		id CHAR(32) PRIMARY KEY,
+		order_id CHAR(32) NOT NULL,
+		status ENUM('REQUESTED', 'PROCESSING', 'SUCCEEDED', 'FAILED', 'UNKNOWN') NOT NULL,
+		original_order_status ENUM('PAID', 'CANCELLED', 'EXPIRED') NOT NULL,
+		amount BIGINT UNSIGNED NOT NULL,
+		reason VARCHAR(500) NOT NULL,
+		requested_by_staff_id CHAR(32) NOT NULL,
+		refund_key VARCHAR(80) NOT NULL,
+		gateway_order_id VARCHAR(50) NOT NULL,
+		provider_transaction_id VARCHAR(100) NOT NULL DEFAULT '',
+		attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+		last_error VARCHAR(512) NOT NULL DEFAULT '',
+		requested_at DATETIME(6) NOT NULL,
+		updated_at DATETIME(6) NOT NULL,
+		completed_at DATETIME(6) NULL,
+		UNIQUE KEY uq_order_refunds_order (order_id),
+		UNIQUE KEY uq_order_refunds_key (refund_key),
+		KEY ix_order_refunds_reconcile (status, updated_at),
+		CONSTRAINT fk_order_refunds_order FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+		CONSTRAINT fk_order_refunds_staff FOREIGN KEY (requested_by_staff_id) REFERENCES staff_users (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+		CONSTRAINT chk_order_refunds_amount CHECK (amount > 0)
+	)`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS order_refund_audit (
+		id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		refund_id CHAR(32) NOT NULL,
+		staff_id CHAR(32) NOT NULL,
+		action VARCHAR(32) NOT NULL,
+		reason VARCHAR(500) NOT NULL,
+		created_at DATETIME(6) NOT NULL,
+		KEY ix_order_refund_audit_refund (refund_id, id),
+		CONSTRAINT fk_order_refund_audit_refund FOREIGN KEY (refund_id) REFERENCES order_refunds (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+		CONSTRAINT fk_order_refund_audit_staff FOREIGN KEY (staff_id) REFERENCES staff_users (id) ON DELETE RESTRICT ON UPDATE RESTRICT
+	)`); err != nil {
+		return err
+	}
+	var columnExists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_queue' AND COLUMN_NAME = 'refund_snapshot')`).Scan(&columnExists); err != nil {
+		return err
+	}
+	if !columnExists {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE email_queue ADD COLUMN refund_snapshot JSON NULL"); err != nil {
+			return err
+		}
+	}
+	if _, err := db.ExecContext(ctx, "ALTER TABLE email_queue MODIFY kind ENUM('TICKETS', 'RECOVERY', 'REFUND') NOT NULL"); err != nil {
+		return err
+	}
+	var check string
+	err := db.QueryRowContext(ctx, `SELECT cc.CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS cc
+		JOIN information_schema.TABLE_CONSTRAINTS tc ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+		WHERE tc.TABLE_SCHEMA = DATABASE() AND tc.TABLE_NAME = 'email_queue' AND tc.CONSTRAINT_NAME = 'chk_email_queue_target'`).Scan(&check)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		upper := strings.ToUpper(check)
+		if strings.Contains(upper, "KIND = 'REFUND'") && strings.Contains(upper, "REFUND_SNAPSHOT IS NOT NULL") {
+			return nil
+		}
+		if _, err := db.ExecContext(ctx, "ALTER TABLE email_queue DROP CHECK chk_email_queue_target"); err != nil {
+			return err
+		}
+	}
+	_, err = db.ExecContext(ctx, `ALTER TABLE email_queue ADD CONSTRAINT chk_email_queue_target CHECK (
+		(KIND = 'TICKETS' AND order_id IS NOT NULL AND recovery_request_id IS NULL) OR
+		(KIND = 'REFUND' AND order_id IS NOT NULL AND recovery_request_id IS NULL AND refund_snapshot IS NOT NULL) OR
+		(KIND = 'RECOVERY' AND order_id IS NULL AND recovery_request_id IS NOT NULL))`)
+	return err
 }
 
 func resumeAdminIssues(ctx context.Context, db *sql.Conn) error {

@@ -131,6 +131,7 @@ func (s *Service) enqueuePaid(ctx context.Context) error {
 type job struct {
 	id, kind, orderID, requestID, recipient, claimToken string
 	attempts                                            int
+	refundSnapshot                                      []byte
 }
 
 func (s *Service) claim(ctx context.Context) (job, bool, error) {
@@ -141,10 +142,10 @@ func (s *Service) claim(ctx context.Context) (job, bool, error) {
 	defer tx.Rollback()
 	var result job
 	var orderID, requestID sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT id, kind, order_id, recovery_request_id, recipient, attempts
+	err = tx.QueryRowContext(ctx, `SELECT id, kind, order_id, recovery_request_id, recipient, attempts, refund_snapshot
 		FROM email_queue WHERE attempts < ? AND ((status = 'PENDING' AND next_attempt_at <= UTC_TIMESTAMP(6))
 		OR (status = 'PROCESSING' AND lease_until <= UTC_TIMESTAMP(6)))
-		ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, maxAttempts).Scan(&result.id, &result.kind, &orderID, &requestID, &result.recipient, &result.attempts)
+		ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, maxAttempts).Scan(&result.id, &result.kind, &orderID, &requestID, &result.recipient, &result.attempts, &result.refundSnapshot)
 	if errors.Is(err, sql.ErrNoRows) {
 		return job{}, false, tx.Commit()
 	}
@@ -193,6 +194,9 @@ type ticket struct {
 func (s *Service) send(ctx context.Context, current job) error {
 	if current.kind == "RECOVERY" {
 		return s.sendRecovery(ctx, current)
+	}
+	if current.kind == "REFUND" {
+		return s.sendRefund(ctx, current)
 	}
 	if !mailbox(current.recipient) {
 		return s.finishFailure(ctx, current, "alamat penerima tidak valid")
@@ -271,6 +275,39 @@ func (s *Service) send(ctx context.Context, current job) error {
 		return s.retry(ctx, current, err.Error())
 	}
 	return s.markSent(ctx, current)
+}
+
+func (s *Service) sendRefund(ctx context.Context, current job) error {
+	if !mailbox(current.recipient) {
+		return s.finishFailure(ctx, current, "alamat penerima tidak valid")
+	}
+	body, from, to, err := renderRefundMessage(s.config, current)
+	if err != nil {
+		return s.finishFailure(ctx, current, "ringkasan refund tidak valid")
+	}
+	if err = s.deliver(ctx, body, from, to); err != nil {
+		return s.retry(ctx, current, err.Error())
+	}
+	return s.markSent(ctx, current)
+}
+
+func renderRefundMessage(config Config, current job) ([]byte, string, string, error) {
+	var snapshot struct {
+		Status    string `json:"status"`
+		Amount    uint64 `json:"amount"`
+		Reason    string `json:"reason"`
+		Reference string `json:"reference"`
+	}
+	if json.Unmarshal(current.refundSnapshot, &snapshot) != nil || snapshot.Reference == "" || (snapshot.Status != "SUCCEEDED" && snapshot.Status != "FAILED") || snapshot.Amount == 0 {
+		return nil, "", "", errors.New("refund snapshot is invalid")
+	}
+	state := "gagal diproses"
+	if snapshot.Status == "SUCCEEDED" {
+		state = "berhasil"
+	}
+	plain := fmt.Sprintf("Halo,\n\nStatus refund pesanan %s: %s.\nNominal: %s\nAlasan: %s\n\nTim Tiket Online", snapshot.Reference, state, money(snapshot.Amount), snapshot.Reason)
+	html := fmt.Sprintf("<!doctype html><html lang=\"id\"><meta charset=\"utf-8\"><body><p>Status refund pesanan <strong>%s</strong>: %s.</p><p>Nominal: <strong>%s</strong></p><p>Alasan: %s</p><p>Tim Tiket Online</p></body></html>", escaped(snapshot.Reference), state, money(snapshot.Amount), escaped(snapshot.Reason))
+	return compose(config, current, "Status refund pesanan "+snapshot.Reference, plain, html)
 }
 
 func (s *Service) markSent(ctx context.Context, current job) error {

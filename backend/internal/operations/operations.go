@@ -132,6 +132,9 @@ type Metrics struct {
 	FailedEmailJobs           int       `json:"failedEmailJobs"`
 	OldestPendingEmailSeconds int64     `json:"oldestPendingEmailSeconds"`
 	OpenPaymentCases          int       `json:"openPaymentCases"`
+	OpenRefunds               int       `json:"openRefunds"`
+	HeldTickets               int64     `json:"heldTickets"`
+	PendingPayments           int       `json:"pendingPayments"`
 	Workers                   []Worker  `json:"workers"`
 	Alerts                    []string  `json:"alerts"`
 }
@@ -170,6 +173,18 @@ func (s *Service) Collect(ctx context.Context) (Metrics, error) {
 		return next, err
 	}
 	next.OpenPaymentCases = int(open)
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM order_refunds WHERE status IN ('REQUESTED','PROCESSING','UNKNOWN')").Scan(&open); err != nil {
+		return next, err
+	}
+	next.OpenRefunds = int(open)
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(ri.quantity), 0) FROM reservation_items ri
+		JOIN reservations r ON r.id = ri.reservation_id WHERE r.status = 'ACTIVE' AND r.expires_at > UTC_TIMESTAMP(6)`).Scan(&next.HeldTickets); err != nil {
+		return next, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE status = 'PENDING' AND expires_at > UTC_TIMESTAMP(6)`).Scan(&open); err != nil {
+		return next, err
+	}
+	next.PendingPayments = int(open)
 	apiFailures, workers, _ := s.tracker.snapshot()
 	next.API5xxLast5m = apiFailures
 	now := next.CollectedAt
@@ -185,6 +200,9 @@ func (s *Service) Collect(ctx context.Context) (Metrics, error) {
 	}
 	if next.OpenPaymentCases > 0 {
 		alerts = append(alerts, "Ada kasus rekonsiliasi pembayaran yang masih terbuka.")
+	}
+	if next.OpenRefunds > 0 {
+		alerts = append(alerts, "Ada refund yang masih menunggu konfirmasi Midtrans.")
 	}
 	for _, item := range workers {
 		next.Workers = append(next.Workers, item.Worker)

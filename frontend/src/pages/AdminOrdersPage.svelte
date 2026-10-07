@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { ApiError, getAdminOrder, getAdminOrders, type AdminOrder, type AdminOrderDetail, type AdminOrderFilter, type AdminOrderPage, type OrderStatus } from "../lib/api.ts";
+  import { ApiError, getAdminOrder, getAdminOrders, requestAdminRefund, type AdminOrder, type AdminOrderDetail, type AdminOrderFilter, type AdminOrderPage, type OrderStatus } from "../lib/api.ts";
+  import { applyIfCurrent } from "../lib/admin-order-requests.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let items = $state<AdminOrder[]>([]);
@@ -19,6 +20,9 @@
   let detailLoading = $state(false);
   let error = $state("");
   let detailError = $state("");
+  let refundReason = $state("");
+  let refundBusy = $state(false);
+  let refundMessage = $state("");
   let request: AbortController | undefined;
   let detailRequest: AbortController | undefined;
   let generation = 0;
@@ -49,14 +53,17 @@
   function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); closeDetail(); void load(applied); }
   function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; closeDetail(); void load(applied); }
 
-  function closeDetail() { detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; }
+  function closeDetail() { detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; }
 
   async function openDetail(id: string) {
     detailRequest?.abort();
     const controller = new AbortController(); detailRequest = controller;
     const current = ++detailGeneration;
+    if (selectedId !== id) { refundReason = ""; refundMessage = ""; }
     selectedId = id; selected = null; detailLoading = true; detailError = "";
-    try { selected = await getAdminOrder(accessToken, id, controller.signal); }
+    try {
+      await applyIfCurrent(() => current === detailGeneration, () => getAdminOrder(accessToken, id, controller.signal), (result) => { selected = result; });
+    }
     catch (cause) {
       if (current !== detailGeneration || (cause instanceof DOMException && cause.name === "AbortError")) return;
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
@@ -66,7 +73,24 @@
 
   function money(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value); }
   function localTime(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" }) + " WIB"; }
-  function statusLabel(value: OrderStatus) { return ({ PENDING: "Menunggu pembayaran", PAID: "Lunas", CANCELLED: "Dibatalkan", EXPIRED: "Kedaluwarsa" })[value]; }
+  function statusLabel(value: OrderStatus) { return ({ PENDING: "Menunggu pembayaran", PAID: "Lunas", CANCELLED: "Dibatalkan", EXPIRED: "Kedaluwarsa", REFUND_PENDING: "Refund diproses", REFUNDED: "Refund berhasil" })[value]; }
+
+  async function submitRefund() {
+    if (!selected || refundBusy || refundReason.trim().length < 3) return;
+    const orderId = selected.id;
+    const reason = refundReason;
+    refundBusy = true; refundMessage = "";
+    try {
+      await applyIfCurrent(() => selectedId === orderId, () => requestAdminRefund(accessToken, orderId, reason), async (result) => {
+        refundMessage = `Refund ${result.status.toLowerCase()} · ${money(result.amount)}. Status diperbarui setelah konfirmasi Midtrans.`;
+        await openDetail(orderId);
+      });
+      await load(applied);
+    } catch (cause) {
+      if (selectedId === orderId) refundMessage = cause instanceof ApiError ? cause.message : "Status refund belum dapat dipastikan. Periksa kembali detail pesanan.";
+    }
+    finally { refundBusy = false; }
+  }
 
   onMount(() => { const orderId = new URLSearchParams(location.search).get("orderId"); void load({}); if (orderId && /^[0-9a-f]{32}$/.test(orderId)) void openDetail(orderId); });
   onDestroy(() => { generation++; detailGeneration++; request?.abort(); detailRequest?.abort(); });
@@ -85,7 +109,7 @@
       <form class="order-filter-form" onsubmit={search} aria-busy={loading}>
         <label>Reference<input bind:value={query} maxlength="32" placeholder="Cari reference pesanan" disabled={loading} /></label>
         <label>Event<select bind:value={eventId} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
-        <label>Status<select bind:value={status} disabled={loading}><option value="">Semua status</option><option value="PENDING">Menunggu pembayaran</option><option value="PAID">Lunas</option><option value="CANCELLED">Dibatalkan</option><option value="EXPIRED">Kedaluwarsa</option></select></label>
+        <label>Status<select bind:value={status} disabled={loading}><option value="">Semua status</option><option value="PENDING">Menunggu pembayaran</option><option value="PAID">Lunas</option><option value="CANCELLED">Dibatalkan</option><option value="EXPIRED">Kedaluwarsa</option><option value="REFUND_PENDING">Refund diproses</option><option value="REFUNDED">Refund berhasil</option></select></label>
         <label>Dibuat sejak (WIB)<input type="date" bind:value={dateFrom} disabled={loading} /></label>
         <label>Dibuat sampai (WIB)<input type="date" bind:value={dateTo} disabled={loading} /></label>
         <div class="history-filter-actions"><button class="scan-submit" type="submit" disabled={loading}>Cari</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
@@ -109,7 +133,16 @@
         <div><h3>Pembeli</h3><dl><dt>Nama</dt><dd>{selected.buyer.name}</dd><dt>Email</dt><dd><a href={`mailto:${selected.buyer.email}`}>{selected.buyer.email}</a></dd><dt>Telepon</dt><dd>{selected.buyer.phone}</dd><dt>Identitas</dt><dd>{selected.buyer.identityMasked}</dd></dl></div>
         <div><h3>Rincian biaya</h3><dl><dt>Subtotal</dt><dd>{money(selected.subtotal)}</dd><dt>Biaya admin</dt><dd>{money(selected.adminFee)}</dd><dt>Diskon</dt><dd>−{money(selected.discount)}</dd><dt>Total</dt><dd><strong>{money(selected.total)}</strong></dd></dl><h3>Pembayaran</h3>{#if selected.payment}<dl><dt>Metode</dt><dd>{selected.payment.method}</dd><dt>Jumlah</dt><dd>{money(selected.payment.amount)}</dd><dt>Status</dt><dd>{selected.payment.status}</dd><dt>Dibayar</dt><dd>{selected.payment.paidAt ? localTime(selected.payment.paidAt) : "Belum dibayar"}</dd></dl>{:else}<p class="staff-muted">Belum ada pembayaran.</p>{/if}</div>
         <div><h3>Kategori tiket</h3><ul class="order-detail-list">{#each selected.items as item (`${item.tierId}-${item.name}`)}<li><strong>{item.name}</strong><span>{item.quantity} × {money(item.unitPrice)} = {money(item.lineTotal)}</span></li>{/each}</ul><h3>E-ticket dan check-in</h3>{#if selected.tickets.length}<ul class="order-detail-list">{#each selected.tickets as ticket (ticket.id)}<li><strong>{ticket.attendeeName} · {ticket.tierName}</strong><code>{ticket.code}</code><span>{ticket.gate} · {ticket.status === "CHECKED_IN" ? `Check-in ${ticket.checkedInAt ? localTime(ticket.checkedInAt) : "berhasil"}${ticket.checkedInBy ? ` · ${ticket.checkedInBy}` : ""}` : "Belum check-in"}</span></li>{/each}</ul>{:else}<p class="staff-muted">E-ticket belum diterbitkan.</p>{/if}</div>
-      </div>{/if}
+      </div>
+      {#if selected.status === "PAID" || selected.status === "CANCELLED" || selected.status === "EXPIRED"}
+        <form class="recovery-panel" onsubmit={(event) => { event.preventDefault(); void submitRefund(); }}>
+          <h3>Ajukan refund penuh</h3><p>Nominal dihitung server: <strong>{money(selected.total)}</strong>. Tiket akan ditahan sampai Midtrans mengonfirmasi hasil.</p>
+          <label>Alasan refund<textarea bind:value={refundReason} minlength="3" maxlength="500" required disabled={refundBusy}></textarea></label>
+          <button class="staff-secondary-button" type="submit" disabled={refundBusy || refundReason.trim().length < 3}>{refundBusy ? "Mengajukan…" : "Ajukan refund"}</button>
+          <p role="status" aria-live="polite">{refundMessage}</p>
+        </form>
+      {/if}
+      {/if}
     </section>{/if}
   </main>
 </div>

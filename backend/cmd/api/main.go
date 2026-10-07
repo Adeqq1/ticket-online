@@ -15,6 +15,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
+	"github.com/Adeqq1/ticket-online/backend/internal/refund"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 	"github.com/Adeqq1/ticket-online/backend/migrations"
@@ -47,18 +48,26 @@ func main() {
 		os.Exit(1)
 	}
 	cancelMigration()
+	bindingCtx, cancelBinding := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := platform.BindPaymentEnvironment(bindingCtx, db, cfg.MidtransEnvironment); err != nil {
+		cancelBinding()
+		logger.Error("database payment environment mismatch", "error", err)
+		os.Exit(1)
+	}
+	cancelBinding()
 
 	serverCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	slog.SetDefault(logger)
 	metrics := operations.NewService(db, staffauth.New(db), operations.Process)
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithOperations(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL, metrics, cfg.TrustedProxyCIDRs...))
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithRefundConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL, cfg.MidtransEnvironment, cfg.TransactionsEnabled, metrics, cfg.MidtransRefundMethods, cfg.TrustedProxyCIDRs...))
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
 	operations.Process.Register("reservation", time.Now())
 	operations.Process.Register("payment_expiry", time.Now())
 	operations.Process.Register("email", time.Now())
 	go worker.Run(serverCtx)
-	go payment.NewRepository(db).RunExpiryWorker(serverCtx, cfg.ExpiryInterval, cfg.MidtransServerKey, logger)
+	go payment.NewRepositoryWithMidtransEnvironment(db, cfg.MidtransEnvironment).RunExpiryWorker(serverCtx, cfg.ExpiryInterval, cfg.MidtransServerKey, logger)
+	go refund.New(db, staffauth.New(db), cfg.MidtransServerKey, cfg.MidtransEnvironment, cfg.MidtransRefundMethods, logger).Run(serverCtx, cfg.ExpiryInterval)
 	go metrics.Run(serverCtx, logger)
 	emailWorker := email.NewService(db, email.Config{
 		Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,

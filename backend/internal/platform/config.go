@@ -14,44 +14,86 @@ import (
 )
 
 type Config struct {
-	AppEnv            string
-	HTTPAddr          string
-	MySQLDSN          string
-	StaticDir         string
-	ReservationTTL    time.Duration
-	ExpiryInterval    time.Duration
-	OrderAccessSecret []byte
-	MidtransServerKey string
-	FrontendURL       string
-	SMTPHost          string
-	SMTPPort          int
-	SMTPUsername      string
-	SMTPPassword      string
-	SMTPFrom          string
-	SMTPTLSMode       string
-	TrustedProxyCIDRs []netip.Prefix
+	AppEnv                string
+	HTTPAddr              string
+	MySQLDSN              string
+	StaticDir             string
+	ReservationTTL        time.Duration
+	ExpiryInterval        time.Duration
+	OrderAccessSecret     []byte
+	MidtransServerKey     string
+	MidtransEnvironment   string
+	MidtransRefundMethods []string
+	TransactionsEnabled   bool
+	FrontendURL           string
+	SMTPHost              string
+	SMTPPort              int
+	SMTPUsername          string
+	SMTPPassword          string
+	SMTPFrom              string
+	SMTPTLSMode           string
+	TrustedProxyCIDRs     []netip.Prefix
 }
 
 func LoadConfig() (Config, error) {
 	cfg := Config{
-		AppEnv:            envOr("APP_ENV", "production"),
-		HTTPAddr:          envOr("HTTP_ADDR", ":8080"),
-		MySQLDSN:          os.Getenv("MYSQL_DSN"),
-		StaticDir:         os.Getenv("STATIC_DIR"),
-		MidtransServerKey: strings.TrimSpace(os.Getenv("MIDTRANS_SERVER_KEY")),
-		FrontendURL:       strings.TrimRight(envOr("FRONTEND_URL", "http://localhost:5173"), "/"),
-		SMTPHost:          strings.TrimSpace(os.Getenv("SMTP_HOST")),
-		SMTPPort:          587,
-		SMTPUsername:      os.Getenv("SMTP_USERNAME"),
-		SMTPPassword:      os.Getenv("SMTP_PASSWORD"),
-		SMTPFrom:          strings.TrimSpace(os.Getenv("SMTP_FROM")),
-		SMTPTLSMode:       envOr("SMTP_TLS_MODE", "starttls"),
-		ReservationTTL:    10 * time.Minute,
-		ExpiryInterval:    15 * time.Second,
+		AppEnv:                envOr("APP_ENV", "production"),
+		HTTPAddr:              envOr("HTTP_ADDR", ":8080"),
+		MySQLDSN:              os.Getenv("MYSQL_DSN"),
+		StaticDir:             os.Getenv("STATIC_DIR"),
+		MidtransServerKey:     strings.TrimSpace(os.Getenv("MIDTRANS_SERVER_KEY")),
+		MidtransEnvironment:   envOr("MIDTRANS_ENV", "sandbox"),
+		MidtransRefundMethods: parseRefundMethods(os.Getenv("MIDTRANS_REFUND_METHODS")),
+		FrontendURL:           strings.TrimRight(envOr("FRONTEND_URL", "http://localhost:5173"), "/"),
+		SMTPHost:              strings.TrimSpace(os.Getenv("SMTP_HOST")),
+		SMTPPort:              587,
+		SMTPUsername:          os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:          os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:              strings.TrimSpace(os.Getenv("SMTP_FROM")),
+		SMTPTLSMode:           envOr("SMTP_TLS_MODE", "starttls"),
+		ReservationTTL:        10 * time.Minute,
+		ExpiryInterval:        15 * time.Second,
 	}
 	var err error
 	if cfg.AppEnv != "development" && cfg.AppEnv != "production" {
 		return Config{}, fmt.Errorf("invalid APP_ENV")
+	}
+	if cfg.MidtransEnvironment != "sandbox" && cfg.MidtransEnvironment != "production" {
+		return Config{}, fmt.Errorf("MIDTRANS_ENV must be sandbox or production")
+	}
+	if value := strings.TrimSpace(os.Getenv("MIDTRANS_REFUND_METHODS")); value != "" {
+		if cfg.MidtransServerKey == "" {
+			return Config{}, fmt.Errorf("MIDTRANS_SERVER_KEY is required when refunds are enabled")
+		}
+		for _, method := range cfg.MidtransRefundMethods {
+			if method != "QRIS" && method != "GOPAY" {
+				return Config{}, fmt.Errorf("MIDTRANS_REFUND_METHODS only supports verified QRIS and GOPAY")
+			}
+		}
+	}
+	if cfg.MidtransEnvironment == "production" && cfg.AppEnv != "production" {
+		return Config{}, fmt.Errorf("MIDTRANS_ENV=production requires APP_ENV=production")
+	}
+	transactionsEnabled := os.Getenv("TRANSACTIONS_ENABLED")
+	if transactionsEnabled == "" {
+		cfg.TransactionsEnabled = cfg.MidtransEnvironment == "sandbox"
+	} else if transactionsEnabled == "true" {
+		cfg.TransactionsEnabled = true
+	} else if transactionsEnabled == "false" {
+		cfg.TransactionsEnabled = false
+	} else {
+		return Config{}, fmt.Errorf("TRANSACTIONS_ENABLED must be true or false")
+	}
+	if cfg.MidtransEnvironment == "production" {
+		if cfg.MidtransServerKey == "" || !strings.HasPrefix(cfg.MidtransServerKey, "Mid-server-") {
+			return Config{}, fmt.Errorf("production MIDTRANS_SERVER_KEY is required and must be a production key")
+		}
+		frontend, err := url.Parse(cfg.FrontendURL)
+		if err != nil || frontend.Host == "" || frontend.Scheme != "https" || frontend.Path != "" || frontend.User != nil || frontend.RawQuery != "" || frontend.Fragment != "" {
+			return Config{}, fmt.Errorf("production FRONTEND_URL must be an HTTPS origin")
+		}
+	} else if cfg.MidtransServerKey != "" && !strings.HasPrefix(cfg.MidtransServerKey, "SB-Mid-server-") {
+		return Config{}, fmt.Errorf("sandbox MIDTRANS_SERVER_KEY must be a sandbox key")
 	}
 	if cfg.MySQLDSN == "" {
 		return Config{}, fmt.Errorf("MYSQL_DSN is required")
@@ -119,6 +161,18 @@ func LoadConfig() (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func parseRefundMethods(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	methods := make([]string, 0, len(parts))
+	for _, part := range parts {
+		methods = append(methods, strings.ToUpper(strings.TrimSpace(part)))
+	}
+	return methods
 }
 
 func envOr(key, fallback string) string {

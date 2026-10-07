@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -306,7 +307,7 @@ type emailPage struct {
 func (s *Service) ListEmailJobs(ctx context.Context, token string, filter EmailFilter) (emailPage, error) {
 	var result emailPage
 	filter.Query = strings.TrimSpace(filter.Query)
-	if len(filter.Query) > 32 || len(filter.Cursor) > 256 || (filter.Kind != "" && filter.Kind != "TICKETS" && filter.Kind != "RECOVERY") {
+	if len(filter.Query) > 32 || len(filter.Cursor) > 256 || (filter.Kind != "" && filter.Kind != "TICKETS" && filter.Kind != "RECOVERY" && filter.Kind != "REFUND") {
 		return result, ErrInvalidRequest
 	}
 	var cursorAt any
@@ -376,6 +377,29 @@ type EmailDetail struct {
 	History     []AuditEntry `json:"history"`
 }
 
+type refundEmailSnapshot struct {
+	Status    string `json:"status"`
+	Amount    uint64 `json:"amount"`
+	Reason    string `json:"reason"`
+	Reference string `json:"reference"`
+}
+
+func decodeRefundEmailSnapshot(data []byte, target *refundEmailSnapshot) error {
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return ErrInvalidRequest
+	}
+	if (target.Status != "SUCCEEDED" && target.Status != "FAILED") || target.Amount == 0 || len(target.Reason) < 3 || len(target.Reason) > 500 || target.Reference == "" {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
 func (s *Service) EmailDetail(ctx context.Context, token, id string) (EmailDetail, error) {
 	var result EmailDetail
 	if !jobIDPattern.MatchString(id) {
@@ -387,13 +411,17 @@ func (s *Service) EmailDetail(ctx context.Context, token, id string) (EmailDetai
 	var superseded sql.NullString
 	var orderID, requestID sql.NullString
 	var requestUsed sql.NullTime
+	var refundSnapshot []byte
+	var buyerEmail sql.NullString
+	var orderTotal sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT q.id, q.kind, q.status, COALESCE(o.reference, rr.reference), q.recipient,
 		q.attempts, q.last_error, q.updated_at, q.superseded_by, COALESCE(o.id, ''), COALESCE(rr.id, ''),
-		rr.used_at
+		rr.used_at, COALESCE(o.status, ''), q.refund_snapshot, b.email, CAST(o.total AS CHAR)
 		FROM email_queue q LEFT JOIN orders o ON o.id = q.order_id
-		LEFT JOIN recovery_requests rr ON rr.id = q.recovery_request_id WHERE q.id = ?`, id).
+		LEFT JOIN order_buyers b ON b.order_id = o.id LEFT JOIN recovery_requests rr ON rr.id = q.recovery_request_id WHERE q.id = ?`, id).
 		Scan(&result.ID, &result.Kind, &result.Status, &result.Reference, &result.Recipient, &result.Attempts,
-			&result.LastError, &result.UpdatedAt, &superseded, &orderID, &requestID, &requestUsed)
+			&result.LastError, &result.UpdatedAt, &superseded, &orderID, &requestID, &requestUsed,
+			&result.OrderStatus, &refundSnapshot, &buyerEmail, &orderTotal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, ErrNotFound
 	}
@@ -416,7 +444,16 @@ func (s *Service) EmailDetail(ctx context.Context, token, id string) (EmailDetai
 		} else {
 			result.RetryReason = "Pesanan belum lunas, tiket belum lengkap, atau akses pesanan sudah kedaluwarsa."
 		}
-	} else {
+	} else if result.Kind == "REFUND" {
+		var snapshot refundEmailSnapshot
+		total, parseErr := strconv.ParseUint(orderTotal.String, 10, 64)
+		if !orderID.Valid || !buyerEmail.Valid || buyerEmail.String != result.Recipient || !orderTotal.Valid || parseErr != nil || total == 0 ||
+			decodeRefundEmailSnapshot(refundSnapshot, &snapshot) != nil || snapshot.Reference != result.Reference || total != snapshot.Amount {
+			result.RetryReason = "Snapshot hasil refund atau tujuan pesanan tidak dapat diverifikasi."
+		} else {
+			result.CanRetry = true
+		}
+	} else if result.Kind == "RECOVERY" {
 		requestUsedAt := requestUsed.Valid
 		order, found, err := recovery.FindOrderByReference(ctx, s.db, result.Reference)
 		if err != nil {
@@ -437,6 +474,8 @@ func (s *Service) EmailDetail(ctx context.Context, token, id string) (EmailDetai
 				result.RetryReason = "Reference dan email permintaan tidak cocok dengan pesanan."
 			}
 		}
+	} else {
+		result.RetryReason = "Jenis email tidak dikenal."
 	}
 	result.History, _, err = s.audit(ctx, "EMAIL_JOB", id)
 	return result, err

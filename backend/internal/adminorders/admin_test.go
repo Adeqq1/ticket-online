@@ -23,10 +23,18 @@ func TestParseFilterUsesJakartaInclusiveDateRangeAndValidatesInputs(t *testing.T
 	}
 	for _, filter := range []Filter{
 		{DateFrom: "2026-02-30"}, {DateFrom: "2026-10-07", DateTo: "2026-10-06"},
-		{Status: "REFUNDED"}, {Cursor: "bad"}, {Query: string(make([]byte, 33))},
+		{Status: "NOPE"}, {Cursor: "bad"}, {Query: string(make([]byte, 33))},
 	} {
 		if _, err := parseFilter(filter); err == nil {
 			t.Errorf("parseFilter(%+v) unexpectedly succeeded", filter)
+		}
+	}
+}
+
+func TestParseFilterAcceptsRefundStatuses(t *testing.T) {
+	for _, status := range []string{"REFUND_PENDING", "REFUNDED"} {
+		if _, err := parseFilter(Filter{Status: status}); err != nil {
+			t.Errorf("status %s rejected: %v", status, err)
 		}
 	}
 }

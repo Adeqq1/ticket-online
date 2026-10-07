@@ -220,7 +220,7 @@ func parseFilter(filter Filter) (parsedFilter, error) {
 		return parsedFilter{}, ErrInvalidRequest
 	}
 	switch filter.Status {
-	case "", "PENDING", "PAID", "CANCELLED", "EXPIRED":
+	case "", "PENDING", "PAID", "CANCELLED", "EXPIRED", "REFUND_PENDING", "REFUNDED":
 	default:
 		return parsedFilter{}, ErrInvalidRequest
 	}

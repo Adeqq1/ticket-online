@@ -87,4 +87,7 @@ func TestAdminIssueRoutesRequireAdminAndValidateFilters(t *testing.T) {
 			t.Errorf("invalid filter %s status=%d", path, res.Code)
 		}
 	}
+	if res := call("/api/v1/admin/email-jobs?kind=REFUND", admin); res.Code != http.StatusOK {
+		t.Errorf("REFUND filter status=%d body=%s", res.Code, res.Body.String())
+	}
 }
