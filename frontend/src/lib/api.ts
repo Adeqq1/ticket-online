@@ -53,7 +53,7 @@ export type AdminPaymentCaseDetail = AdminPaymentCase & { total: number; expires
 export type AdminEmailJob = { id: string; kind: "TICKETS" | "RECOVERY"; status: "FAILED" | "PENDING" | "SENT" | "PROCESSING"; reference: string; recipient: string; attempts: number; lastError: string; updatedAt: string; supersededBy: string | null };
 export type AdminEmailDetail = AdminEmailJob & { orderStatus: string; canRetry: boolean; retryReason: string; retryJobId: string | null; history: AdminIssueAudit[] };
 export type AdminWorkerStatus = { name: string; running: boolean; startedAt: string | null; lastFinishedAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; consecutiveFailures: number };
-export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; openRefunds: number; workers: AdminWorkerStatus[]; alerts: string[] };
+export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; openRefunds: number; heldTickets: number; pendingPayments: number; workers: AdminWorkerStatus[]; alerts: string[] };
 
 export class ApiError extends Error {
   code: string;

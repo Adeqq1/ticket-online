@@ -65,3 +65,15 @@ func TestRefundWindowIsConservative(t *testing.T) {
 		t.Fatal("refund method window changed")
 	}
 }
+
+func TestRefundWindowAllowsRefundBeforeEventStarts(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	paidAt := now.Add(-time.Hour)
+	eventStarts := now.Add(24 * time.Hour)
+	if !now.Before(eventStarts) || !withinRefundWindow("QRIS", paidAt, now) {
+		t.Fatal("eligible paid order was rejected before event start")
+	}
+	if withinRefundWindow("QRIS", now.Add(2*time.Minute), now) || withinRefundWindow("QRIS", now.Add(-8*24*time.Hour), now) {
+		t.Fatal("refund outside safe time window was accepted")
+	}
+}

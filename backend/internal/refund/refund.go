@@ -117,9 +117,8 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 	var status, method, gatewayID, paymentStatus string
 	var amount, orderTotal uint64
 	var paidAt sql.NullTime
-	var starts time.Time
-	err = tx.QueryRowContext(ctx, `SELECT o.status,p.method,p.amount,p.paid_at,COALESCE(p.gateway_order_id,''),e.starts_at,p.status,o.total
-	FROM orders o JOIN payments p ON p.order_id=o.id JOIN reservations r ON r.id=o.reservation_id JOIN events e ON e.id=r.event_id WHERE o.id=? FOR UPDATE`, orderID).Scan(&status, &method, &amount, &paidAt, &gatewayID, &starts, &paymentStatus, &orderTotal)
+	err = tx.QueryRowContext(ctx, `SELECT o.status,p.method,p.amount,p.paid_at,COALESCE(p.gateway_order_id,''),p.status,o.total
+	FROM orders o JOIN payments p ON p.order_id=o.id WHERE o.id=? FOR UPDATE`, orderID).Scan(&status, &method, &amount, &paidAt, &gatewayID, &paymentStatus, &orderTotal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, ErrUnavailable
 	}
@@ -150,7 +149,7 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 			return result, ErrUnavailable
 		}
 	}
-	if method != "QRIS" && method != "GOPAY" || !s.methods[method] || paymentStatus != "SUCCEEDED" || !paidAt.Valid || time.Since(paidAt.Time) > refundWindow(method) || paidAt.Time.After(time.Now().Add(time.Minute)) || time.Now().Before(starts) && !late {
+	if method != "QRIS" && method != "GOPAY" || !s.methods[method] || paymentStatus != "SUCCEEDED" || !paidAt.Valid || !withinRefundWindow(method, paidAt.Time, time.Now()) {
 		return result, ErrUnavailable
 	}
 	var checkins int
@@ -196,6 +195,11 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 	}
 	_, _ = s.db.ExecContext(ctx, "UPDATE order_refunds SET attempts=attempts+1,updated_at=? WHERE order_id=? AND status='PROCESSING'", time.Now().UTC(), orderID)
 	return result, nil
+}
+
+func withinRefundWindow(method string, paidAt, now time.Time) bool {
+	window := refundWindow(method)
+	return window > 0 && !paidAt.After(now.Add(time.Minute)) && now.Sub(paidAt) <= window
 }
 
 type providerStatus struct {
