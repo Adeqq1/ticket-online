@@ -41,6 +41,9 @@ services:
       STATIC_DIR: /app/public
     ports:
       - "8080:8080"
+    networks:
+      default:
+        ipv4_address: 172.30.18.4
     depends_on:
       db:
         condition: service_healthy
