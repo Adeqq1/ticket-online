@@ -36,10 +36,6 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 	return &Handler{service: service, logger: logger}
 }
 
-func (h *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/admin/reports/sales", h.sales)
-}
-
 type Filter struct{ EventID, DateFrom, DateTo string }
 
 type Event struct {

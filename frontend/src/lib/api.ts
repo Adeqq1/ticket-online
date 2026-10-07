@@ -56,6 +56,8 @@ export type AdminWorkerStatus = { name: string; running: boolean; startedAt: str
 export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; openRefunds: number; heldTickets: number; pendingPayments: number; workers: AdminWorkerStatus[]; alerts: string[] };
 export type AdminSalesAmounts = { successfulTransactions: number; paymentAmount: number; refundAmount: number; netAmount: number; unfinishedRefunds: number; openReconciliationCases: number };
 export type AdminSalesReport = { period: { eventId: string | null; dateFrom: string; dateTo: string; timeZone: "Asia/Jakarta" }; summary: AdminSalesAmounts; daily: Array<{ date: string } & AdminSalesAmounts>; byEvent: Array<{ id: string; name: string } & AdminSalesAmounts>; filterOptions: { events: Array<{ id: string; name: string }> }; dataUpdatedAt: string };
+export type AdminAttendanceAmounts = { capacity: number; available: number; issued: number; eligible: number; heldForRefund: number; checkedIn: number; attendanceRate: number | null };
+export type AdminAttendanceReport = { event: { id: string; name: string }; gate: string | null; timeZone: "Asia/Jakarta"; summary: AdminAttendanceAmounts; byCategory: Array<{ id: number; name: string } & AdminAttendanceAmounts>; byGate: Array<{ gate: string | null } & AdminAttendanceAmounts>; hourly: Array<{ hour: string; checkedIn: number }>; filterOptions: { gates: string[] }; dataUpdatedAt: string };
 
 export class ApiError extends Error {
   code: string;
@@ -152,6 +154,11 @@ export function getAdminSalesReport(accessToken: string, filters: { eventId?: st
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
   return adminIssueRequest<AdminSalesReport>(accessToken, `/api/v1/admin/reports/sales${query.size ? `?${query}` : ""}`, signal);
+}
+export function getAdminAttendanceReport(accessToken: string, filters: { eventId: string; gate?: string } , signal?: AbortSignal) {
+  const query = new URLSearchParams({ eventId: filters.eventId });
+  if (filters.gate) query.set("gate", filters.gate);
+  return adminIssueRequest<AdminAttendanceReport>(accessToken, `/api/v1/admin/reports/attendance?${query}`, signal);
 }
 
 export function createAdminEvent(accessToken: string, payload: AdminEventInput, signal?: AbortSignal) {

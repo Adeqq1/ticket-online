@@ -182,6 +182,13 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 24 {
+		if err := resumeAdminAttendanceReports(ctx, db); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -263,6 +270,19 @@ func resumeAdminSalesReports(ctx context.Context, db *sql.Conn) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func resumeAdminAttendanceReports(ctx context.Context, db *sql.Conn) error {
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ticket_checkins' AND INDEX_NAME = 'ix_ticket_checkins_admin_attendance')`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		_, err := db.ExecContext(ctx, "ALTER TABLE ticket_checkins ADD KEY ix_ticket_checkins_admin_attendance (event_id, gate, checked_in_at)")
+		return err
 	}
 	return nil
 }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
+import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminAttendanceReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -35,6 +35,21 @@ test("admin sales report API serializes filters and sends the staff session", as
     const result = await getAdminSalesReport("staff-token", { eventId: "nusa malam", dateFrom: "2026-10-01", dateTo: "2026-10-08" });
     expect(result.daily).toEqual([]);
     expect(request?.url).toBe("/api/v1/admin/reports/sales?eventId=nusa+malam&dateFrom=2026-10-01&dateTo=2026-10-08");
+    expect(new Headers(request?.init?.headers).get("Authorization")).toBe("Bearer staff-token");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("admin attendance report requires event and serializes optional gate", async () => {
+  const originalFetch = globalThis.fetch;
+  let request: { url: string; init?: RequestInit } | undefined;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    request = { url: String(input), init };
+    return new Response(JSON.stringify({ summary: {}, byCategory: [], byGate: [], hourly: [], filterOptions: { gates: [] } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const result = await getAdminAttendanceReport("staff-token", { eventId: "nusa malam", gate: "Gate A" });
+    expect(result.hourly).toEqual([]);
+    expect(request?.url).toBe("/api/v1/admin/reports/attendance?eventId=nusa+malam&gate=Gate+A");
     expect(new Headers(request?.init?.headers).get("Authorization")).toBe("Bearer staff-token");
   } finally { globalThis.fetch = originalFetch; }
 });

@@ -30,3 +30,12 @@ func TestParseFilterUsesJakartaCalendarDaysAnd366DayLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestAttendanceRateUsesEligibleTicketsAndLeavesEmptyDenominatorUnset(t *testing.T) {
+	if got := attendanceRate(3, 4); got == nil || *got != 75 {
+		t.Fatalf("attendanceRate(3, 4) = %v, want 75%%", got)
+	}
+	if got := attendanceRate(0, 0); got != nil {
+		t.Fatalf("attendanceRate(0, 0) = %v, want nil", got)
+	}
+}
