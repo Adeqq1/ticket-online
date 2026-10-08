@@ -2,9 +2,32 @@ package adminreports
 
 import (
 	"errors"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestReportQueryRejectsMalformedAndAmbiguousFilters(t *testing.T) {
+	for _, rawQuery := range []string{
+		"eventId=%ZZ&dateFrom=2026-09-01&dateTo=2026-09-30",
+		"dateFrom=%ZZ&dateTo=2026-09-30",
+		"dateFrom=2026-09-01;dateTo=2026-09-30",
+		"unknown=value",
+		"eventId=a&eventId=b",
+	} {
+		t.Run(rawQuery, func(t *testing.T) {
+			request := httptest.NewRequest("GET", "/?"+rawQuery, nil)
+			if _, err := reportQuery(request, "|eventId|dateFrom|dateTo|", false); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("reportQuery(%q) error = %v, want ErrInvalidRequest", rawQuery, err)
+			}
+		})
+	}
+	request := httptest.NewRequest("GET", "/?eventId=evt&gate=Gate%20A", nil)
+	query, err := reportQuery(request, "|eventId|gate|", true)
+	if err != nil || query.Get("gate") != "Gate A" {
+		t.Fatalf("valid encoded gate query = %v, %v", query, err)
+	}
+}
 
 func TestParseFilterUsesJakartaCalendarDaysAnd366DayLimit(t *testing.T) {
 	now := time.Date(2026, 10, 8, 3, 0, 0, 0, time.UTC)

@@ -253,6 +253,16 @@ func TestSalesReportUsesPaymentAndRefundTimestampsWithoutMultiplyingRows(t *test
 	if len(report.ByEvent) != 1 || report.ByEvent[0].ID != baseEventID || report.ByEvent[0].PaymentAmount != 2000 {
 		t.Fatalf("event report = %+v", report.ByEvent)
 	}
+	if len(report.FilterOptions.Events) < 2 {
+		t.Fatalf("filtered report event options = %+v, want at least both fixture events", report.FilterOptions.Events)
+	}
+	optionIDs := map[string]bool{}
+	for _, event := range report.FilterOptions.Events {
+		optionIDs[event.ID] = true
+	}
+	if !optionIDs[baseEventID] || !optionIDs[otherEventID] {
+		t.Fatalf("filtered report event options = %+v, want %s and %s", report.FilterOptions.Events, baseEventID, otherEventID)
+	}
 	refundReport, err := service.Sales(request, adminToken, Filter{EventID: baseEventID, DateFrom: "2026-09-05", DateTo: "2026-09-05"})
 	if err != nil || refundReport.Summary.PaymentAmount != 0 || refundReport.Summary.RefundAmount != 1000 || refundReport.Summary.NetAmount != -1000 {
 		t.Fatalf("refund date report = %+v, error = %v", refundReport.Summary, err)
@@ -293,6 +303,16 @@ func TestSalesReportUsesPaymentAndRefundTimestampsWithoutMultiplyingRows(t *test
 		mux.ServeHTTP(response, request)
 		return response
 	}
+	callRawQuery := func(path, rawQuery, token string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.URL.RawQuery = rawQuery
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response
+	}
 	if got := call("/api/v1/admin/reports/sales", ""); got.Code != http.StatusUnauthorized {
 		t.Errorf("unauthenticated status = %d", got.Code)
 	}
@@ -303,6 +323,16 @@ func TestSalesReportUsesPaymentAndRefundTimestampsWithoutMultiplyingRows(t *test
 		var decoded Report
 		err := json.Unmarshal(got.Body.Bytes(), &decoded)
 		t.Errorf("ADMIN response = %d %s; decode error %v", got.Code, got.Body.String(), err)
+	}
+	for _, path := range []string{"/api/v1/admin/reports/sales", "/api/v1/admin/reports/sales.csv", "/api/v1/admin/reports/attendance", "/api/v1/admin/reports/attendance.csv"} {
+		if got := callRawQuery(path, "eventId=%ZZ", adminToken); got.Code != http.StatusBadRequest {
+			t.Errorf("malformed query %s status = %d, body %s", path, got.Code, got.Body.String())
+		}
+	}
+	for _, path := range []string{"/api/v1/admin/reports/sales?eventId=missing-event", "/api/v1/admin/reports/sales.csv?eventId=missing-event"} {
+		if got := call(path, adminToken); got.Code != http.StatusNotFound {
+			t.Errorf("unknown event %s status = %d, body %s", path, got.Code, got.Body.String())
+		}
 	}
 	for _, path := range []string{"/api/v1/admin/reports/sales.csv?eventId=" + baseEventID + "&dateFrom=2026-09-02&dateTo=2026-09-04", "/api/v1/admin/reports/attendance.csv?eventId=" + baseEventID} {
 		if got := call(path, ""); got.Code != http.StatusUnauthorized {

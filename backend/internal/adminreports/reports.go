@@ -217,7 +217,7 @@ func (s *Service) Sales(r *http.Request, token string, filter Filter) (Report, e
 	}
 	result.Summary.NetAmount = result.Summary.PaymentAmount - result.Summary.RefundAmount
 	result.FilterOptions.Events = make([]Event, 0)
-	rows, err = tx.QueryContext(r.Context(), "SELECT id, artist FROM events WHERE (? = '' OR id = ?) ORDER BY artist, id", query.EventID, query.EventID)
+	rows, err = tx.QueryContext(r.Context(), "SELECT id, artist FROM events ORDER BY artist, id")
 	if err != nil {
 		return result, fmt.Errorf("query admin sales report events: %w", err)
 	}
@@ -228,6 +228,9 @@ func (s *Service) Sales(r *http.Request, token string, filter Filter) (Report, e
 			return result, fmt.Errorf("scan admin sales report event: %w", err)
 		}
 		result.FilterOptions.Events = append(result.FilterOptions.Events, event)
+		if query.EventID != "" && event.ID != query.EventID {
+			continue
+		}
 		amounts := eventAmounts[event.ID]
 		amounts.NetAmount = amounts.PaymentAmount - amounts.RefundAmount
 		result.ByEvent = append(result.ByEvent, EventRow{Event: event, Amounts: amounts})
@@ -285,7 +288,10 @@ func (s *Service) Sales(r *http.Request, token string, filter Filter) (Report, e
 }
 
 func reportQuery(r *http.Request, allowed string, requireEvent bool) (url.Values, error) {
-	query := r.URL.Query()
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, ErrInvalidRequest
+	}
 	for name, values := range query {
 		if !strings.Contains(allowed, "|"+name+"|") || len(values) != 1 {
 			return nil, ErrInvalidRequest

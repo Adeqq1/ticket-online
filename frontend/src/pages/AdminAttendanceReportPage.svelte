@@ -6,6 +6,7 @@
   let events = $state<AdminApiEvent[]>([]);
   let eventId = $state("");
   let gate = $state("");
+  let gateOptions = $state<string[]>([]);
   let applied = $state<{ eventId: string; gate?: string } | null>(null);
   let data = $state<AdminAttendanceReport | null>(null);
   let loading = $state(true);
@@ -23,7 +24,10 @@
     const current = ++generation;
     loading = true; error = ""; data = null;
     try {
-      data = await getAdminAttendanceReport(accessToken, filters, controller.signal);
+      const report = await getAdminAttendanceReport(accessToken, filters, controller.signal);
+      if (current !== generation) return;
+      data = report;
+      gateOptions = report.filterOptions.gates;
     } catch (cause) {
       if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
@@ -48,8 +52,8 @@
     applied = { eventId, ...(gate ? { gate } : {}) };
     void load(applied);
   }
-  function selectEvent(value: string) { eventId = value; gate = ""; data = null; applied = null; }
-  function reset() { eventId = ""; gate = ""; data = null; applied = null; error = ""; }
+  function selectEvent(value: string) { eventId = value; gate = ""; gateOptions = []; data = null; applied = null; }
+  function reset() { eventId = ""; gate = ""; gateOptions = []; data = null; applied = null; error = ""; }
   function retry() { if (applied) void load(applied); else void initialize(); }
   async function exportCSV() {
     if (!data || exporting) return;
@@ -83,7 +87,7 @@
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="attendance-filter-title">Filter laporan</h2></div></div>
       <form class="history-filter-form" onsubmit={search} aria-busy={loading}>
         <label>Event wajib<select value={eventId} onchange={(event) => selectEvent(event.currentTarget.value)} required disabled={loading}><option value="">Pilih event</option>{#each events as event (event.id)}<option value={event.id}>{event.artist} · {event.city}</option>{/each}</select></label>
-        <label>Gate<select bind:value={gate} disabled={loading || !eventId || !data?.filterOptions.gates.length}><option value="">Semua gate</option>{#each data?.filterOptions.gates ?? [] as item (item)}<option value={item}>{item}</option>{/each}</select></label>
+        <label>Gate<select bind:value={gate} disabled={loading || !eventId || !gateOptions.length}><option value="">Semua gate</option>{#each gateOptions as item (item)}<option value={item}>{item}</option>{/each}</select></label>
         <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading || !eventId}>Terapkan</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
       </form>
     </section>
