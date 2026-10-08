@@ -74,11 +74,15 @@ func attendanceRate(checkedIn, eligible int64) *float64 {
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/reports/sales", h.sales)
+	mux.HandleFunc("GET /api/v1/admin/reports/sales.csv", h.salesCSV)
 	mux.HandleFunc("GET /api/v1/admin/reports/attendance", h.attendance)
+	mux.HandleFunc("GET /api/v1/admin/reports/attendance.csv", h.attendanceCSV)
 }
 
 func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFilter) (AttendanceReport, error) {
 	var result AttendanceReport
+	result.ByCategory = make([]AttendanceCategory, 0)
+	result.ByGate = make([]AttendanceGate, 0)
 	filter.EventID = strings.TrimSpace(filter.EventID)
 	if filter.EventID == "" || len(filter.EventID) > 64 || strings.TrimSpace(filter.Gate) != filter.Gate || len(filter.Gate) > 100 {
 		return result, ErrInvalidRequest
@@ -181,7 +185,7 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 		AND COALESCE(JSON_TYPE(JSON_EXTRACT(t.snapshot,'$.code')),'NULL') IN ('STRING','NULL')
 		AND COALESCE(JSON_TYPE(JSON_EXTRACT(t.snapshot,'$.attendeeName')),'NULL') IN ('STRING','NULL')
 		AND COALESCE(JSON_TYPE(JSON_EXTRACT(t.snapshot,'$.tierName')),'NULL') IN ('STRING','NULL')`
-	rows, err = tx.QueryContext(r.Context(), `SELECT t.ticket_tier_id, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot,'$.gate')),''),
+	rows, err = tx.QueryContext(r.Context(), `SELECT t.ticket_tier_id, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot,'$.gate')),'') AS ticket_gate,
 		COALESCE(tt.name,'Kategori tidak diketahui'), COALESCE(tt.gate,''),
 		COUNT(*) AS issued, COALESCE(SUM(o.status='PAID' AND (`+validTicketSnapshot+`)),0) AS eligible,
 		SUM(o.status='REFUND_PENDING'
@@ -276,10 +280,9 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 		return *result.ByGate[i].Gate < *result.ByGate[j].Gate
 	})
 	result.Hourly = make([]HourlyCheckIns, 0)
-	rows, err = tx.QueryContext(r.Context(), `SELECT CONCAT(DATE_FORMAT(DATE_ADD(checked_in_at,INTERVAL 7 HOUR),'%Y-%m-%dT%H:00:00'),'+07:00'), COUNT(*)
+	rows, err = tx.QueryContext(r.Context(), `SELECT CONCAT(DATE_FORMAT(DATE_ADD(checked_in_at,INTERVAL 7 HOUR),'%Y-%m-%dT%H:00:00'),'+07:00') AS report_hour, COUNT(*)
 		FROM ticket_checkins WHERE event_id=? AND (?='' OR BINARY gate=BINARY ?)
-		GROUP BY DATE( DATE_ADD(checked_in_at,INTERVAL 7 HOUR)), HOUR(DATE_ADD(checked_in_at,INTERVAL 7 HOUR))
-		ORDER BY DATE(DATE_ADD(checked_in_at,INTERVAL 7 HOUR)), HOUR(DATE_ADD(checked_in_at,INTERVAL 7 HOUR))`,
+		GROUP BY report_hour ORDER BY report_hour`,
 		filter.EventID, filter.Gate, filter.Gate)
 	if err != nil {
 		return result, fmt.Errorf("query admin attendance hourly check-ins: %w", err)
@@ -313,14 +316,8 @@ func (h *Handler) attendance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]any{"error": map[string]string{"code": "UNAUTHORIZED", "message": "Autentikasi administrator diperlukan"}})
 		return
 	}
-	query := r.URL.Query()
-	for name, values := range query {
-		if !strings.Contains("|eventId|gate|", "|"+name+"|") || len(values) != 1 {
-			writeJSON(w, 400, map[string]any{"error": map[string]string{"code": "INVALID_REQUEST", "message": "Filter laporan kehadiran tidak valid"}})
-			return
-		}
-	}
-	if _, ok := query["eventId"]; !ok || query.Get("eventId") == "" {
+	query, err := reportQuery(r, "|eventId|gate|", true)
+	if err != nil {
 		writeJSON(w, 400, map[string]any{"error": map[string]string{"code": "INVALID_REQUEST", "message": "Event wajib dipilih"}})
 		return
 	}

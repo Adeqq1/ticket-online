@@ -84,12 +84,7 @@ async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit
     throw new ApiError("Respons server tidak dapat dipastikan; hasil operasi belum diketahui.", 0, "UNKNOWN_OUTCOME");
   }
   if (!response.ok) {
-    let body: ApiErrorBody = {};
-    try { body = await response.json() as ApiErrorBody; } catch { /* malformed error body */ }
-    const error = new ApiError(body.error?.message ?? "Terjadi kesalahan pada server.", response.status, body.error?.code ?? "API_ERROR", body);
-    const retryAfter = Number(response.headers.get("Retry-After"));
-    if (Number.isInteger(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter;
-    throw error;
+    throw await apiResponseError(response);
   }
   if (response.status === 204) return undefined as T;
   try { return await response.json() as T; }
@@ -97,6 +92,42 @@ async function request<T>(path: string, signal?: AbortSignal, init?: RequestInit
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError("Respons server terputus; hasil operasi belum diketahui.", 0, "UNKNOWN_OUTCOME");
   }
+}
+
+async function apiResponseError(response: Response): Promise<ApiError> {
+  let body: ApiErrorBody = {};
+  try { body = await response.json() as ApiErrorBody; } catch { /* malformed error body */ }
+  const error = new ApiError(body.error?.message ?? "Terjadi kesalahan pada server.", response.status, body.error?.code ?? "API_ERROR", body);
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  if (Number.isInteger(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter;
+  return error;
+}
+
+async function getAdminReportCSV(accessToken: string, path: string, signal?: AbortSignal) {
+  let response: Response;
+  try {
+    response = await fetch(path, { signal, headers: { Accept: "text/csv", ...privateHeaders(accessToken) } });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new ApiError("Tidak dapat terhubung ke server.", 0, "NETWORK_ERROR");
+  }
+  if (!response.ok) throw await apiResponseError(response);
+  if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("text/csv")) throw new ApiError("Respons ekspor CSV tidak valid.", 0, "INVALID_RESPONSE");
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = disposition.match(/filename="([A-Za-z0-9_.-]+)"/)?.[1] ?? "admin-report.csv";
+  return { blob: await response.blob(), filename };
+}
+
+export function saveAdminReportCSV(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function mapApiEvent(event: ApiEvent): Concert {
@@ -155,10 +186,20 @@ export function getAdminSalesReport(accessToken: string, filters: { eventId?: st
   for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
   return adminIssueRequest<AdminSalesReport>(accessToken, `/api/v1/admin/reports/sales${query.size ? `?${query}` : ""}`, signal);
 }
+export function exportAdminSalesReportCSV(accessToken: string, filters: { eventId?: string; dateFrom?: string; dateTo?: string } = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+  return getAdminReportCSV(accessToken, `/api/v1/admin/reports/sales.csv${query.size ? `?${query}` : ""}`, signal);
+}
 export function getAdminAttendanceReport(accessToken: string, filters: { eventId: string; gate?: string } , signal?: AbortSignal) {
   const query = new URLSearchParams({ eventId: filters.eventId });
   if (filters.gate) query.set("gate", filters.gate);
   return adminIssueRequest<AdminAttendanceReport>(accessToken, `/api/v1/admin/reports/attendance?${query}`, signal);
+}
+export function exportAdminAttendanceReportCSV(accessToken: string, filters: { eventId: string; gate?: string }, signal?: AbortSignal) {
+  const query = new URLSearchParams({ eventId: filters.eventId });
+  if (filters.gate) query.set("gate", filters.gate);
+  return getAdminReportCSV(accessToken, `/api/v1/admin/reports/attendance.csv?${query}`, signal);
 }
 
 export function createAdminEvent(accessToken: string, payload: AdminEventInput, signal?: AbortSignal) {

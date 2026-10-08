@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createStaff, getAdminAttendanceReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
+import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./src/lib/api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -51,6 +51,26 @@ test("admin attendance report requires event and serializes optional gate", asyn
     expect(result.hourly).toEqual([]);
     expect(request?.url).toBe("/api/v1/admin/reports/attendance?eventId=nusa+malam&gate=Gate+A");
     expect(new Headers(request?.init?.headers).get("Authorization")).toBe("Bearer staff-token");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("admin report CSV exports send the report filters and bearer token", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    return new Response("\uFEFFjenis_laporan\r\n", { status: 200, headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="admin-sales-2026-09-01-2026-09-30.csv"' } });
+  }) as typeof fetch;
+  try {
+    const sales = await exportAdminSalesReportCSV("admin-token", { eventId: "nusa malam", dateFrom: "2026-09-01", dateTo: "2026-09-30" });
+    const attendance = await exportAdminAttendanceReportCSV("admin-token", { eventId: "nusa malam", gate: "Gate A" });
+    expect(sales.filename).toBe("admin-sales-2026-09-01-2026-09-30.csv");
+    expect(await sales.blob.text()).toContain("jenis_laporan");
+    expect(calls.map((call) => call.url)).toEqual([
+      "/api/v1/admin/reports/sales.csv?eventId=nusa+malam&dateFrom=2026-09-01&dateTo=2026-09-30",
+      "/api/v1/admin/reports/attendance.csv?eventId=nusa+malam&gate=Gate+A",
+    ]);
+    expect(calls.every((call) => new Headers(call.init?.headers).get("Authorization") === "Bearer admin-token" && new Headers(call.init?.headers).get("Accept") === "text/csv")).toBe(true);
   } finally { globalThis.fetch = originalFetch; }
 });
 

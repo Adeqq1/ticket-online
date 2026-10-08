@@ -22,6 +22,7 @@
 .staff-admin-shell { min-height: 100dvh; }
 .staff-admin-content { width: min(100% - 56px, 1380px); margin: auto; padding: 58px 0 32px; }
 .staff-admin-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
+.report-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; }
 .staff-admin-heading .scan-kicker { margin-bottom: 15px; }
 .staff-admin-heading > div > p:last-child { margin-bottom: 0; }
 .staff-admin-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 16px; }

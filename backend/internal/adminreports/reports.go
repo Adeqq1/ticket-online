@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -123,6 +124,7 @@ func parseDate(value string) (time.Time, error) {
 
 func (s *Service) Sales(r *http.Request, token string, filter Filter) (Report, error) {
 	var result Report
+	result.ByEvent = make([]EventRow, 0)
 	query, err := parseFilter(filter, time.Now())
 	if err != nil {
 		return result, err
@@ -282,6 +284,21 @@ func (s *Service) Sales(r *http.Request, token string, filter Filter) (Report, e
 	return result, nil
 }
 
+func reportQuery(r *http.Request, allowed string, requireEvent bool) (url.Values, error) {
+	query := r.URL.Query()
+	for name, values := range query {
+		if !strings.Contains(allowed, "|"+name+"|") || len(values) != 1 {
+			return nil, ErrInvalidRequest
+		}
+	}
+	if requireEvent {
+		if _, ok := query["eventId"]; !ok || query.Get("eventId") == "" {
+			return nil, ErrInvalidRequest
+		}
+	}
+	return query, nil
+}
+
 func (h *Handler) sales(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	token, ok := orderaccess.Bearer(r.Header.Get("Authorization"))
@@ -289,12 +306,10 @@ func (h *Handler) sales(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]any{"error": map[string]string{"code": "UNAUTHORIZED", "message": "Autentikasi administrator diperlukan"}})
 		return
 	}
-	query := r.URL.Query()
-	for name, values := range query {
-		if !strings.Contains("|eventId|dateFrom|dateTo|", "|"+name+"|") || len(values) != 1 {
-			writeJSON(w, 400, map[string]any{"error": map[string]string{"code": "INVALID_REQUEST", "message": "Filter laporan tidak valid"}})
-			return
-		}
+	query, err := reportQuery(r, "|eventId|dateFrom|dateTo|", false)
+	if err != nil {
+		writeJSON(w, 400, map[string]any{"error": map[string]string{"code": "INVALID_REQUEST", "message": "Filter laporan tidak valid"}})
+		return
 	}
 	result, err := h.service.Sales(r, token, Filter{EventID: query.Get("eventId"), DateFrom: query.Get("dateFrom"), DateTo: query.Get("dateTo")})
 	if err != nil {

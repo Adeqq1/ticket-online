@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { ApiError, getAdminSalesReport, type AdminSalesAmounts, type AdminSalesReport } from "../lib/api.ts";
+  import { ApiError, exportAdminSalesReportCSV, getAdminSalesReport, saveAdminReportCSV, type AdminSalesAmounts, type AdminSalesReport } from "../lib/api.ts";
   import { salesChartPaths } from "../lib/admin-sales-chart.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
@@ -16,7 +16,9 @@
   let applied = $state<{ eventId?: string; dateFrom?: string; dateTo?: string }>({});
   let data = $state<AdminSalesReport | null>(null);
   let loading = $state(true);
+  let exporting = $state(false);
   let error = $state("");
+  let exportError = $state("");
   let request: AbortController | undefined;
   let generation = 0;
 
@@ -47,6 +49,18 @@
     void load(applied);
   }
 
+  async function exportCSV() {
+    if (!data || exporting) return;
+    exporting = true; exportError = "";
+    try {
+      const file = await exportAdminSalesReportCSV(accessToken, { eventId: data.period.eventId ?? undefined, dateFrom: data.period.dateFrom, dateTo: data.period.dateTo });
+      saveAdminReportCSV(file.blob, file.filename);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
+      else exportError = cause instanceof ApiError ? cause.message : "CSV belum dapat diunduh. Periksa koneksi lalu coba lagi.";
+    } finally { exporting = false; }
+  }
+
   function reset() {
     eventId = ""; dateFrom = shiftDate(today, -29); dateTo = today; applied = {};
     void load(applied);
@@ -71,7 +85,7 @@
   <a class="skip-link" href="#reports-content">Lewati ke laporan</a>
   <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
   <main id="reports-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">LAPORAN KEUANGAN <span>•</span> ADMIN</p><h1>Penjualan dan refund.</h1><p>Pembayaran dihitung dari waktu lunas, refund dari waktu penyelesaian. Penerimaan setelah refund belum memperhitungkan biaya provider.</p></div><button class="staff-secondary-button" type="button" onclick={() => void load()} disabled={loading}>Muat ulang</button></div>
+    <div class="staff-admin-heading"><div><p class="scan-kicker">LAPORAN KEUANGAN <span>•</span> ADMIN</p><h1>Penjualan dan refund.</h1><p>Pembayaran dihitung dari waktu lunas, refund dari waktu penyelesaian. Penerimaan setelah refund belum memperhitungkan biaya provider.</p></div><div class="report-actions"><button class="staff-secondary-button" type="button" onclick={() => void load()} disabled={loading}>Muat ulang</button><button class="staff-secondary-button" type="button" onclick={exportCSV} disabled={loading || exporting || !data}>{exporting ? "Menyiapkan CSV…" : "Ekspor CSV"}</button></div></div>
     <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a aria-current="page" href="/admin/reports">Penjualan dan refund</a><a href="/admin/reports/attendance">Kehadiran</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
     <form class="history-filter-form sales-report-filters" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each data?.filterOptions.events ?? [] as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
@@ -80,6 +94,7 @@
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
     </form>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => void load()}>Coba lagi</button></p>{/if}
+    {#if exportError}<p class="staff-form-message staff-form-error" role="alert">{exportError}</p>{/if}
     {#if loading}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan…</p>{:else if data}
       <p class="sales-period">Periode {period(data.period.dateFrom)}–{period(data.period.dateTo)} · WIB <span>Data diperbarui {time(data.dataUpdatedAt)}</span></p>
       <section class="sales-metrics" aria-label="Ringkasan laporan" aria-busy={loading}>
