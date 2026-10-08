@@ -28,6 +28,8 @@ tags:
     description: Check-in hanya dapat dilakukan STAFF pada event dan gate yang ditugaskan. ADMIN dapat membaca status dan riwayat sesuai endpoint.
   - name: Admin Operasional
     description: Pemantauan API, worker, email gagal, dan kasus pembayaran terbuka khusus ADMIN.
+  - name: Admin Laporan
+    description: Ringkasan pembayaran berhasil dan refund berdasarkan waktu transaksi keuangan.
   - name: Admin Pesanan
     description: Detail dan refund penuh order oleh ADMIN. Refund hanya untuk QRIS/GoPay yang diaktifkan lewat allowlist konfigurasi.
 paths:
@@ -1451,6 +1453,118 @@ paths:
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '409': {description: Job tidak lagi gagal, telah digantikan, atau order tidak memenuhi syarat.}
         '429': {description: Batas kirim ulang tercapai.}
+  /api/v1/admin/reports/sales:
+    get:
+      operationId: getAdminSalesReport
+      tags: [Admin Laporan]
+      summary: Ringkasan penjualan dan refund
+      description: >-
+        Hanya ADMIN aktif. Filter tanggal memakai hari kalender Asia/Jakarta, inklusif, default 30 hari terakhir,
+        maksimal 366 hari. Jika hanya dateTo diisi, dateFrom adalah 29 hari sebelumnya; jika hanya dateFrom diisi,
+        dateTo adalah hari ini.
+        Pembayaran dikelompokkan menurut paid_at dan refund menurut completed_at. Refund berjalan dan kasus
+        rekonsiliasi terbuka mengikuti kondisi pada snapshot laporan dan tidak dibatasi rentang tanggal. netAmount
+        adalah penerimaan setelah refund; nominal ini bukan laba atau settlement bank dan belum mengurangi biaya provider.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: eventId, in: query, required: false, schema: {type: string, maxLength: 64}}
+        - {name: dateFrom, in: query, required: false, description: Awal inklusif dalam hari WIB., schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: false, description: Akhir inklusif dalam hari WIB., schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Ringkasan konsisten dari snapshot database.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSalesReport'}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {description: Event tidak ditemukan.}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/reports/sales.csv:
+    get:
+      operationId: exportAdminSalesReportCSV
+      tags: [Admin Laporan]
+      summary: Mengekspor laporan penjualan dan refund sebagai CSV
+      description: >-
+        Hanya ADMIN aktif. Filter dan perhitungan identik dengan GET /api/v1/admin/reports/sales.
+        CSV UTF-8 dengan BOM berisi metadata snapshot dan baris ringkasan, harian, serta event; data pribadi pembeli tidak disertakan.
+        Kolom teks diawali apostrof jika berpotensi menjadi formula spreadsheet.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: eventId, in: query, required: false, schema: {type: string, maxLength: 64}}
+        - {name: dateFrom, in: query, required: false, description: Awal inklusif dalam hari WIB., schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: false, description: Akhir inklusif dalam hari WIB., schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Ringkasan penjualan dalam CSV tanpa data pribadi pembeli.
+          headers:
+            Content-Disposition: {schema: {type: string}}
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            text/csv:
+              schema: {type: string, format: binary, description: Baris ringkasan, harian, dan event dengan nominal rupiah bulat.}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {description: Event filter tidak ditemukan.}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/reports/attendance:
+    get:
+      operationId: getAdminAttendanceReport
+      tags: [Admin Laporan]
+      summary: Ringkasan tiket dan kehadiran event
+      description: >-
+        Hanya ADMIN aktif. Event wajib; gate opsional. Inventori, tiket, refund tertahan, dan check-in menunjukkan kondisi
+        pada snapshot saat laporan dibuat. Tiket eligible mengikuti status order PAID serta validasi ID, event, dan gate snapshot
+        yang dipakai backend check-in. Tingkat kehadiran adalah check-in berhasil dibagi tiket eligible; nilainya null jika tidak ada.
+        Check-in per jam dihitung dari ticket_checkins, bukan percobaan scan.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: eventId, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+        - {name: gate, in: query, required: false, schema: {type: string, maxLength: 100}}
+      responses:
+        '200':
+          description: Snapshot agregasi tiket dan kehadiran.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminAttendanceReport'}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {description: Event tidak ditemukan.}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/reports/attendance.csv:
+    get:
+      operationId: exportAdminAttendanceReportCSV
+      tags: [Admin Laporan]
+      summary: Mengekspor laporan kehadiran sebagai CSV
+      description: >-
+        Hanya ADMIN aktif. Filter dan perhitungan identik dengan GET /api/v1/admin/reports/attendance.
+        CSV UTF-8 dengan BOM berisi metadata snapshot serta baris ringkasan, kategori, gate, dan per jam; tidak ada data pribadi pembeli.
+        Kolom teks diawali apostrof jika berpotensi menjadi formula spreadsheet.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: eventId, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+        - {name: gate, in: query, required: false, schema: {type: string, maxLength: 100}}
+      responses:
+        '200':
+          description: Snapshot tiket dan kehadiran dalam CSV tanpa data pribadi pembeli.
+          headers:
+            Content-Disposition: {schema: {type: string}}
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            text/csv:
+              schema: {type: string, format: binary, description: Baris ringkasan, kategori, gate, dan per jam.}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {description: Event tidak ditemukan.}
+        '500': {$ref: '#/components/responses/InternalError'}
   /api/v1/admin/operations:
     get:
       operationId: getAdminOperations
@@ -1701,6 +1815,107 @@ components:
               lastFailureAt: {type: [string, 'null'], format: date-time}
               consecutiveFailures: {type: integer, minimum: 0}
         alerts: {type: array, items: {type: string}}
+    AdminSalesAmounts:
+      type: object
+      required: [successfulTransactions, paymentAmount, refundAmount, netAmount, unfinishedRefunds, openReconciliationCases]
+      properties:
+        successfulTransactions: {type: integer, minimum: 0}
+        paymentAmount: {type: integer, minimum: 0}
+        refundAmount: {type: integer, minimum: 0}
+        netAmount: {type: integer}
+        unfinishedRefunds: {type: integer, minimum: 0}
+        openReconciliationCases: {type: integer, minimum: 0}
+    AdminSalesReport:
+      type: object
+      required: [period, summary, daily, byEvent, filterOptions, dataUpdatedAt]
+      properties:
+        period:
+          type: object
+          required: [eventId, dateFrom, dateTo, timeZone]
+          properties:
+            eventId: {type: [string, 'null']}
+            dateFrom: {type: string, format: date}
+            dateTo: {type: string, format: date}
+            timeZone: {type: string, const: Asia/Jakarta}
+        summary: {$ref: '#/components/schemas/AdminSalesAmounts'}
+        daily:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AdminSalesAmounts'}
+              - type: object
+                required: [date]
+                properties: {date: {type: string, format: date}}
+        byEvent:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AdminSalesAmounts'}
+              - type: object
+                required: [id, name]
+                properties: {id: {type: string}, name: {type: string}}
+        filterOptions:
+          type: object
+          required: [events]
+          properties:
+            events:
+              type: array
+              items:
+                type: object
+                required: [id, name]
+                properties: {id: {type: string}, name: {type: string}}
+        dataUpdatedAt: {type: string, format: date-time}
+    AdminAttendanceAmounts:
+      type: object
+      required: [capacity, available, issued, eligible, heldForRefund, checkedIn, attendanceRate]
+      properties:
+        capacity: {type: integer, minimum: 0}
+        available: {type: integer, minimum: 0}
+        issued: {type: integer, minimum: 0}
+        eligible: {type: integer, minimum: 0}
+        heldForRefund: {type: integer, minimum: 0}
+        checkedIn: {type: integer, minimum: 0}
+        attendanceRate: {type: [number, 'null'], minimum: 0, maximum: 100}
+    AdminAttendanceReport:
+      type: object
+      required: [event, gate, timeZone, summary, byCategory, byGate, hourly, filterOptions, dataUpdatedAt]
+      properties:
+        event:
+          type: object
+          required: [id, name]
+          properties: {id: {type: string}, name: {type: string}}
+        gate: {type: [string, 'null']}
+        timeZone: {type: string, const: Asia/Jakarta}
+        summary: {$ref: '#/components/schemas/AdminAttendanceAmounts'}
+        byCategory:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AdminAttendanceAmounts'}
+              - type: object
+                required: [id, name]
+                properties: {id: {type: integer, minimum: 1}, name: {type: string}}
+        byGate:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AdminAttendanceAmounts'}
+              - type: object
+                required: [gate]
+                properties: {gate: {type: [string, 'null']}}
+        hourly:
+          type: array
+          items:
+            type: object
+            required: [hour, checkedIn]
+            properties:
+              hour: {type: string, format: date-time}
+              checkedIn: {type: integer, minimum: 0}
+        filterOptions:
+          type: object
+          required: [gates]
+          properties: {gates: {type: array, items: {type: string}}}
+        dataUpdatedAt: {type: string, format: date-time}
     Error:
       type: object
       required: [error]

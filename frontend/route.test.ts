@@ -14,6 +14,9 @@ test("matches application paths without accepting extra segments", () => {
   expect(matchRoute("/admin/orders")).toEqual({ name: "admin-orders" });
   expect(matchRoute("/admin/issues")).toEqual({ name: "admin-issues" });
   expect(matchRoute("/admin/operations")).toEqual({ name: "admin-operations" });
+  expect(matchRoute("/admin/reports")).toEqual({ name: "admin-reports" });
+  expect(matchRoute("/admin/reports/attendance")).toEqual({ name: "admin-attendance-report" });
+  expect(matchRoute("/admin/reports/attendance/extra")).toEqual({ name: "not-found" });
   expect(matchRoute("/admin/check-ins")).toEqual({ name: "admin-check-ins" });
   expect(matchRoute("/admin/login/")).toEqual({ name: "admin-login" });
   expect(matchRoute("/admin/staff/extra")).toEqual({ name: "not-found" });
