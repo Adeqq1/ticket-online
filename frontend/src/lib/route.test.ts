@@ -1,0 +1,34 @@
+import { expect, test } from "bun:test";
+import { matchRoute } from "./route.ts";
+
+test("matches application paths without accepting extra segments", () => {
+  expect(matchRoute("/")).toEqual({ name: "home" });
+  expect(matchRoute("/konser/")).toEqual({ name: "concerts" });
+  expect(matchRoute("/tiket-saya")).toEqual({ name: "my-tickets" });
+  expect(matchRoute("/tiket-saya/")).toEqual({ name: "my-tickets" });
+  expect(matchRoute("/panduan")).toEqual({ name: "guide" });
+  expect(matchRoute("/panduan/")).toEqual({ name: "guide" });
+  expect(matchRoute("/admin/login")).toEqual({ name: "admin-login" });
+  expect(matchRoute("/admin/staff")).toEqual({ name: "admin-staff" });
+  expect(matchRoute("/admin/events")).toEqual({ name: "admin-events" });
+  expect(matchRoute("/admin/orders")).toEqual({ name: "admin-orders" });
+  expect(matchRoute("/admin/issues")).toEqual({ name: "admin-issues" });
+  expect(matchRoute("/admin/operations")).toEqual({ name: "admin-operations" });
+  expect(matchRoute("/admin/reports")).toEqual({ name: "admin-reports" });
+  expect(matchRoute("/admin/reports/attendance")).toEqual({ name: "admin-attendance-report" });
+  expect(matchRoute("/admin/reports/attendance/extra")).toEqual({ name: "not-found" });
+  expect(matchRoute("/admin/check-ins")).toEqual({ name: "admin-check-ins" });
+  expect(matchRoute("/admin/login/")).toEqual({ name: "admin-login" });
+  expect(matchRoute("/admin/staff/extra")).toEqual({ name: "not-found" });
+  expect(matchRoute("/admin/scan")).toEqual({ name: "admin-scan" });
+  expect(matchRoute("/admin/scan/")).toEqual({ name: "admin-scan" });
+  expect(matchRoute("/konser/nusa-malam")).toEqual({ name: "concert-detail", id: "nusa-malam" });
+  expect(matchRoute("/checkout/nusa-malam")).toEqual({ name: "checkout", id: "nusa-malam" });
+  expect(matchRoute("/tiket/a1b2c3d4")).toEqual({ name: "ticket", id: "a1b2c3d4" });
+  expect(matchRoute("/konser/nusa-malam/extra")).toEqual({ name: "not-found" });
+  expect(matchRoute("/halaman-yang-tidak-ada")).toEqual({ name: "not-found" });
+  expect(matchRoute("/panduan/extra")).toEqual({ name: "not-found" });
+  expect(matchRoute("/admin/scan/extra")).toEqual({ name: "not-found" });
+  expect(matchRoute("/tiket/")).toEqual({ name: "not-found" });
+  expect(matchRoute("/konser/%E0%A4%A")).toEqual({ name: "not-found" });
+});

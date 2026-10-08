@@ -1,17 +1,17 @@
 <script lang="ts">
-  import SiteFooter from "./components/SiteFooter.svelte";
-  import SiteHeader from "./components/SiteHeader.svelte";
-  import ConcertCatalogPage from "./pages/ConcertCatalogPage.svelte";
-  import ConcertDetailPage from "./pages/ConcertDetailPage.svelte";
-  import CheckoutPage from "./pages/CheckoutPage.svelte";
-  import HomePage from "./pages/HomePage.svelte";
-  import TicketPage from "./pages/TicketPage.svelte";
-  import MyTicketsPage from "./pages/MyTicketsPage.svelte";
-  import GuidePage from "./pages/GuidePage.svelte";
-  import OrderPage from "./pages/OrderPage.svelte";
-  import TicketRecoveryPage from "./pages/TicketRecoveryPage.svelte";
-  import UnknownRoutePage from "./pages/UnknownRoutePage.svelte";
-  import AdminArea from "./AdminArea.svelte";
+  import SiteFooter from "./layouts/SiteFooter.svelte";
+  import SiteHeader from "./layouts/SiteHeader.svelte";
+  import ConcertCatalogPage from "./pages/public/ConcertCatalogPage.svelte";
+  import ConcertDetailPage from "./pages/public/ConcertDetailPage.svelte";
+  import CheckoutPage from "./pages/public/CheckoutPage.svelte";
+  import HomePage from "./pages/public/HomePage.svelte";
+  import TicketPage from "./pages/public/TicketPage.svelte";
+  import MyTicketsPage from "./pages/public/MyTicketsPage.svelte";
+  import GuidePage from "./pages/public/GuidePage.svelte";
+  import OrderPage from "./pages/public/OrderPage.svelte";
+  import TicketRecoveryPage from "./pages/public/TicketRecoveryPage.svelte";
+  import UnknownRoutePage from "./pages/public/UnknownRoutePage.svelte";
+  import AdminArea from "./layouts/AdminArea.svelte";
   import { matchRoute } from "./lib/route.ts";
   const route = $state(matchRoute(location.pathname));
 </script>

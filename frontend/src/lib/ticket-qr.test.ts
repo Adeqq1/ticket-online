@@ -40,7 +40,7 @@ test("e-ticket SVG QR decodes at screen and printed sizes", () => {
   expect(screen.svg).not.toContain("token");
   expect(screen.svg).not.toContain("@example.com");
 
-  const css = readFileSync(new URL("../../ticket.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../styles/pages/ticket.css", import.meta.url), "utf8");
   expect(css).toMatch(/@media print\s*\{\s*\.qr-code\s*\{[^}]*width:\s*45mm[^}]*height:\s*45mm/);
   expect(css).toMatch(/\.qr-code\s*\{[^}]*background:\s*#fff/);
 });
