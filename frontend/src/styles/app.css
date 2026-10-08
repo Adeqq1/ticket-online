@@ -1,0 +1,11 @@
+@import "./shared.css";
+@import "./pages/index.css";
+@import "./pages/konser.css";
+@import "./pages/konser-detail.css";
+@import "./pages/checkout.css";
+@import "./pages/ticket.css";
+@import "./pages/tiket-saya.css";
+@import "./pages/panduan.css";
+@import "./pages/not-found.css";
+@import "./pages/admin-scan.css";
+@import "./pages/admin-auth.css";
