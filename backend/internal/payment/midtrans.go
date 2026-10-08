@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/conversion"
 )
 
 func midtransSnapURL(environment string) string {
@@ -123,9 +125,10 @@ func (r *Repository) BeginSnap(ctx context.Context, orderID, method string) (id 
 }
 
 func (r *Repository) SetSnapURL(ctx context.Context, id, gatewayOrderID, token, redirect string) (string, error) {
+	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, `UPDATE payments
-		SET gateway_reference = COALESCE(gateway_reference, ?), redirect_url = COALESCE(redirect_url, ?), updated_at = ?
-		WHERE id = ? AND gateway_order_id = ? AND status = 'PENDING'`, token, redirect, time.Now().UTC(), id, gatewayOrderID)
+		SET gateway_reference = COALESCE(gateway_reference, ?), redirect_url = COALESCE(redirect_url, ?), started_at = COALESCE(started_at, ?), updated_at = ?
+		WHERE id = ? AND gateway_order_id = ? AND status = 'PENDING'`, token, redirect, now, now, id, gatewayOrderID)
 	if err != nil {
 		return "", err
 	}
@@ -206,7 +209,7 @@ func (r *Repository) ApplyGatewayStatusTx(ctx context.Context, tx *sql.Tx, gatew
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE payments SET status = 'SUCCEEDED', paid_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?", orderID); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE payments SET status = 'SUCCEEDED', started_at = COALESCE(started_at, UTC_TIMESTAMP(6)), paid_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?", orderID); err != nil {
 				return err
 			}
 			return nil
@@ -219,8 +222,13 @@ func (r *Repository) ApplyGatewayStatusTx(ctx context.Context, tx *sql.Tx, gatew
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE payments SET status = ?, paid_at = ?, updated_at = ? WHERE order_id = ?", newStatus, paidAt, now, orderID); err != nil {
+	if _, err = tx.ExecContext(ctx, "UPDATE payments SET status = ?, started_at = IF(?='SUCCEEDED',COALESCE(started_at,?),started_at), paid_at = ?, updated_at = ? WHERE order_id = ?", newStatus, newStatus, now, paidAt, now, orderID); err != nil {
 		return err
+	}
+	if newStatus == "FAILED" {
+		_, _ = tx.ExecContext(ctx, `INSERT IGNORE INTO conversion_events (journey_id,kind,reason,created_at)
+			SELECT cr.journey_id,'PAYMENT_FAILURE','PAYMENT_PROVIDER',UTC_TIMESTAMP(6) FROM conversion_reservations cr
+			JOIN reservations r ON r.id=cr.reservation_id JOIN orders o ON o.reservation_id=r.id WHERE o.id=?`, orderID)
 	}
 	return nil
 }
@@ -298,16 +306,19 @@ func (h *Handler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	payload.CustomerDetails.FirstName, payload.CustomerDetails.Email, payload.CustomerDetails.Phone = name, email, phone
 	response, err := h.callSnap(r.Context(), payload)
 	if err != nil {
+		conversion.RecordOrder(r.Context(), h.repository.db, orderID, "PAYMENT_FAILURE", "PAYMENT_PROVIDER")
 		h.logger.ErrorContext(r.Context(), "midtrans snap create failed", "request_id", r.Header.Get("X-Request-ID"), "error", err)
 		writeError(w, 502, "PAYMENT_PROVIDER_ERROR", "Sesi pembayaran belum dapat dibuat. Coba lagi.")
 		return
 	}
 	if response.Token == "" || response.RedirectURL == "" {
+		conversion.RecordOrder(r.Context(), h.repository.db, orderID, "PAYMENT_FAILURE", "PAYMENT_PROVIDER")
 		writeError(w, 502, "PAYMENT_PROVIDER_ERROR", "Sesi pembayaran tidak valid.")
 		return
 	}
 	providerURL, err := url.Parse(response.RedirectURL)
 	if err != nil || providerURL.Scheme != "https" || providerURL.Host != midtransRedirectHost(h.environment) || !strings.HasPrefix(providerURL.Path, "/snap/") || providerURL.User != nil {
+		conversion.RecordOrder(r.Context(), h.repository.db, orderID, "PAYMENT_FAILURE", "PAYMENT_PROVIDER")
 		writeError(w, 502, "PAYMENT_PROVIDER_ERROR", "Sesi pembayaran tidak valid.")
 		return
 	}

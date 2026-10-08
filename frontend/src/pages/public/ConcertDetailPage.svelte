@@ -6,6 +6,7 @@
   import ConcertInfoTabs from "../../components/detail/ConcertInfoTabs.svelte";
   import SeatingMap from "../../components/detail/SeatingMap.svelte";
   import { cartTotal, changeQuantity, quantityParams, ticketCount, type DetailState } from "../../lib/cart.ts";
+  import { recordConversion, trackConversionActivity } from "../../lib/conversion.ts";
   let { id }: { id: string } = $props();
   let concertData: Concert | undefined = $state();
   let loading: boolean = $state(true);
@@ -27,8 +28,8 @@
     requestAnimationFrame(() => { const element = document.getElementById(`tier-${tier?.id}`); element?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); if (event instanceof KeyboardEvent) element?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); });
   }
   function checkout() { if (concertData && count) location.assign(`/checkout/${concertData.id}?${quantityParams(detailState.quantities)}`); }
-  async function load(signal?: AbortSignal) { loading = true; error = ""; try { concertData = await getEvent(id, signal); detailState = initialDetailState(); } catch (value) { if (!(value instanceof DOMException && value.name === "AbortError")) error = value instanceof ApiError && value.code === "EVENT_NOT_FOUND" ? "not-found" : value instanceof ApiError ? value.message : "Detail konser belum dapat dimuat."; } finally { if (!signal?.aborted) loading = false; } }
-  onMount(() => { const controller = new AbortController(); load(controller.signal); return () => controller.abort(); });
+  async function load(signal?: AbortSignal) { loading = true; error = ""; try { concertData = await getEvent(id, signal); detailState = initialDetailState(); if (!signal?.aborted) recordConversion(concertData.id, "DETAIL_VIEWED"); } catch (value) { if (!(value instanceof DOMException && value.name === "AbortError")) error = value instanceof ApiError && value.code === "EVENT_NOT_FOUND" ? "not-found" : value instanceof ApiError ? value.message : "Detail konser belum dapat dimuat."; } finally { if (!signal?.aborted) loading = false; } }
+  onMount(() => { const controller = new AbortController(); const stopTracking = trackConversionActivity(id); load(controller.signal); return () => { controller.abort(); stopTracking(); }; });
 </script>
 
 <svelte:head><title>{concertData ? `${concertData.artist} | Tiket Online` : "Konser tidak ditemukan | Tiket Online"}</title><meta name="description" content={concertData ? `Detail konser dan pilihan tiket ${concertData.artist} di Tiket Online.` : "Konser tidak ditemukan di Tiket Online."} />{#if !concertData}<meta name="robots" content="noindex" />{/if}</svelte:head>

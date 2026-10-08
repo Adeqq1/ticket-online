@@ -152,8 +152,12 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 		if request.Result == "SUCCEEDED" {
 			succeededAt = now
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE payments SET method = ?, amount = ?, status = ?, paid_at = ?, updated_at = ? WHERE order_id = ?", request.Method, amount, request.Result, succeededAt, now, orderID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE payments SET method = ?, amount = ?, status = ?, started_at = COALESCE(started_at, ?), paid_at = ?, updated_at = ? WHERE order_id = ?", request.Method, amount, request.Result, now, succeededAt, now, orderID); err != nil {
 			return Payment{}, false, fmt.Errorf("update payment: %w", err)
+		}
+		if request.Result == "FAILED" {
+			_, _ = tx.ExecContext(ctx, `INSERT IGNORE INTO conversion_events (journey_id,kind,reason,created_at)
+				SELECT cr.journey_id,'PAYMENT_FAILURE','PAYMENT_PROVIDER',UTC_TIMESTAMP(6) FROM conversion_reservations cr JOIN orders o ON o.reservation_id=cr.reservation_id WHERE o.id=?`, orderID)
 		}
 		existing.Method = request.Method
 		existing.Amount = amount
@@ -192,9 +196,13 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 	if request.Result == "SUCCEEDED" {
 		succeededAt = now
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO payments (id, order_id, method, amount, status, paid_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, existing.ID, orderID, request.Method, amount, request.Result, succeededAt, now, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO payments (id, order_id, method, amount, status, started_at, paid_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, existing.ID, orderID, request.Method, amount, request.Result, now, succeededAt, now, now); err != nil {
 		return Payment{}, false, fmt.Errorf("insert payment: %w", err)
+	}
+	if request.Result == "FAILED" {
+		_, _ = tx.ExecContext(ctx, `INSERT IGNORE INTO conversion_events (journey_id,kind,reason,created_at)
+			SELECT cr.journey_id,'PAYMENT_FAILURE','PAYMENT_PROVIDER',UTC_TIMESTAMP(6) FROM conversion_reservations cr JOIN orders o ON o.reservation_id=cr.reservation_id WHERE o.id=?`, orderID)
 	}
 	existing.OrderID = orderID
 	existing.Method = request.Method

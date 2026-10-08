@@ -58,6 +58,9 @@ export type AdminSalesAmounts = { successfulTransactions: number; paymentAmount:
 export type AdminSalesReport = { period: { eventId: string | null; dateFrom: string; dateTo: string; timeZone: "Asia/Jakarta" }; summary: AdminSalesAmounts; daily: Array<{ date: string } & AdminSalesAmounts>; byEvent: Array<{ id: string; name: string } & AdminSalesAmounts>; filterOptions: { events: Array<{ id: string; name: string }> }; dataUpdatedAt: string };
 export type AdminAttendanceAmounts = { capacity: number; available: number; issued: number; eligible: number; heldForRefund: number; checkedIn: number; attendanceRate: number | null };
 export type AdminAttendanceReport = { event: { id: string; name: string }; gate: string | null; timeZone: "Asia/Jakarta"; summary: AdminAttendanceAmounts; byCategory: Array<{ id: number; name: string } & AdminAttendanceAmounts>; byGate: Array<{ gate: string | null } & AdminAttendanceAmounts>; hourly: Array<{ hour: string; checkedIn: number }>; filterOptions: { gates: string[] }; dataUpdatedAt: string };
+export type ConversionStage = { detail: number; reservation: number; order: number; paymentStarted: number; paymentSucceeded: number };
+export type ConversionBreakdown = { eventId?: string; eventName?: string; device?: string; total: ConversionStage; matured: ConversionStage; pendingObservation: number; lost: Record<string, number> };
+export type ConversionReport = { period: { eventId: string; device: string; dateFrom: string; dateTo: string; timeZone: "Asia/Jakarta"; observationHours: number }; summary: ConversionBreakdown; byEvent: ConversionBreakdown[]; byDevice: ConversionBreakdown[]; blockers: Array<{ kind: string; reason: string; count: number }>; unattributedReservations: number | null; unattributedPayments: number | null; dataUpdatedAt: string };
 
 export class ApiError extends Error {
   code: string;
@@ -196,6 +199,11 @@ export function getAdminAttendanceReport(accessToken: string, filters: { eventId
   if (filters.gate) query.set("gate", filters.gate);
   return adminIssueRequest<AdminAttendanceReport>(accessToken, `/api/v1/admin/reports/attendance?${query}`, signal);
 }
+export function getAdminConversionReport(accessToken: string, filters: { eventId?: string; device?: string; dateFrom?: string; dateTo?: string } = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+  return adminIssueRequest<ConversionReport>(accessToken, `/api/v1/admin/reports/conversion${query.size ? `?${query}` : ""}`, signal);
+}
 export function exportAdminAttendanceReportCSV(accessToken: string, filters: { eventId: string; gate?: string }, signal?: AbortSignal) {
   const query = new URLSearchParams({ eventId: filters.eventId });
   if (filters.gate) query.set("gate", filters.gate);
@@ -216,16 +224,16 @@ export type AdminTierInput = Omit<AdminTicketTier,"availableQuantity"|"boundQuan
 export function createAdminTier(accessToken: string, eventId: string, payload: AdminTierInput) { return request<AdminTicketTier>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/ticket-tiers`, undefined, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 201); }
 export function updateAdminTier(accessToken: string, eventId: string, tierId: string, payload: Omit<AdminTierInput,"id">) { return request<AdminTicketTier>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/ticket-tiers/${encodeURIComponent(tierId)}`, undefined, { method: "PUT", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
 
-export function createReservation(eventId: string, items: Array<{ tierId: string; quantity: number }>, idempotencyKey: string, signal?: AbortSignal) {
-  return request<Reservation>("/api/v1/reservations", signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ eventId, items }) });
+export function createReservation(eventId: string, items: Array<{ tierId: string; quantity: number }>, idempotencyKey: string, signal?: AbortSignal, journeyId?: string) {
+  return request<Reservation>("/api/v1/reservations", signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, ...(journeyId ? { "X-Conversion-Journey": journeyId } : {}) }, body: JSON.stringify({ eventId, items }) });
 }
 
 export function getReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}`, signal); }
 
 export function convertReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}/convert`, signal, { method: "POST" }); }
 
-export function createOrder(reservationId: string, payload: CreateOrderRequest, idempotencyKey: string, signal?: AbortSignal) {
-  return request<OrderResponse>(`/api/v1/reservations/${encodeURIComponent(reservationId)}/checkout`, signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) });
+export function createOrder(reservationId: string, payload: CreateOrderRequest, idempotencyKey: string, signal?: AbortSignal, journeyId?: string) {
+  return request<OrderResponse>(`/api/v1/reservations/${encodeURIComponent(reservationId)}/checkout`, signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, ...(journeyId ? { "X-Conversion-Journey": journeyId } : {}) }, body: JSON.stringify(payload) });
 }
 
 function privateHeaders(accessToken: string): HeadersInit { return { Authorization: `Bearer ${accessToken}` }; }

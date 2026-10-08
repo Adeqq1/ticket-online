@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/conversion"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 )
 
@@ -17,14 +18,23 @@ type Handler struct {
 	repository *Repository
 	logger     *slog.Logger
 	access     *orderaccess.Access
+	conversion *conversion.Service
 }
 
-func NewHandler(repository *Repository, logger *slog.Logger) *Handler {
-	return &Handler{repository: repository, logger: logger}
+func NewHandler(repository *Repository, logger *slog.Logger, metrics ...*conversion.Service) *Handler {
+	h := &Handler{repository: repository, logger: logger}
+	if len(metrics) > 0 {
+		h.conversion = metrics[0]
+	}
+	return h
 }
 
-func NewHandlerWithAccess(repository *Repository, logger *slog.Logger, access *orderaccess.Access) *Handler {
-	return &Handler{repository: repository, logger: logger, access: access}
+func NewHandlerWithAccess(repository *Repository, logger *slog.Logger, access *orderaccess.Access, metrics ...*conversion.Service) *Handler {
+	h := &Handler{repository: repository, logger: logger, access: access}
+	if len(metrics) > 0 {
+		h.conversion = metrics[0]
+	}
+	return h
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -47,16 +57,25 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	var request Request
 	if err := decoder.Decode(&request); err != nil {
+		if h.conversion != nil {
+			h.conversion.Record(r.Context(), r.Header.Get("X-Conversion-Journey"), "VALIDATION_FAILED", "BUYER_DATA")
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "JSON request tidak valid")
 		return
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if h.conversion != nil {
+			h.conversion.Record(r.Context(), r.Header.Get("X-Conversion-Journey"), "VALIDATION_FAILED", "BUYER_DATA")
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "JSON request tidak valid")
 		return
 	}
 	order, replay, err := h.repository.Create(r.Context(), reservationID, idempotencyKey, request)
 	if err != nil {
+		if h.conversion != nil && errors.Is(err, ErrInvalidRequest) {
+			h.conversion.Record(r.Context(), r.Header.Get("X-Conversion-Journey"), "VALIDATION_FAILED", "BUYER_DATA")
+		}
 		h.respondError(w, r, err)
 		return
 	}

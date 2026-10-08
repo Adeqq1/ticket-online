@@ -30,6 +30,8 @@ tags:
     description: Pemantauan API, worker, email gagal, dan kasus pembayaran terbuka khusus ADMIN.
   - name: Admin Laporan
     description: Ringkasan pembayaran berhasil dan refund berdasarkan waktu transaksi keuangan.
+  - name: Konversi
+    description: Pencatatan perjalanan anonim dan laporan funnel ADMIN.
   - name: Admin Pesanan
     description: Detail dan refund penuh order oleh ADMIN. Refund hanya untuk QRIS/GoPay yang diaktifkan lewat allowlist konfigurasi.
 paths:
@@ -312,6 +314,11 @@ paths:
         dikonfigurasi server.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: X-Conversion-Journey
+          in: header
+          required: false
+          description: ID perjalanan anonim untuk menghubungkan reservasi. Diabaikan jika tidak valid atau tidak cocok dengan event.
+          schema: {type: string, pattern: '^[a-fA-F0-9]{32}$'}
       requestBody:
         required: true
         content:
@@ -1453,6 +1460,60 @@ paths:
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '409': {description: Job tidak lagi gagal, telah digantikan, atau order tidak memenuhi syarat.}
         '429': {description: Batas kirim ulang tercapai.}
+  /api/v1/conversion/events:
+    post:
+      operationId: recordConversionEvent
+      tags: [Konversi]
+      summary: Mencatat aktivitas perjalanan anonim
+      description: >-
+        Tidak menerima identitas pembeli, token, URL, query, atau teks bebas. ID perjalanan acak per event dan tab;
+        timestamp ditetapkan server. Pengulangan aktivitas dideduplikasi.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [journeyId, eventId, device, kind]
+              properties:
+                journeyId: {type: string, pattern: '^[a-fA-F0-9]{32}$'}
+                eventId: {type: string, minLength: 1, maxLength: 64}
+                device: {type: string, enum: [mobile, desktop, unknown]}
+                kind: {type: string, enum: [DETAIL_VIEWED, CHECKOUT_STARTED, VALIDATION_FAILED, SERVICE_FAILURE]}
+                reason: {type: string, enum: [BUYER_DATA, ATTENDEE_DATA, SERVICE]}
+      responses:
+        '204': {description: Aktivitas tercatat atau sudah pernah dicatat.}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '503': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/reports/conversion:
+    get:
+      operationId: getAdminConversionReport
+      tags: [Konversi]
+      summary: Laporan konversi pembeli
+      description: >-
+        Hanya ADMIN aktif. Tanggal cohort inklusif memakai Asia/Jakarta, default 30 hari terakhir dan maksimal 366 hari.
+        Tiap perjalanan dihitung sekali; hasil matang setelah 24 jam. Detail, reservasi, order, pembayaran dimulai,
+        dan pembayaran berhasil berasal dari bukti frontend/backend yang sesuai. Setiap tahap harus tercapai dalam 24 jam sejak awal cohort. Checkout langsung tidak menambah tahap detail.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: eventId, in: query, required: false, schema: {type: string, maxLength: 64}}
+        - {name: device, in: query, required: false, schema: {type: string, enum: [mobile, desktop, unknown]}}
+        - {name: dateFrom, in: query, required: false, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: false, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Snapshot agregat tanpa data pribadi atau token.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema: {type: object, description: Jumlah tahap total dan matang, kehilangan per tahap, hambatan, rincian event/perangkat, cakupan tanpa atribusi, serta waktu snapshot.}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
   /api/v1/admin/reports/sales:
     get:
       operationId: getAdminSalesReport

@@ -189,6 +189,13 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 25 {
+		if err := resumeConversion(ctx, db, item); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -205,6 +212,29 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration %s: %w", item.name, err)
+	}
+	return nil
+}
+
+func resumeConversion(ctx context.Context, db *sql.Conn, item migration) error {
+	items := statements(string(item.data))
+	if len(items) < 2 {
+		return fmt.Errorf("conversion migration is incomplete")
+	}
+	for _, statement := range items[:len(items)-1] {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payments' AND COLUMN_NAME='started_at')`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := db.ExecContext(ctx, items[len(items)-1]); err != nil {
+			return err
+		}
 	}
 	return nil
 }

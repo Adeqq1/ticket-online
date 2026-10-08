@@ -19,8 +19,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 24 {
-		t.Fatalf("migration count = %d, want 24", len(items))
+	if len(items) != 25 {
+		t.Fatalf("migration count = %d, want 25", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -60,6 +60,9 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if !strings.Contains(string(items[23].data), "ix_ticket_checkins_admin_attendance") {
 		t.Fatal("admin attendance report index was not loaded")
 	}
+	if !strings.Contains(string(items[24].data), "conversion_journeys") || !strings.Contains(string(items[24].data), "started_at DATETIME(6)") {
+		t.Fatal("conversion migration was not loaded")
+	}
 }
 
 func TestStatementsIgnoresEmptyStatements(t *testing.T) {
@@ -88,7 +91,7 @@ func TestMySQLNonAtomicMigrationsResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, version := range []int{18, 20, 21, 22, 23, 24} {
+	for _, version := range []int{18, 20, 21, 22, 23, 24, 25} {
 		item := items[version-1]
 		steps := statements(string(item.data))
 		for interruptedAfter := 0; interruptedAfter < len(steps); interruptedAfter++ {
