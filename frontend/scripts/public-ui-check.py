@@ -55,7 +55,7 @@ def event(state="SCHEDULED"):
 
 def ticket():
     return {
-        "id": TICKET_ID, "code": "ET-0123456789ABCDEF", "attendeeName": "Nadia Pembeli",
+        "id": TICKET_ID, "code": "ET-0123456789ABCDEF0123456789ABCDEF", "attendeeName": "Nadia Pembeli",
         "orderReference": "TO-0123456789abcdef0123", "eventId": "nusa-malam",
         "eventArtist": "Nusa Malam", "eventCity": "Jakarta", "eventVenue": "Ruang Selatan",
         "eventAddress": "Jl. Musik Raya, Jakarta", "eventStartsAt": EVENT_START,
@@ -264,6 +264,28 @@ async def main():
                     assert await page.locator(".order-status").is_visible(), "The payment or order status should lead the order page."
                     assert await page.locator(".order-ticket-section").evaluate("element => element.compareDocumentPosition(document.querySelector('#refund-right-title').closest('.recovery-panel')) & Node.DOCUMENT_POSITION_FOLLOWING"), "Tickets should appear before refund details."
                     assert await page.locator(".order-breakdown").evaluate("element => element.compareDocumentPosition(document.querySelector('#refund-right-title').closest('.recovery-panel')) & Node.DOCUMENT_POSITION_PRECEDING"), "Order item details should follow refund information."
+                if route_name == "my-tickets":
+                    assert await page.get_by_role("link", name="Sudah membeli, tetapi tiket tidak muncul?").is_visible(), "Ticket recovery should remain easy to find above the ticket list."
+                    assert await page.locator(".my-ticket-card").count() == 1, "A saved order should render a concise ticket card."
+                if route_name == "ticket":
+                    assert await page.locator(".pass-details").evaluate("element => !element.open"), "Secondary ticket details should start collapsed."
+                    assert await page.locator(".qr-code").is_visible(), "The usable ticket should show its QR code."
+                    assert await page.locator(".pass-row").filter(has=page.get_by_text("Nadia Pembeli")).is_visible(), "Attendee details should remain visible beside the ticket QR."
+                    await page.evaluate("window.dispatchEvent(new Event('beforeprint'))")
+                    assert await page.locator(".pass-details").evaluate("element => element.open"), "Ticket details should open for printing."
+                    assert await page.get_by_text("Jl. Musik Raya, Jakarta").is_visible(), "The printed ticket should include the event address."
+                    await page.evaluate("window.dispatchEvent(new Event('afterprint'))")
+                    assert await page.locator(".pass-details").evaluate("element => !element.open"), "The on-screen ticket should restore the details state after printing."
+                if route_name == "guide":
+                    guide_copy = await page.locator("main").inner_text()
+                    assert "simulasi development" not in guide_copy and "Kode belum mendukung pemindaian QR" not in guide_copy, "Guide copy should reflect the current payment and ticket flow."
+                    await page.locator("#cara-kerja").get_by_role("button").first.click()
+                    assert await page.locator("#cara-kerja").get_by_role("button").first.get_attribute("aria-expanded") == "true", "Guide accordions should open with keyboard-accessible controls."
+                    assert await page.locator("#cara-kerja").get_by_role("region").count() == 1, "Expanded guide answers should be available to assistive technology."
+                if route_name == "recovery":
+                    await page.get_by_role("button", name="Kirim tautan pemulihan").click()
+                    assert await page.locator("#recovery-email").get_attribute("aria-invalid") == "true", "Recovery validation should identify a missing buyer email."
+                    assert await page.locator("#recovery-reference").get_attribute("aria-invalid") == "true", "Recovery validation should identify a missing order reference."
                 if route_name == "catalog" and viewport_name == "desktop":
                     assert await page.locator(".filters").evaluate("element => element.open"), "Catalog filters should start open on desktop."
                 if route_name == "detail":
@@ -292,6 +314,11 @@ async def main():
             for state in ("changed", "inactive"):
                 await page.goto(f"{BASE_URL}/tiket/{TICKET_ID}?snapshot={state}", wait_until="domcontentloaded")
                 await page.wait_for_timeout(350)
+                if state == "inactive":
+                    assert await page.locator(".qr-code").count() == 0, "Backend-inactive tickets should not render a usable QR."
+                    assert await page.get_by_text("Tidak aktif", exact=True).first.is_visible(), "Backend-inactive tickets should show their status."
+                if state == "changed":
+                    assert await page.get_by_role("status", name="Informasi terbaru acara").is_visible(), "Event changes should remain visible on the e-ticket."
                 captures.append(await capture(page, f"{viewport_name}-e-ticket-{state}", f"{viewport_name}, e-ticket {state}"))
             await page.goto(f"{BASE_URL}/pulihkan-tiket#token={TOKEN}", wait_until="domcontentloaded")
             await page.wait_for_timeout(350)
@@ -450,7 +477,8 @@ async def main():
             await context.close()
         await browser.close()
     if MODE == "current":
-        assert all(check["document"] <= check["viewport"] and check["body"] <= check["viewport"] for check in layout_checks), "A public page overflows the 320px viewport."
+        overflowing = [check for check in layout_checks if check["document"] > check["viewport"] or check["body"] > check["viewport"]]
+        assert not overflowing, f"Public pages overflow the 320px viewport: {overflowing}"
         assert any(check.get("kind") == "public-font" and check["loaded"] for check in isolation_checks), "The locally hosted Manrope font did not load."
         assert any(check.get("kind") == "dark-mode" and check["accent"] == "#769dff" for check in isolation_checks), "The public dark-mode accent token is missing."
         assert any(check.get("kind") == "admin-isolation" and not check["publicWrapper"] and check["adminMain"] for check in isolation_checks), "Admin was included in the public visual wrapper."

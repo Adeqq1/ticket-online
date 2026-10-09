@@ -19,6 +19,8 @@
   let toast = $state<{ id: number; message: string; tone: "success" | "error" } | null>(null);
   let toastId = 0;
   let controller: AbortController | undefined;
+  let ticketDetails = $state<HTMLDetailsElement>();
+  let detailsOpenBeforePrint = false;
   const qrSource = $derived(ticket?.usable === false ? null : ticketQrSource(ticket?.code));
   const errorMessage = $derived(error instanceof ApiError && error.code === "ACCESS_TOKEN_EXPIRED"
     ? "Akses tiket pada browser ini sudah kedaluwarsa."
@@ -70,9 +72,19 @@
       toast = { id: ++toastId, message: "Kode e-ticket disalin.", tone: "success" };
     } catch { toast = { id: ++toastId, message: "Kode tidak dapat disalin otomatis. Pilih dan salin kodenya secara manual.", tone: "error" }; }
   }
+
+  function preparePrint() {
+    detailsOpenBeforePrint = ticketDetails?.open ?? false;
+    if (ticketDetails) ticketDetails.open = true;
+  }
+
+  function finishPrint() {
+    if (ticketDetails) ticketDetails.open = detailsOpenBeforePrint;
+  }
 </script>
 
 <svelte:head><title>{ticket ? `${ticket.eventArtist} | E-Ticket Tiket Online` : "E-ticket | Tiket Online"}</title><meta name="description" content={ticket ? `E-ticket digital untuk konser ${ticket.eventArtist}.` : "E-ticket digital Tiket Online."} /><meta name="robots" content="noindex" /></svelte:head>
+<svelte:window onbeforeprint={preparePrint} onafterprint={finishPrint} />
 {#if loading}
   <p class="shell" role="status">Memuat e-ticket...</p>
 {:else if !ticket}
@@ -82,10 +94,17 @@
     <header><p class="ticket-kicker">E-ticket digital</p><h1>{ticket.usable === false ? "Informasi tiketmu." : "Tiketmu sudah siap."}</h1><p>{ticket.usable === false ? "Tiket ini tidak aktif untuk masuk. Periksa informasi acara dan pesanan." : "Tunjukkan kode e-ticket ini kepada petugas di gate yang tertera."}</p></header>
     <EventNotice state={ticket.currentEvent} />
     <article class="boarding-pass" aria-labelledby="ticket-title">
-      <section class="pass-main"><div class="pass-top"><span class="pass-label">Tiket Online</span><span class="pass-status">E-ticket</span></div><h2 id="ticket-title">{ticket.eventArtist}</h2><p class="pass-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
-        <div class="pass-grid"><div class="pass-row"><span>Pengunjung</span><b>{ticket.attendeeName}</b></div><div class="pass-row"><span>Tanggal event</span><b>{eventDate(currentStart(ticket))}</b></div><div class="pass-row"><span>Lokasi</span><b>{ticket.eventVenue}, {ticket.eventCity}</b></div><div class="pass-row"><span>Alamat</span><b>{ticket.eventAddress}</b></div><div class="pass-row"><span>Jenis tiket</span><b>{ticket.tierName}</b></div><div class="pass-row"><span>Gate</span><b>{ticket.gate}</b></div><div class="pass-row"><span>Kode pesanan (reference)</span><b>{ticket.orderReference}</b></div><div class="pass-row"><span>Diterbitkan</span><b>{eventDate(ticket.issuedAt)}</b></div></div>
+      <section class="pass-main">
+        <div class="pass-event">
+          <div class="pass-top"><span class="pass-label">Tiket Online</span><span class="pass-status">{ticket.usable === false ? "Tidak aktif" : "E-ticket"}</span></div>
+          <h2 id="ticket-title">{ticket.eventArtist}</h2><p class="pass-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
+          <div class="pass-grid"><div class="pass-row"><span>Pengunjung</span><b>{ticket.attendeeName}</b></div><div class="pass-row"><span>Tanggal event</span><b>{eventDate(currentStart(ticket))}</b></div><div class="pass-row"><span>Jenis tiket</span><b>{ticket.tierName}</b></div><div class="pass-row"><span>Gate</span><b>{ticket.gate}</b></div></div>
+        </div>
+        <details class="pass-details" bind:this={ticketDetails}><summary>Rincian penerbitan dan pesanan</summary>
+          <div class="ticket-lines"><div class="ticket-line"><span>Alamat</span><b>{ticket.eventAddress}</b></div><div class="ticket-line"><span>Kode pesanan (reference)</span><b>{ticket.orderReference}</b></div><div class="ticket-line"><span>Diterbitkan</span><b>{eventDate(ticket.issuedAt)}</b></div></div>
+        </details>
       </section>
-      <aside class="pass-stub"><div><span class="pass-label">Kode e-ticket</span>{#if qrSource}<img class="qr-code" src={qrSource} alt={`QR code untuk kode e-ticket ${ticket.code}`} />{:else}<p role="status">{ticket.usable === false ? "QR dinonaktifkan; tiket tidak dapat digunakan." : "QR tidak tersedia. Gunakan kode e-ticket di bawah."}</p>{/if}<p class="ticket-code">{ticket.code}</p>{#if ticket.usable !== false}<button class="button button-secondary" type="button" onclick={copyCode}>Salin kode</button>{/if}</div>{#if currentStart(ticket) && ticket.usable !== false}<Countdown startsAt={currentStart(ticket)!} />{/if}</aside>
+      <aside class="pass-stub"><div><span class="pass-label">Tunjukkan di gate</span>{#if qrSource}<img class="qr-code" src={qrSource} alt={`QR code untuk kode e-ticket ${ticket.code}`} />{:else}<p role="status">{ticket.usable === false ? "QR dinonaktifkan; tiket tidak dapat digunakan." : "QR tidak tersedia. Gunakan kode e-ticket di bawah."}</p>{/if}<p class="ticket-code">{ticket.code}</p>{#if ticket.usable !== false}<button class="button button-secondary" type="button" onclick={copyCode}>Salin kode</button>{/if}</div>{#if currentStart(ticket) && ticket.usable !== false}<Countdown startsAt={currentStart(ticket)!} />{/if}</aside>
     </article>
     <div class="ticket-actions"><button class="button" type="button" onclick={() => window.print()}>Cetak / Simpan PDF</button><a class="button button-secondary" href="/tiket-saya">Tiket Saya</a></div>
     <p class="ticket-caption">Simpan email ini untuk membuka e-ticket kembali. Tunjukkan QR atau kode e-ticket kepada petugas di gate.</p>

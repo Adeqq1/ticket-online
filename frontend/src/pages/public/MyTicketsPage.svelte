@@ -148,16 +148,18 @@
         <li>
           <article class="my-ticket-card">
             <div class="my-ticket-card-link">
-              <div class="my-ticket-poster" aria-hidden="true">{ticket.code}</div>
+              <div class="my-ticket-mark" aria-hidden="true">Tiket<br />digital</div>
               <div class="my-ticket-card-body">
                 <div class="my-ticket-card-topline">
-                  <span class:past={!upcoming(ticket)} class="my-ticket-status">{eventStatus(ticket.currentEvent) || (ticket.usable === false ? "Tidak aktif" : upcoming(ticket) ? "Mendatang" : "Selesai")}</span>
+                  <span class:past={!upcoming(ticket)} class="my-ticket-status">{ticket.usable === false ? "Tidak aktif" : eventStatus(ticket.currentEvent) || (upcoming(ticket) ? "Mendatang" : "Selesai")}</span>
                   {#if access}<a class="my-ticket-reference" href={`/pesanan/${encodeURIComponent(access.orderId)}`}>Kode pesanan (reference): {ticket.orderReference}</a>{:else}<span class="my-ticket-reference">Kode pesanan (reference): {ticket.orderReference}</span>{/if}
                 </div>
                 <h2>{ticket.eventArtist}</h2>
                 <p class="my-ticket-date">{eventDate(currentStart(ticket))}</p>
+                {#if ticket.currentEvent?.version}<p class="my-ticket-event-update" role="status">{ticket.currentEvent.announcement}</p>{/if}
                 <p class="my-ticket-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
-                <p class="my-ticket-venue">{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</p>
+                <p class="my-ticket-venue"><strong>{ticket.attendeeName}</strong></p>
+                <p class="my-ticket-venue">{ticket.tierName} · {ticket.gate}</p>
                 {#if persistent}
                   <a class="my-ticket-action" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Lihat e-ticket <span aria-hidden="true">→</span></a>
                 {:else}

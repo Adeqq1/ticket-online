@@ -2,14 +2,14 @@
   import Accordion from "../../components/Accordion.svelte";
 
   const purchaseSteps = [
-    { question: "Bagaimana simulasi pembelian tiket berjalan?", answer: "Pilih konser dari katalog, buka detail acara, lalu pilih jenis tiket yang tersedia. Isi data pemesan, pilih metode pembayaran, dan tinjau kembali detail pesanan sebelum menekan tombol Buat pesanan." },
-    { question: "Apakah pembayaran di website ini benar-benar diproses?", answer: "Tidak ada uang yang diproses. Metode QRIS, virtual account, dan GoPay hanya simulasi development, serta dinonaktifkan pada lingkungan lain." },
-    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah pembayaran dikonfirmasi server, ringkasan pesanan dan tautan e-ticket setiap peserta dikirim ke email pemesan. Kamu juga dapat membuka tiket tersimpan pada halaman Tiket Saya. Tunjukkan QR atau kode ET dan gate yang tercetak di tiket kepada petugas." }
+    { question: "Bagaimana cara memesan tiket?", answer: "Pilih konser dari katalog, buka detail acara, lalu pilih jenis tiket yang tersedia. Isi data pemesan, pilih metode pembayaran, dan tinjau kembali detail pesanan sebelum menekan tombol Buat pesanan." },
+    { question: "Di mana saya menemukan e-ticket setelah memesan?", answer: "Setelah server mengonfirmasi pembayaran, e-ticket diterbitkan untuk setiap peserta. Buka tautan di email atau lihat Tiket Saya. Tunjukkan QR dan gate yang tercetak di e-ticket kepada petugas." },
+    { question: "Bagaimana jika tiket tidak muncul di browser ini?", answer: "Pulihkan akses memakai email pembeli dan kode pesanan TO- dari email berjudul E-ticket pesanan. Kode pesanan berbeda dari kode e-ticket ET-." }
   ];
 
   const paymentRules = [
-    { question: "Metode pembayaran apa saja yang tersedia?", answer: "QRIS, virtual account, dan GoPay tersedia sebagai simulasi hanya pada lingkungan development yang mengaktifkannya. Pembayaran belum tersedia pada lingkungan lain." },
-    { question: "Kapan pesanan dianggap selesai?", answer: "Order menjadi lunas setelah server mengonfirmasi pembayaran. Server menerbitkan satu e-ticket untuk setiap peserta. Pembayaran simulasi tidak memproses transaksi uang." }
+    { question: "Metode pembayaran apa saja yang tersedia?", answer: "Pilihan yang tersedia mengikuti metode yang ditampilkan saat checkout. Selesaikan pembayaran melalui kanal tersebut dan gunakan detail pembayaran dari halaman pesanan." },
+    { question: "Kapan pesanan dianggap selesai?", answer: "Pesanan menjadi lunas setelah server mengonfirmasi pembayaran. E-ticket diterbitkan untuk setiap peserta setelah konfirmasi tersebut." }
   ];
 
   const refundRules = [
@@ -19,9 +19,9 @@
   ];
 
   const wristbandSteps = [
-    { question: "Apa yang perlu disiapkan sebelum menuju meja penukaran?", answer: "Pada versi produksi, buka e-ticket valid dan siapkan QR di layar ponsel sebelum menuju meja penukaran wristband. Untuk mencoba alur petugas, buka demo scanner di /admin/scan." },
-    { question: "Bagaimana proses penukaran wristband di venue?", answer: "Pada versi produksi, tunjukkan QR valid kepada petugas untuk diverifikasi sebelum menerima wristband sesuai kategori tiket. Pada simulasi ini tidak ada pemindaian, verifikasi, atau check-in venue yang nyata." },
-    { question: "Bolehkah menggunakan screenshot e-ticket?", answer: "Kode ET dapat disimpan atau dicetak sebagai PDF. Kode belum mendukung pemindaian QR; tunjukkan e-ticket pada browser yang menyimpan akses order." }
+    { question: "Apa yang perlu disiapkan sebelum menuju gate?", answer: "Buka e-ticket sebelum tiba di gate. Pastikan status tiket aktif, informasi acara terbaru sudah diperiksa, dan QR terlihat jelas di layar." },
+    { question: "Bagaimana tiket diperiksa di venue?", answer: "Tunjukkan QR e-ticket kepada petugas di gate yang tercetak pada tiket. Jangan bagikan QR atau kode tiket kepada orang lain." },
+    { question: "Bolehkah menyimpan atau mencetak e-ticket?", answer: "Gunakan tombol Cetak / Simpan PDF. QR, nama peserta, gate, jadwal, dan rincian tiket disertakan pada hasil cetak." }
   ];
 </script>
 
@@ -35,8 +35,10 @@
     <p class="eyebrow">PANDUAN TIKET</p>
     <h1 id="guide-title">Semua yang perlu kamu tahu sebelum datang.</h1>
   </div>
-  <p class="guide-intro">Ikuti alur pembelian, pahami ketentuannya, dan bedakan fitur simulasi dari proses venue versi produksi.</p>
+  <p class="guide-intro">Temukan cara mengakses tiket, menyelesaikan pembayaran, dan menyiapkan QR sebelum tiba di gate.</p>
 </section>
+
+<p class="guide-recovery shell"><a class="text-button" href="/pulihkan-tiket">Sudah membeli, tetapi tiket tidak muncul? Pulihkan tiket</a></p>
 
 <nav class="guide-index shell" aria-label="Daftar isi panduan">
   <a href="#cara-kerja"><span>01</span> Cara kerja</a>
