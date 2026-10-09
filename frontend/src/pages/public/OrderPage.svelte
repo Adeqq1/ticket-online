@@ -2,7 +2,8 @@
   import EventNotice from "../../components/EventNotice.svelte";
   import { emailAccessToken } from "../../lib/ticket-email-access.ts";
   import { onMount, tick } from "svelte";
-  import { ApiError, getOrder, requestEventRefund, resendOrderEmail, type ApiTicket, type OrderDetail } from "../../lib/api.ts";
+  import { ApiError, getOrder, listOrderTickets, requestEventRefund, resendOrderEmail, type ApiTicket, type OrderDetail } from "../../lib/api.ts";
+  import { buyerPaymentStatusLabel } from "../../lib/buyer-payment.ts";
   import { refundStatusLabel } from "../../lib/buyer-refund.ts";
   import { loadBuyerOrderTickets } from "../../lib/buyer-tickets.ts";
   import { eventDate, formatRupiah } from "../../lib/concerts.ts";
@@ -23,6 +24,11 @@
   let refundResult = $state<HTMLParagraphElement>();
   let pageController: AbortController | undefined;
   let emailToken: string | null = null;
+  let paymentBusy = $state(false);
+  let paymentCheckError = $state("");
+  let paymentMessage = $state("");
+  let ticketError = $state("");
+  let paymentResult = $state<HTMLParagraphElement>();
 
   async function load() {
     pageController?.abort();
@@ -41,6 +47,7 @@
       if (controller.signal.aborted) return;
       if (result.detail) detail = result.detail;
       tickets = result.tickets;
+      ticketError = result.detail && result.error ? result.error.message : "";
       if (result.detail) saveOrderAccess({ ...access, accessExpiresAt: result.detail.accessExpiresAt, ticketIds: [...new Set([...access.ticketIds, ...result.tickets.map((ticket) => ticket.id)])] });
       if (result.error) error = result.error.message;
       return Boolean(result.detail);
@@ -48,6 +55,39 @@
       if (!controller.signal.aborted) error = cause instanceof Error ? cause.message : "Pesanan belum dapat dimuat.";
       return false;
     } finally { if (!controller.signal.aborted) loading = false; }
+  }
+
+  async function checkPaymentStatus() {
+    const access = getOrderAccess(id);
+    if (!access || paymentBusy) return;
+    paymentBusy = true;
+    paymentCheckError = "";
+    paymentMessage = "";
+    try {
+      detail = await getOrder(id, access.accessToken);
+      paymentMessage = `Status pembayaran diperbarui: ${buyerPaymentStatusLabel(detail.status, detail.payment?.status)}.`;
+    } catch (cause) {
+      paymentCheckError = cause instanceof Error ? cause.message : "Terjadi gangguan jaringan.";
+      paymentMessage = "Status pembayaran terbaru belum dapat diperiksa.";
+    } finally {
+      paymentBusy = false;
+      await tick();
+      paymentResult?.focus();
+    }
+  }
+
+  async function reloadTickets() {
+    const access = getOrderAccess(id);
+    if (!access || paymentBusy || detail?.status !== "PAID") return;
+    paymentBusy = true;
+    ticketError = "";
+    try {
+      const expected = detail.items.reduce((count, item) => count + item.quantity, 0);
+      tickets = await listOrderTickets(id, access.accessToken);
+      if (tickets.length !== expected) ticketError = "Sebagian e-ticket belum dapat dimuat.";
+    } catch (cause) {
+      ticketError = cause instanceof Error ? cause.message : "Daftar tiket belum dapat dimuat.";
+    } finally { paymentBusy = false; }
   }
 
   async function checkRefundStatus() {
@@ -129,7 +169,7 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Detail pesanan</p>
     <h1>{detail ? detail.reference : "Pesanan"}</h1>
-    {#if detail}<p>{detail.status === "PAID" ? "Pembayaran dikonfirmasi." : detail.status === "REFUND_PENDING" ? "Pengembalian belum dikonfirmasi. Tiket tidak dapat digunakan selama pemeriksaan." : detail.status === "REFUNDED" ? "Pengembalian dana dikonfirmasi. Tiket pesanan ini sudah tidak berlaku." : detail.status === "CANCELLED" ? "Pesanan dibatalkan." : "Pesanan menunggu pembayaran."} {detail.accessExpiresAt ? `Akses berlaku sampai ${eventDate(detail.accessExpiresAt)}.` : "Akses tetap tersedia selama perubahan acara atau pengembalian belum selesai."}</p>{/if}
+    {#if detail}<p>{detail.status === "REFUND_PENDING" ? "Pengembalian belum dikonfirmasi. Tiket tidak dapat digunakan selama pemeriksaan." : detail.status === "REFUNDED" ? "Pengembalian dana dikonfirmasi. Tiket pesanan ini sudah tidak berlaku." : buyerPaymentStatusLabel(detail.status, detail.payment?.status)} {detail.accessExpiresAt ? `Akses berlaku sampai ${eventDate(detail.accessExpiresAt)}.` : "Akses tetap tersedia selama perubahan acara atau pengembalian belum selesai."}</p>{/if}
   </header>
 
   {#if loading}
@@ -138,6 +178,14 @@
     <div class="recovery-panel" role="alert"><p>{error || "Pesanan tidak dapat dimuat."}</p><a class="button" href="/pulihkan-tiket">Pulihkan tiket</a></div>
   {:else}
     {#if error}<p class="legacy-ticket-note" role="alert">{error}</p>{/if}
+    <section class="recovery-panel" aria-labelledby="payment-status-title">
+      <h2 id="payment-status-title">Status pembayaran</h2>
+      <p>{buyerPaymentStatusLabel(detail.status, detail.payment?.status)}</p>
+      {#if buyerPaymentStatusLabel(detail.status, detail.payment?.status) === "Menunggu konfirmasi pembayaran"}<p>Pembayaran belum dikonfirmasi. Tiket tersedia setelah pembayaran dikonfirmasi.</p>{/if}
+      {#if paymentCheckError}<p role="alert">Status pembayaran terbaru belum dapat diperiksa. {paymentCheckError} Status terakhir yang berhasil dibaca: {buyerPaymentStatusLabel(detail.status, detail.payment?.status)}.</p>{/if}
+      <p role="status" aria-live="polite" tabindex="-1" bind:this={paymentResult}>{paymentBusy ? "Memeriksa status pembayaran…" : paymentMessage}</p>
+      {#if detail.status === "PENDING"}<button class="button" type="button" disabled={paymentBusy} onclick={checkPaymentStatus}>{paymentBusy ? "Memeriksa…" : "Periksa status pembayaran"}</button>{/if}
+    </section>
     <EventNotice state={detail.currentEvent} />
     <button class="text-button" type="button" onclick={() => load()} disabled={refundBusy}>Muat ulang informasi pesanan</button>
     <div class="recovery-panel">
@@ -154,6 +202,7 @@
         {/each}
       </ul>
     {/if}
+    {#if detail.status === "PAID" && (!tickets.length || ticketError)}<section class="recovery-panel"><h2>Tiket</h2><p>{ticketError || "Tiket belum dimuat."}</p><button class="button button-secondary" type="button" disabled={paymentBusy} onclick={reloadTickets}>{paymentBusy ? "Memuat…" : "Muat ulang tiket"}</button></section>{/if}
     <section class="recovery-panel" aria-labelledby="refund-right-title">
       <h2 id="refund-right-title">Hak refund</h2>
       {#if detail.refundRight}<p>Anda berhak meminta refund penuh untuk seluruh order: {formatRupiah.format(detail.total)}, termasuk biaya admin sebesar {formatRupiah.format(detail.adminFee)}.</p>

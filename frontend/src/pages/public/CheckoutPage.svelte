@@ -1,7 +1,7 @@
 <script lang="ts">
  import EventNotice from "../../components/EventNotice.svelte";
   import { onMount, tick } from "svelte";
-  import { createOrder, createReservation, createSnapPayment, getEvent, getReservationEvent, getOrder, getReservation, listOrderTickets, simulatePayment, ApiError, type ApiTicket, type CreateOrderRequest, type OrderBase, type OrderDetail, type OrderResponse, type PaymentMethod, type Reservation } from "../../lib/api.ts";
+  import { createOrder, createReservation, createSnapPayment, getEvent, getReservationEvent, getOrder, getReservation, listOrderTickets, simulatePayment, ApiError, type ApiTicket, type CreateOrderRequest, type OrderBase, type OrderDetail, type OrderResponse, type PaymentMethod, type PaymentStatus, type Reservation } from "../../lib/api.ts";
   import { eventDate, formatRupiah, type Concert } from "../../lib/concerts.ts";
   import NotFoundPanel from "../../components/NotFoundPanel.svelte";
   import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, voucherDiscount, type Buyer } from "../../lib/checkout.ts";
@@ -9,6 +9,7 @@
   import { findOrderForActiveReservation, orderMatchesReservation, restoredReservationQuantities } from "../../lib/checkout-recovery.ts";
   import Toast from "../../components/Toast.svelte";
   import { concertTerms } from "../../lib/terms.ts";
+  import { buyerPaymentStatusLabel, canContinuePayment } from "../../lib/buyer-payment.ts";
   import { RESERVATION_DURATION_MS, isReservationExpired, remainingReservationSeconds, reservationBasketKey, parseCheckoutAttempt, parseStoredReservation, serializeStoredReservation, type StoredReservation } from "../../lib/reservation.ts";
   import { journeyId, recordConversion, trackConversionActivity } from "../../lib/conversion.ts";
   let { id }: { id: string } = $props();
@@ -28,14 +29,14 @@
   let reservation = $state<Reservation | undefined>();
   let reservationError = $state("");
   let creatingReservation = $state(false);
-  let activeOrder = $state<OrderBase | undefined>(); let orderAccess = $state<CheckoutOrderAccess | null>(null); let paymentStatus = $state(""); let checkoutUncertain = $state(false); let paymentUncertain = $state(false); let pendingCheckoutPayload = $state<CreateOrderRequest | null>(null); let restartCheckoutRequired = $state(false);
-  let issuedTickets = $state<ApiTicket[]>([]);
+  let activeOrder = $state<OrderBase | undefined>(); let orderAccess = $state<CheckoutOrderAccess | null>(null); let paymentStatus = $state<PaymentStatus | null>(null); let checkoutUncertain = $state(false); let paymentUncertain = $state(false); let pendingCheckoutPayload = $state<CreateOrderRequest | null>(null); let restartCheckoutRequired = $state(false);
+  let issuedTickets = $state<ApiTicket[]>([]); let ticketsLoading = $state(false); let paymentCheckMessage = $state("");
   const subtotal = $derived(activeOrder?.subtotal ?? reservation?.subtotal ?? 0);
   let step = $state(1); let payment = $state<PaymentMethod | "">(""); let voucherInput = $state(""); let voucher = $state(""); let completed = $state(false); let ticketIds = $state<string[]>([]); let reference = $state(""); let storageFailed = $state(false);
   let buyer = $state<Buyer>({ name: "", email: "", phone: "", identity: "" });
   let attendeeNames = $state<Record<string, string[]>>({}); let attendeeErrors = $state<Record<string, string[]>>({});
   let errors = $state<Record<keyof Buyer, string>>({ name: "", email: "", phone: "", identity: "" });
-  let paymentError = $state(""); let termsDialog = $state<HTMLDialogElement>(); let expiryDialog = $state<HTMLDialogElement>(); let toast = $state<{ id: number; message: string; tone: "success" | "info" | "error" } | null>(null); let toastId = 0; let expiresAt = $state<number | null>(null); let reservationExpired = $state(false); let remainingSeconds = $state(RESERVATION_DURATION_MS / 1_000); let storedReservation = $state<StoredReservation | null>(null); let converting = $state(false);
+  let paymentError = $state(""); let paymentCheckError = $state(""); let ticketError = $state(""); let statusResult = $state<HTMLParagraphElement>(); let termsDialog = $state<HTMLDialogElement>(); let expiryDialog = $state<HTMLDialogElement>(); let toast = $state<{ id: number; message: string; tone: "success" | "info" | "error" } | null>(null); let toastId = 0; let expiresAt = $state<number | null>(null); let reservationExpired = $state(false); let remainingSeconds = $state(RESERVATION_DURATION_MS / 1_000); let storedReservation = $state<StoredReservation | null>(null); let converting = $state(false);
   const discount = $derived(activeOrder?.discount ?? voucherDiscount(subtotal, voucher));
   const total = $derived(activeOrder?.total ?? subtotal + ADMIN_FEE - discount);
   const paymentLabel = $derived(payment === "VIRTUAL_ACCOUNT" ? "Virtual Account" : payment === "GOPAY" ? "GoPay" : payment);
@@ -116,7 +117,7 @@
     else { storageFailed = true; showToast("Akses pesanan hanya tersimpan selama halaman ini terbuka.", "error"); }
     return saved;
   }
-  async function restoreOrder(detail: OrderDetail, access: CheckoutOrderAccess, signal?: AbortSignal) {
+  async function restoreOrder(detail: OrderDetail, access: CheckoutOrderAccess, signal?: AbortSignal, loadTickets = true) {
     if (!concert) return;
     checkoutUncertain = false;
     pendingCheckoutPayload = null;
@@ -126,22 +127,41 @@
     storedReservation = { reservationId: detail.reservationId, idempotencyKey: access.idempotencyKey, eventId: concert.id, basketKey: reservationKey.slice(reservationKey.lastIndexOf(":") + 1) };
     expiresAt = Date.parse(detail.expiresAt);
     updateExpiryTimer();
-    step = 3; payment = detail.payment?.method ?? "QRIS"; paymentStatus = detail.payment?.status ?? "";
+    step = 3; payment = detail.payment?.method ?? "QRIS"; paymentStatus = detail.payment?.status ?? null;
+    paymentUncertain = false;
     reservationExpired = detail.status === "EXPIRED" || detail.status === "CANCELLED";
-    if (detail.status === "PAID") {
-      try { const tickets = await listOrderTickets(detail.id, access.accessToken, signal); saveIssuedTickets(tickets); completed = tickets.length === detail.items.reduce((count, item) => count + item.quantity, 0) && tickets.length > 0; if (!completed) paymentError = "Sebagian e-ticket belum dapat dimuat. Coba muat ulang."; }
-      catch (value) { if (!signal?.aborted) paymentError = value instanceof ApiError ? value.message : "Daftar tiket belum dapat dimuat."; }
+    if (detail.status === "PAID" && loadTickets) {
+      await reloadTickets(detail, access, signal);
     }
+  }
+  async function reloadTickets(detail = activeOrder, access = orderAccess, signal?: AbortSignal) {
+    if (ticketsLoading || !detail || !access || (detail.status !== "PAID" && !(detail.id === activeOrder?.id && paymentStatus === "SUCCEEDED"))) return;
+    ticketsLoading = true;
+    ticketError = "";
+    try {
+      const tickets = await listOrderTickets(detail.id, access.accessToken, signal);
+      saveIssuedTickets(tickets);
+      completed = tickets.length === detail.items.reduce((count, item) => count + item.quantity, 0) && tickets.length > 0;
+      if (!completed) ticketError = "Sebagian e-ticket belum dapat dimuat.";
+    } catch (value) {
+      if (!signal?.aborted) ticketError = value instanceof ApiError ? value.message : "Daftar tiket belum dapat dimuat.";
+    } finally { ticketsLoading = false; }
   }
   async function refreshOrderStatus() {
     if (!activeOrder || !orderAccess || converting) return;
     converting = true;
-    try { await restoreOrder(await getOrder(activeOrder.id, orderAccess.accessToken), orderAccess); paymentUncertain = false; }
-    catch (value) { paymentError = value instanceof ApiError ? value.message : "Status order belum dapat dimuat. Coba lagi."; }
-    finally { converting = false; }
+    paymentCheckError = "";
+    paymentCheckMessage = "";
+    try {
+      await restoreOrder(await getOrder(activeOrder.id, orderAccess.accessToken), orderAccess, undefined, false);
+      paymentCheckMessage = `Status pembayaran diperbarui: ${buyerPaymentStatusLabel(activeOrder.status, paymentStatus)}.`;
+    } catch (value) {
+      paymentCheckError = value instanceof Error ? value.message : "Terjadi gangguan jaringan.";
+      paymentCheckMessage = "Status pembayaran terbaru belum dapat diperiksa.";
+    } finally { converting = false; await tick(); statusResult?.focus(); }
   }
   async function completeOrder(result: "SUCCEEDED" | "FAILED" = "SUCCEEDED") {
-    if (!concert || !reservation || converting || (reservationExpired && !activeOrder && !checkoutUncertain) || (!checkoutUncertain && !paymentUncertain && checkExpiry())) return;
+    if (!concert || !reservation || converting || paymentUncertain || (reservationExpired && !activeOrder && !checkoutUncertain) || (!checkoutUncertain && checkExpiry())) return;
     converting = true;
     try {
       if (!activeOrder) {
@@ -159,28 +179,7 @@
         updateExpiryTimer();
       }
       if (!orderAccess || !activeOrder) throw new Error("Akses order tidak tersedia di memori browser");
-      if (activeOrder.status === "PAID") {
-        const tickets = await listOrderTickets(activeOrder.id, orderAccess.accessToken);
-        saveIssuedTickets(tickets);
-        if (tickets.length !== activeOrder.items.reduce((count, item) => count + item.quantity, 0)) throw new Error("Sebagian e-ticket belum tersedia. Coba muat ulang.");
-        completed = true;
-        paymentStatus = "SUCCEEDED";
-        return;
-      }
-      if (paymentUncertain) {
-        const detail = await getOrder(activeOrder.id, orderAccess.accessToken);
-        await restoreOrder(detail, orderAccess);
-        paymentUncertain = false;
-        if (detail.status === "PAID") {
-          if (!completed) paymentError = "Pembayaran terkonfirmasi, tetapi tiket belum dapat dimuat. Coba muat ulang.";
-          return;
-        }
-        if (detail.status === "EXPIRED" || detail.status === "CANCELLED") {
-          reservationExpired = true;
-          paymentError = "Order sudah kedaluwarsa atau dibatalkan.";
-          return;
-        }
-      }
+      if (activeOrder.status !== "PENDING") return;
       if (simulationEnabled) {
         paymentUncertain = true;
         const resultPayment = await simulatePayment(activeOrder.id, { method: payment || "QRIS", result }, orderAccess.accessToken);
@@ -189,12 +188,10 @@
         if (resultPayment.orderStatus === "PAID") activeOrder = { ...activeOrder, status: "PAID" };
         if (resultPayment.status === "FAILED") paymentError = "Pembayaran simulasi gagal. Coba bayar kembali untuk menyelesaikan pesanan.";
         else if (resultPayment.orderStatus === "PAID") {
-          const tickets = resultPayment.tickets.length ? resultPayment.tickets : await listOrderTickets(activeOrder.id, orderAccess.accessToken);
-          saveIssuedTickets(tickets);
-          if (tickets.length !== activeOrder.items.reduce((count, item) => count + item.quantity, 0)) throw new Error("Sebagian e-ticket belum dapat dimuat. Coba muat ulang halaman.");
-          completed = true;
+          if (resultPayment.tickets.length) saveIssuedTickets(resultPayment.tickets);
+          await reloadTickets(activeOrder, orderAccess);
           paymentError = "";
-          await tick(); document.querySelector<HTMLElement>("#success-title")?.focus();
+          if (completed) { await tick(); document.querySelector<HTMLElement>("#success-title")?.focus(); }
         } else paymentError = "Server belum mengonfirmasi pembayaran. Periksa status order sebelum mencoba lagi.";
       } else {
         const reservationForReturn = {
@@ -228,7 +225,7 @@
         if (!expiryDialog?.open) expiryDialog?.showModal();
       } else if (value instanceof ApiError && value.code === "RESERVATION_CANCELLED") reservationError = value.message;
       else if (value instanceof ApiError && value.code === "INVALID_VOUCHER") paymentError = value.message;
-      else paymentError = value instanceof ApiError ? value.message : "Pesanan belum dapat dibuat. Coba lagi.";
+      else { paymentError = value instanceof ApiError ? value.message : "Pesanan belum dapat dibuat. Coba lagi."; if (activeOrder && !(value instanceof ApiError && (value.status === 0 || value.status >= 500))) paymentUncertain = false; }
     } finally { converting = false; }
   }
   async function setupReservation(signal: AbortSignal, recoveryHint: StoredReservation | null = null) {
@@ -430,7 +427,7 @@
          </section>
       {:else if step === 1}<form id="buyer-form" novalidate onsubmit={submitBuyer}><div class="step-title"><p>Langkah 1 dari 3</p><h2 id="buyer-title" tabindex="-1">Data pemesan</h2><span>Data order disimpan pada browser yang sama; e-ticket belum dikirim lewat email.</span></div><div class="field-grid">{#each [{ name: "name", label: "Nama lengkap", type: "text" }, { name: "email", label: "Email", type: "email" }, { name: "phone", label: "No. HP", type: "tel" }, { name: "identity", label: "No. identitas", type: "text" }] as field}<label for={`buyer-${field.name}`}>{field.label}<input id={`buyer-${field.name}`} name={field.name} type={field.type} autocomplete={field.name === "name" ? "name" : field.name === "email" ? "email" : field.name === "phone" ? "tel" : "off"} inputmode={field.name === "phone" ? "tel" : field.name === "identity" ? "numeric" : undefined} maxlength={field.name === "name" ? 80 : undefined} disabled={Boolean(activeOrder) || checkoutUncertain} bind:value={buyer[field.name as keyof Buyer]} aria-describedby={`${field.name}-error`} aria-invalid={Boolean(errors[field.name as keyof Buyer])} class:is-invalid={Boolean(errors[field.name as keyof Buyer])} onblur={() => validate(field.name as keyof Buyer)} required /><small id={`${field.name}-error`} aria-live="polite">{errors[field.name as keyof Buyer]}</small></label>{/each}</div><section class="attendee-fields" aria-label="Nama pemegang tiket"><h3>Nama pemegang tiket</h3>{#each lines as line}<fieldset><legend>{line.quantity} tiket {line.tier.name}</legend>{#each attendeeNames[line.tier.id] ?? [] as _name, index}<label for={`attendee-${line.tier.id}-${index}`}>Peserta {index + 1}<input id={`attendee-${line.tier.id}-${index}`} value={attendeeNames[line.tier.id]?.[index] ?? ""} oninput={(event) => setAttendeeName(line.tier.id, index, event.currentTarget.value)} maxlength="80" autocomplete="off" disabled={Boolean(activeOrder) || checkoutUncertain} aria-invalid={Boolean(attendeeErrors[line.tier.id]?.[index])} required /><small class="form-error">{attendeeErrors[line.tier.id]?.[index] ?? ""}</small></label>{/each}</fieldset>{/each}</section><div class="step-actions"><span></span><button class="button" type="submit">Lanjut ke pembayaran</button></div></form>
       {:else if step === 2}<form id="payment-form" onsubmit={submitPayment}><div class="step-title"><p>Langkah 2 dari 3</p><h2 id="payment-title" tabindex="-1">Pilih metode bayar.</h2><span>{simulationEnabled ? "Mode pengembangan: pembayaran disimulasikan." : "Pembayaran diproses aman melalui Midtrans."}</span></div><fieldset aria-describedby="payment-error" class:has-error={Boolean(paymentError)}><legend class="sr-only">Metode pembayaran</legend><div class="payment-options">{#each [{ id: "QRIS", label: "QRIS" }, { id: "VIRTUAL_ACCOUNT", label: "Virtual Account" }, { id: "GOPAY", label: "GoPay" }] as method}<label class="payment-card"><input bind:group={payment} type="radio" name="payment" value={method.id} aria-describedby="payment-error" disabled={Boolean(activeOrder) || checkoutUncertain} /><span class="payment-logo" class:gopay={method.id === "GOPAY"}>{method.label}</span><span><b>{method.label}</b><small>{simulationEnabled ? "Simulasi" : "Pembayaran Midtrans"}</small></span></label>{/each}</div></fieldset><p id="payment-error" class="form-error" aria-live="polite">{paymentError}</p><div class="step-actions"><button class="text-button" type="button" disabled={Boolean(activeOrder) || checkoutUncertain} onclick={() => goToStep(1)}>Kembali</button><button class="button" type="submit">Tinjau pesanan</button></div></form>
-       {:else}<section id="confirmation"><div class="step-title"><p>Langkah 3 dari 3</p><h2 id="confirmation-title" tabindex="-1">Periksa sebelum memesan.</h2><span>Pastikan data dan pesananmu sudah benar.</span></div><div class="confirmation-block"><div><span>Pemesan</span><b>{buyer.name}</b><p>{buyer.email} · {buyer.phone}</p></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(1)}>Ubah data</button>{/if}</div><div class="confirmation-block"><div><span>Pembayaran</span><b>{paymentLabel}</b></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(2)}>Ubah metode</button>{/if}</div><p class="terms-trigger">Dengan melanjutkan, kamu menyetujui <button class="text-button" type="button" onclick={openTerms}>S&K Konser</button>.</p><p class="form-error" aria-live="polite">{paymentError}</p>{#if paymentStatus === "FAILED"}<p role="status">Pembayaran gagal. Order tetap tersimpan dan kamu dapat mencoba lagi.</p>{/if}{#if activeOrder && activeOrder.status === "PENDING"}<p role="status">{paymentStatus === "PENDING" ? "Menunggu konfirmasi pembayaran dari Midtrans." : "Pesanan siap dibayar."}</p><button class="text-button" type="button" disabled={converting} onclick={refreshOrderStatus}>Periksa status pembayaran</button>{/if}<div class="step-actions"><button class="text-button" type="button" disabled={checkoutUncertain} onclick={() => goToStep(2)}>Kembali</button>{#if !completed}<button class="button" type="button" disabled={converting || (reservationExpired && !paymentUncertain)} onclick={() => completeOrder("SUCCEEDED")}>{converting ? "Memproses..." : checkoutUncertain ? "Coba ulang checkout" : paymentUncertain ? "Periksa status pembayaran" : activeOrder ? activeOrder.status === "PAID" ? "Muat e-ticket lagi" : paymentStatus === "FAILED" ? "Coba bayar lagi" : "Lanjutkan pembayaran" : "Buat pesanan dan bayar"}</button>{/if}</div>{#if simulationEnabled && !activeOrder && !checkoutUncertain}<button class="text-button" type="button" disabled={reservationExpired || converting} onclick={() => completeOrder("FAILED")}>Simulasikan pembayaran gagal</button>{/if}</section>{/if}
+      {:else}<section id="confirmation"><div class="step-title"><p>Langkah 3 dari 3</p><h2 id="confirmation-title" tabindex="-1">Periksa sebelum memesan.</h2><span>Pastikan data dan pesananmu sudah benar.</span></div><div class="confirmation-block"><div><span>Pemesan</span><b>{buyer.name}</b><p>{buyer.email} · {buyer.phone}</p></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(1)}>Ubah data</button>{/if}</div><div class="confirmation-block"><div><span>Pembayaran</span><b>{paymentLabel}</b></div>{#if !activeOrder && !checkoutUncertain}<button class="text-button" type="button" onclick={() => goToStep(2)}>Ubah metode</button>{/if}</div><p class="terms-trigger">Dengan melanjutkan, kamu menyetujui <button class="text-button" type="button" onclick={openTerms}>S&K Konser</button>.</p><p class="form-error" aria-live="polite">{paymentError}</p>{#if activeOrder}<section class="recovery-panel"><h3>Status pembayaran</h3><p>{buyerPaymentStatusLabel(activeOrder.status, paymentStatus)}</p>{#if buyerPaymentStatusLabel(activeOrder.status, paymentStatus) === "Menunggu konfirmasi pembayaran"}<p>Pembayaran belum dikonfirmasi. Tiket tersedia setelah pembayaran dikonfirmasi.</p>{/if}{#if paymentCheckError}<p role="alert">Status pembayaran terbaru belum dapat diperiksa. {paymentCheckError} Status terakhir yang berhasil dibaca: {buyerPaymentStatusLabel(activeOrder.status, paymentStatus)}.</p>{/if}<p role="status" aria-live="polite" tabindex="-1" bind:this={statusResult}>{converting ? "Memeriksa status pembayaran…" : paymentCheckMessage}</p>{#if activeOrder.status === "PENDING" && paymentStatus !== "SUCCEEDED"}<button class="button" type="button" disabled={converting} onclick={refreshOrderStatus}>{converting ? "Memeriksa…" : "Periksa status pembayaran"}</button>{/if}{#if buyerPaymentStatusLabel(activeOrder.status, paymentStatus) === "Pembayaran dikonfirmasi"}<p>{ticketError || (completed ? "Tiket sudah tersedia." : ticketsLoading ? "Memuat tiket…" : "Tiket tersedia untuk dimuat.")}</p>{#if !completed}<button class="button button-secondary" type="button" disabled={ticketsLoading} onclick={() => reloadTickets()}>{ticketsLoading ? "Memuat…" : "Muat ulang tiket"}</button>{/if}{/if}</section>{/if}<div class="step-actions"><button class="text-button" type="button" disabled={checkoutUncertain || Boolean(activeOrder)} onclick={() => goToStep(2)}>Kembali</button>{#if !completed && !activeOrder}<button class="button" type="button" disabled={converting || paymentUncertain || reservationExpired} onclick={() => completeOrder("SUCCEEDED")}>{converting ? "Memproses..." : checkoutUncertain ? "Coba ulang checkout" : "Buat pesanan dan bayar"}</button>{:else if activeOrder?.status === "PENDING" && canContinuePayment(activeOrder.status) && paymentStatus !== "SUCCEEDED" && !paymentUncertain}<button class="button button-secondary" type="button" disabled={converting || reservationExpired} onclick={() => completeOrder("SUCCEEDED")}>{converting ? "Memproses…" : paymentStatus === "FAILED" ? "Coba bayar lagi" : "Lanjutkan pembayaran"}</button>{/if}</div>{#if simulationEnabled && !activeOrder && !checkoutUncertain}<button class="text-button" type="button" disabled={reservationExpired || converting} onclick={() => completeOrder("FAILED")}>Simulasikan pembayaran gagal</button>{/if}</section>{/if}
        </section><aside class="order-summary"><h2>Ringkasan pesanan</h2><p class="summary-event">{concert.artist}</p><p>{eventDate(concert.startsAt)}</p>{#each reservation.items as line}<div class="summary-line"><span>{line.quantity}x {line.name}</span><b>{formatRupiah.format(line.lineTotal)}</b></div>{/each}<div class="summary-line"><span>Biaya admin</span><b>{formatRupiah.format(activeOrder?.adminFee ?? ADMIN_FEE)}</b></div>{#if discount}<div class="summary-line discount-row"><span>Diskon</span><b>-{formatRupiah.format(discount)}</b></div>{/if}<form class="voucher-form" onsubmit={applyVoucher}><label for="voucher">Kode promo<input bind:value={voucherInput} id="voucher" autocomplete="off" disabled={Boolean(activeOrder) || checkoutUncertain || reservationExpired} /></label><button class="button button-small" type="submit" disabled={Boolean(activeOrder) || checkoutUncertain || reservationExpired}>Gunakan</button></form>{#if voucher}<p class:is-valid={Boolean(discount)} class="voucher-message" aria-live="polite">{activeOrder ? "Voucher tercatat pada pesanan." : discount ? "Estimasi promo HEMAT10 diterapkan." : "Kode voucher akan divalidasi server."}</p>{/if}<div class="grand-total"><span>{activeOrder ? "Total" : "Estimasi total"}</span><strong>{formatRupiah.format(total)}</strong></div>{#if !activeOrder && !checkoutUncertain}<small>Nominal akhir ditetapkan server setelah pesanan dibuat.</small>{/if}<button class="terms-button" type="button" onclick={openTerms}>Lihat S&amp;K Konser</button></aside></div>
    </section>
    <dialog class="terms-dialog" bind:this={termsDialog} aria-labelledby="terms-title"><div class="dialog-heading"><p class="checkout-kicker">Informasi penting</p><h2 id="terms-title">Syarat &amp; ketentuan konser</h2></div><div class="terms-dialog-list">{#each concertTerms as term}<section><h3>{term.title}</h3><p>{term.body}</p></section>{/each}</div><form method="dialog" class="dialog-actions"><button class="button" type="submit">Tutup</button></form></dialog>

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, requestEventRefund, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
+import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createSnapPayment, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, requestEventRefund, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -228,6 +228,23 @@ test("uses checkout idempotency and Bearer auth for order, payment, and ticket A
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("payment status reads use GET and continuing sends the saved method for the same order", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string; body?: string }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), method: init?.method ?? "GET", body: typeof init?.body === "string" ? init.body : undefined });
+    return Response.json(calls.length === 1 ? { status: "PENDING" } : { redirectUrl: "https://payments.example/session" });
+  }) as typeof fetch;
+  try {
+    await getOrder("same-order", "same-session-token");
+    await createSnapPayment("same-order", "VIRTUAL_ACCOUNT", "https://tickets.example/checkout/event", "same-session-token");
+    expect(calls).toEqual([
+      { url: "/api/v1/orders/same-order", method: "GET", body: undefined },
+      { url: "/api/v1/orders/same-order/payments", method: "POST", body: JSON.stringify({ method: "VIRTUAL_ACCOUNT", returnUrl: "https://tickets.example/checkout/event" }) },
+    ]);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("preserves checkout voucher errors from the backend", async () => {
