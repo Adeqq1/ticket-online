@@ -63,7 +63,7 @@ def ticket():
     }
 
 
-def order(status="PAID", payment_status="SUCCEEDED", event_state="SCHEDULED"):
+def order(status="PAID", payment_status="SUCCEEDED", event_state="SCHEDULED", refund_state=None, refund_deadline="2027-08-30T23:59:00+07:00"):
     result = {
         "id": ORDER_ID, "reference": "TO-0123456789abcdef0123", "reservationId": RESERVATION_ID,
         "status": status, "expiresAt": EXPIRY, "subtotal": 275000, "adminFee": 5000,
@@ -78,9 +78,9 @@ def order(status="PAID", payment_status="SUCCEEDED", event_state="SCHEDULED"):
     if event_state != "SCHEDULED":
         result["currentEvent"] = event(event_state)["currentEvent"]
     if event_state in ("POSTPONED", "RESCHEDULED"):
-        result["refundRight"] = {"requested": status in ("REFUND_PENDING", "REFUNDED"), "deadline": "2027-08-30T23:59:00+07:00"}
+        result["refundRight"] = {"requested": status in ("REFUND_PENDING", "REFUNDED"), "deadline": refund_deadline}
     if status in ("REFUND_PENDING", "REFUNDED"):
-        result["refund"] = {"status": "PROCESSING" if status == "REFUND_PENDING" else "SUCCEEDED", "amount": 280000}
+        result["refund"] = {"status": refund_state or ("PROCESSING" if status == "REFUND_PENDING" else "SUCCEEDED"), "amount": 280000}
     return result
 
 
@@ -90,7 +90,7 @@ def reservation():
             "items": [{"tierId": "festival", "name": "Festival", "quantity": 1, "unitPrice": 275000, "lineTotal": 275000}], "subtotal": 275000}
 
 
-def reply(path, scenario, page_state="standard"):
+def reply(path, scenario, page_state="standard", refund_requested=False):
     query = dict(item.split("=", 1) for item in path.query.split("&") if "=" in item)
     state = query.get("snapshot", page_state)
     endpoint = path.path
@@ -130,13 +130,34 @@ def reply(path, scenario, page_state="standard"):
         return 201, {**result, "accessToken": TOKEN}
     if endpoint.startswith("/api/v1/reservations/"):
         return 200, reservation()
+    if endpoint.endswith("/refund-request"):
+        if scenario == "phase23-refund-unknown":
+            return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Status pengajuan belum dapat dipastikan."}}
+        return 200, {"status": "REQUESTED"}
     if endpoint.startswith("/api/v1/orders/") and endpoint.endswith("/tickets"):
+        if scenario == "phase23-ticket-error":
+            return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Daftar tiket belum dapat dimuat."}}
         return 200, {"tickets": [ticket()]}
     if endpoint.startswith("/api/v1/orders/"):
-        status = {"pending": "PENDING", "cancelled": "CANCELLED", "expired": "EXPIRED", "refund-pending": "REFUND_PENDING", "refunded": "REFUNDED"}.get(state, "PAID")
+        status = {"pending": "PENDING", "cancelled": "CANCELLED", "expired": "EXPIRED", "refund-pending": "REFUND_PENDING", "refund-unknown": "REFUND_PENDING", "refund-manual": "REFUND_PENDING", "refund-failed": "REFUND_PENDING", "refunded": "REFUNDED"}.get(state, "PAID")
         payment_status = "PENDING" if status == "PENDING" else "SUCCEEDED"
-        event_state = "POSTPONED" if state in ("changed", "refund-pending", "refunded") else "SCHEDULED"
-        return 200, order(status, payment_status, event_state)
+        event_state = "POSTPONED" if state in ("changed", "refund-pending", "refund-unknown", "refund-manual", "refund-failed", "refunded", "no-deadline") else "RESCHEDULED" if state == "past-deadline" else "SCHEDULED"
+        refund_state = {"refund-unknown": "UNKNOWN", "refund-manual": "MANUAL_REQUIRED", "refund-failed": "FAILED"}.get(state)
+        refund_deadline = None if state == "no-deadline" else "2020-08-30T23:59:00+07:00" if state == "past-deadline" else "2027-08-30T23:59:00+07:00"
+        result = order(status, payment_status, event_state, refund_state, refund_deadline)
+        if scenario == "phase23-refund-eligible":
+            result = order("REFUND_PENDING" if refund_requested else "PAID", "SUCCEEDED", "POSTPONED", "PROCESSING" if refund_requested else None)
+        if scenario == "phase23-refund-eligible" and refund_requested:
+            result["status"] = "REFUND_PENDING"
+            result["refundRight"] = {"requested": True, "deadline": "2027-08-30T23:59:00+07:00"}
+            result["refund"] = {"status": "PROCESSING", "amount": 280000}
+        if scenario == "phase23-payment-accepted-pending":
+            result = order("PENDING", "SUCCEEDED")
+        if scenario == "phase23-checkout-retry":
+            result = order("PENDING", "PENDING")
+        if scenario == "phase23-refund-unknown":
+            result = order("PAID", "SUCCEEDED", "RESCHEDULED")
+        return 200, result
     if endpoint == "/api/v1/tickets/" + TICKET_ID:
         result = ticket()
         if state == "changed":
@@ -204,9 +225,24 @@ async def main():
                 url = urlparse(route.request.url)
                 page_params = dict(parse_qsl(urlparse(page.url).query))
                 scenario = page_params.get("scenario", "standard")
+                if url.path.endswith("/refund-request") and route.request.method == "POST":
+                    api.refund_post_count = getattr(api, "refund_post_count", 0) + 1
+                    if scenario == "phase23-refund-eligible":
+                        api.refund_requested = True
+                        await route.fulfill(status=200, content_type="application/json", body=json.dumps({"status": "REQUESTED"}))
+                        return
+                if url.path.endswith("/checkout") and "/reservations/" in url.path and route.request.method == "POST" and scenario == "phase23-checkout-retry":
+                    api.checkout_requests = getattr(api, "checkout_requests", [])
+                    api.checkout_requests.append({"key": route.request.headers.get("idempotency-key"), "payload": route.request.post_data_json})
+                    if len(api.checkout_requests) == 1:
+                        await route.fulfill(status=503, content_type="application/json", body=json.dumps({"error": {"code": "SERVICE_UNAVAILABLE", "message": "Respons order belum dapat dipastikan."}}))
+                        return
+                    result = order("PENDING", "PENDING")
+                    await route.fulfill(status=201, content_type="application/json", body=json.dumps({**result, "accessToken": TOKEN}))
+                    return
                 if scenario == "loading":
                     await asyncio.sleep(1.5)
-                status, body = reply(url, scenario, page_params.get("snapshot", "standard"))
+                status, body = reply(url, scenario, page_params.get("snapshot", "standard"), getattr(api, "refund_requested", False))
                 await route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
 
             async def photo(route):
@@ -224,6 +260,10 @@ async def main():
             for route_name, url, label in routes:
                 await page.goto(BASE_URL + url, wait_until="domcontentloaded")
                 await page.wait_for_timeout(350)
+                if route_name == "order":
+                    assert await page.locator(".order-status").is_visible(), "The payment or order status should lead the order page."
+                    assert await page.locator(".order-ticket-section").evaluate("element => element.compareDocumentPosition(document.querySelector('#refund-right-title').closest('.recovery-panel')) & Node.DOCUMENT_POSITION_FOLLOWING"), "Tickets should appear before refund details."
+                    assert await page.locator(".order-breakdown").evaluate("element => element.compareDocumentPosition(document.querySelector('#refund-right-title').closest('.recovery-panel')) & Node.DOCUMENT_POSITION_PRECEDING"), "Order item details should follow refund information."
                 if route_name == "catalog" and viewport_name == "desktop":
                     assert await page.locator(".filters").evaluate("element => element.open"), "Catalog filters should start open on desktop."
                 if route_name == "detail":
@@ -241,6 +281,14 @@ async def main():
                 await page.goto(f"{BASE_URL}/pesanan/{ORDER_ID}?snapshot={state}", wait_until="domcontentloaded")
                 await page.wait_for_timeout(350)
                 captures.append(await capture(page, f"{viewport_name}-pesanan-{state}", f"{viewport_name}, status pesanan {state}"))
+            for state in ("refund-unknown", "refund-manual", "refund-failed", "no-deadline", "past-deadline"):
+                await page.goto(f"{BASE_URL}/pesanan/{ORDER_ID}?snapshot={state}", wait_until="domcontentloaded")
+                await page.wait_for_timeout(350)
+                captures.append(await capture(page, f"{viewport_name}-pesanan-{state}", f"{viewport_name}, refund {state}"))
+            for scenario, label in (("phase23-ticket-error", "tiket-error"), ("phase23-payment-accepted-pending", "pembayaran-terkonfirmasi-pesanan-pending")):
+                await page.goto(f"{BASE_URL}/pesanan/{ORDER_ID}?scenario={scenario}", wait_until="domcontentloaded")
+                await page.wait_for_timeout(350)
+                captures.append(await capture(page, f"{viewport_name}-pesanan-{label}", f"{viewport_name}, pesanan {label}"))
             for state in ("changed", "inactive"):
                 await page.goto(f"{BASE_URL}/tiket/{TICKET_ID}?snapshot={state}", wait_until="domcontentloaded")
                 await page.wait_for_timeout(350)
@@ -260,7 +308,53 @@ async def main():
                     await page.locator('input[name="payment"][value="QRIS"]').check()
                     await page.get_by_role("button", name="Tinjau pesanan").click()
                 await page.wait_for_timeout(150)
+                if step == 1 and viewport_name == "mobile":
+                    assert await page.locator(".checkout-overview").is_visible(), "The mobile checkout total should remain visible before confirmation."
+                if step == 3:
+                    assert await page.locator(".summary-breakdown").evaluate("element => element.open"), "Cost details should be open at final confirmation."
+                    assert await page.get_by_text("Biaya admin", exact=True).is_visible(), "The admin fee should be visible before order confirmation."
+                    assert await page.evaluate("document.activeElement?.id === 'confirmation-title'"), "The final checkout step should receive keyboard focus."
+                    assert await page.locator(".skip-link").evaluate("element => getComputedStyle(element).top === '-64px'"), "The skip link should remain hidden unless it has keyboard focus."
                 captures.append(await capture(page, f"{viewport_name}-checkout-{label}", f"{viewport_name}, checkout langkah {step}"))
+            if viewport_name == "mobile":
+                await page.goto(BASE_URL + "/checkout/nusa-malam?festival=1", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Lanjut ke pembayaran").click()
+                invalid_name = page.locator("#buyer-name")
+                assert await invalid_name.get_attribute("aria-invalid") == "true" and await invalid_name.evaluate("element => document.activeElement === element"), "Invalid checkout fields should receive focus and expose their error state."
+                assert await page.locator("#name-error").inner_text(), "The validation message should remain beside its field."
+
+                await page.set_viewport_size({"width": 390, "height": 420})
+                await page.goto(BASE_URL + "/checkout/nusa-malam?festival=1", wait_until="domcontentloaded")
+                await page.get_by_label("Nama lengkap").focus()
+                await page.wait_for_timeout(500)
+                keyboard_layout = await page.evaluate("""() => { const input = document.querySelector('#buyer-name'); const bounds = input.getBoundingClientRect(); return {focused: document.activeElement === input, inputTop: bounds.top, inputBottom: bounds.bottom, stickyBottom: document.querySelector('.checkout-overview').getBoundingClientRect().bottom, viewport: innerHeight}; }""")
+                assert keyboard_layout["focused"] and keyboard_layout["inputTop"] >= keyboard_layout["stickyBottom"] and keyboard_layout["inputBottom"] <= keyboard_layout["viewport"], f"The focused field should remain visible below the sticky total in a short viewport; got {keyboard_layout}."
+
+                await page.goto(BASE_URL + "/checkout/nusa-malam?festival=1&scenario=phase23-checkout-retry", wait_until="domcontentloaded")
+                for selector, value in (("#buyer-name", "Nadia Pembeli"), ("#buyer-email", "nadia@example.test"), ("#buyer-phone", "08123456789"), ("#buyer-identity", "1234567890123456"), ("#attendee-festival-0", "Nadia Pembeli")):
+                    await page.locator(selector).fill(value)
+                await page.get_by_role("button", name="Lanjut ke pembayaran").click()
+                await page.locator('input[name="payment"][value="QRIS"]').check()
+                await page.get_by_role("button", name="Tinjau pesanan").click()
+                await page.get_by_role("button", name="Buat pesanan dan bayar").click()
+                await page.get_by_role("button", name="Coba ulang checkout").wait_for()
+                await page.reload(wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Status pembayaran").wait_for()
+                retries = getattr(api, "checkout_requests", [])
+                assert len(retries) == 2 and retries[0]["key"] == retries[1]["key"] and retries[0]["payload"] == retries[1]["payload"], f"Checkout recovery must reuse the same idempotency key and payload; got {retries}."
+
+                await page.goto(BASE_URL + f"/pesanan/{ORDER_ID}?scenario=phase23-refund-eligible", wait_until="domcontentloaded")
+                await page.get_by_role("checkbox", name="Saya memahami refund mencakup seluruh order dan semua tiket akan dinonaktifkan.").check()
+                await page.get_by_role("button", name="Ajukan refund penuh").click()
+                await page.get_by_text("Pengajuan diterima. Dana belum dinyatakan kembali", exact=False).wait_for()
+                assert getattr(api, "refund_post_count", 0) == 1, "A refund confirmation should submit one request."
+                assert await page.get_by_text("Sedang diproses", exact=True).count() == 1, "A requested refund must remain visibly pending."
+
+                await page.goto(BASE_URL + f"/pesanan/{ORDER_ID}?scenario=phase23-refund-unknown", wait_until="domcontentloaded")
+                await page.get_by_role("checkbox", name="Saya memahami refund mencakup seluruh order dan semua tiket akan dinonaktifkan.").check()
+                await page.get_by_role("button", name="Ajukan refund penuh").click()
+                await page.get_by_role("button", name="Periksa status").wait_for()
+                assert getattr(api, "refund_post_count", 0) == 2, "An uncertain refund request should not submit a duplicate automatically."
             if viewport_name == "mobile":
                 await page.set_viewport_size({"width": 390, "height": 844})
                 await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase22-normal", wait_until="domcontentloaded")

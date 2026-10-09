@@ -29,4 +29,29 @@
 .voucher-form label { flex: 1; }
 .voucher-message { color: var(--danger); }
 .voucher-message.is-valid { color: var(--accent); }
+.checkout-overview { display: none; }
+.summary-breakdown > summary { display: none; }
+.step-title { scroll-margin-top: calc(var(--checkout-overview-height, 0px) + 16px); }
+@media (max-width: 767px) {
+  .checkout .reservation-banner { display: none; }
+  .checkout-overview { position: sticky; z-index: 3; top: env(safe-area-inset-top, 0px); display: grid; gap: 3px; margin: 0 -16px 18px; padding: 10px 16px; border-block: 1px solid var(--line); background: var(--canvas); box-shadow: 0 5px 12px color-mix(in srgb, var(--ink) 8%, transparent); font-size: 13px; }
+  .checkout-overview > strong { display: flex; justify-content: space-between; gap: 12px; }
+  .checkout-overview > span { color: var(--muted); }
+  .checkout .order-summary { order: 1; position: static; padding: 14px; }
+  .checkout .order-summary h2 { margin-bottom: 6px; font-size: 20px; }
+  .checkout .order-summary > .summary-event, .checkout .order-summary > p:nth-of-type(2) { display: none; }
+  .checkout .summary-breakdown > summary { min-height: 44px; display: flex; align-items: center; color: var(--accent); font-weight: 700; cursor: pointer; }
+  .checkout .summary-breakdown > summary::-webkit-details-marker { display: none; }
+  .checkout .summary-breakdown:not([open]) > :not(summary) { display: none; }
+  .checkout .summary-breakdown .voucher-form { padding-block: 14px; }
+  .checkout .summary-breakdown .grand-total { margin-top: 8px; padding-top: 12px; }
+  .checkout .checkout-panel { order: 2; }
+  .checkout .field-grid input, .checkout .attendee-fields input { scroll-margin-block: calc(var(--checkout-overview-height, 0px) + 16px); }
+  .checkout .step-title { scroll-margin-top: calc(var(--checkout-overview-height, 0px) + env(safe-area-inset-top, 0px) + 16px); }
+}
+@media (max-width: 430px) {
+  .checkout-overview { margin-inline: -16px; }
+  .checkout .step-actions { gap: 12px; }
+  .checkout .step-actions > .button { white-space: normal; }
+}
 @media (max-width: 430px) { .checkout-steps li { display: grid; justify-items: start; align-content: start; gap: 6px; }.checkout-steps li:not(:last-child)::after { display: none; }.checkout-steps b { line-height: 1.2; }.checkout-steps span { width: 30px; height: 30px; } }
