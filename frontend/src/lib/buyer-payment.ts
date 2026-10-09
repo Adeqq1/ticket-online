@@ -13,3 +13,11 @@ export function buyerPaymentStatusLabel(orderStatus: OrderStatus, paymentStatus?
 export function canContinuePayment(orderStatus: OrderStatus) {
   return orderStatus === "PENDING";
 }
+
+export function checkoutTicketsComplete(orderStatus: OrderStatus, ticketCount: number, expected: number) {
+  return orderStatus === "PAID" && expected > 0 && ticketCount === expected;
+}
+
+export function showCheckoutPaymentCountdown(completed: boolean, orderStatus?: OrderStatus) {
+  return !completed && (!orderStatus || orderStatus === "PENDING");
+}

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buyerPaymentStatusLabel, canContinuePayment } from "./buyer-payment.ts";
+import { buyerPaymentStatusLabel, canContinuePayment, checkoutTicketsComplete, showCheckoutPaymentCountdown } from "./buyer-payment.ts";
 
 test("resolves payment labels from backend order and payment status", () => {
   expect(buyerPaymentStatusLabel("PENDING", null)).toBe("Belum dibayar");
@@ -15,4 +15,15 @@ test("resolves payment labels from backend order and payment status", () => {
   expect(canContinuePayment("PENDING")).toBe(true);
   expect(canContinuePayment("EXPIRED")).toBe(false);
   expect(canContinuePayment("CANCELLED")).toBe(false);
+});
+
+test("only a fully loaded PAID order completes checkout or keeps the payment countdown", () => {
+  expect(checkoutTicketsComplete("PAID", 2, 2)).toBe(true);
+  expect(checkoutTicketsComplete("PAID", 1, 2)).toBe(false);
+  expect(checkoutTicketsComplete("REFUND_PENDING", 2, 2)).toBe(false);
+  expect(checkoutTicketsComplete("REFUNDED", 2, 2)).toBe(false);
+  expect(showCheckoutPaymentCountdown(false, "PENDING")).toBe(true);
+  expect(showCheckoutPaymentCountdown(false, "PAID")).toBe(false);
+  expect(showCheckoutPaymentCountdown(false, "REFUNDED")).toBe(false);
+  expect(showCheckoutPaymentCountdown(false)).toBe(true);
 });

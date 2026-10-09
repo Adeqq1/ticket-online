@@ -7,7 +7,7 @@
   import { refundStatusLabel } from "../../lib/buyer-refund.ts";
   import { loadBuyerOrderTickets } from "../../lib/buyer-tickets.ts";
   import { eventDate, formatRupiah } from "../../lib/concerts.ts";
-  import { getOrderAccess, saveOrderAccess } from "../../lib/order-access.ts";
+  import { getOrderAccess, hasPersistentTicketAccess, saveOrderAccess, saveOrderTicketAccess } from "../../lib/order-access.ts";
 
   let { id }: { id: string } = $props();
   let detail = $state<OrderDetail | null>(null);
@@ -28,6 +28,7 @@
   let paymentCheckError = $state("");
   let paymentMessage = $state("");
   let ticketError = $state("");
+  let ticketAccessError = $state("");
   let paymentResult = $state<HTMLParagraphElement>();
 
   async function load() {
@@ -48,7 +49,10 @@
       if (result.detail) detail = result.detail;
       tickets = result.tickets;
       ticketError = result.detail && result.error ? result.error.message : "";
-      if (result.detail) saveOrderAccess({ ...access, accessExpiresAt: result.detail.accessExpiresAt, ticketIds: [...new Set([...access.ticketIds, ...result.tickets.map((ticket) => ticket.id)])] });
+      if (result.detail) {
+        const saved = saveOrderTicketAccess(access, result.detail.accessExpiresAt, result.tickets.map((ticket) => ticket.id));
+        ticketAccessError = saved ? "" : "Akses tiket belum tersimpan. Kode tiket terlihat selama halaman ini terbuka, tetapi tautan e-ticket memerlukan penyimpanan browser.";
+      }
       if (result.error) error = result.error.message;
       return Boolean(result.detail);
     } catch (cause) {
@@ -85,6 +89,8 @@
       const expected = detail.items.reduce((count, item) => count + item.quantity, 0);
       tickets = await listOrderTickets(id, access.accessToken);
       if (tickets.length !== expected) ticketError = "Sebagian e-ticket belum dapat dimuat.";
+      const saved = saveOrderTicketAccess(access, detail.accessExpiresAt, tickets.map((ticket) => ticket.id));
+      ticketAccessError = saved ? "" : "Akses tiket belum tersimpan. Kode tiket terlihat selama halaman ini terbuka, tetapi tautan e-ticket memerlukan penyimpanan browser.";
     } catch (cause) {
       ticketError = cause instanceof Error ? cause.message : "Daftar tiket belum dapat dimuat.";
     } finally { paymentBusy = false; }
@@ -198,10 +204,12 @@
     {#if tickets.length}
       <ul class="my-order-list" aria-label="E-ticket pesanan">
         {#each tickets as ticket (ticket.id)}
-          <li><article class="my-order-card"><div><b>{ticket.attendeeName}</b><p>{ticket.tierName} · Gate {ticket.gate} · {ticket.code}</p></div><a class="button button-secondary" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Buka e-ticket</a></article></li>
+          {@const persistent = hasPersistentTicketAccess(id, ticket.id)}
+          <li><article class="my-order-card"><div><b>{ticket.attendeeName}</b><p>{ticket.tierName} · Gate {ticket.gate} · {ticket.code}</p></div>{#if persistent}<a class="button button-secondary" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Buka e-ticket</a>{:else}<span>Kode tiket tersedia selama halaman ini terbuka.</span>{/if}</article></li>
         {/each}
       </ul>
     {/if}
+    {#if ticketAccessError}<p class="legacy-ticket-note" role="status">{ticketAccessError}</p>{/if}
     {#if detail.status === "PAID" && (!tickets.length || ticketError)}<section class="recovery-panel"><h2>Tiket</h2><p>{ticketError || "Tiket belum dimuat."}</p><button class="button button-secondary" type="button" disabled={paymentBusy} onclick={reloadTickets}>{paymentBusy ? "Memuat…" : "Muat ulang tiket"}</button></section>{/if}
     <section class="recovery-panel" aria-labelledby="refund-right-title">
       <h2 id="refund-right-title">Hak refund</h2>

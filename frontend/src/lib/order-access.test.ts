@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { getOrderAccess, getOrderAccessForTicket, hasPersistentOrderAccess, hasPersistentTicketAccess, listOrderAccess, parseOrderAccess, removeOrderAccess, saveOrderAccess, type OrderAccess } from "./order-access.ts";
+import { getOrderAccess, getOrderAccessForTicket, hasPersistentOrderAccess, hasPersistentTicketAccess, listOrderAccess, parseOrderAccess, removeOrderAccess, saveOrderAccess, saveOrderTicketAccess, type OrderAccess } from "./order-access.ts";
 
 const record = { orderId: "order-1", accessToken: "private-token", expiresAt: "2027-08-24T12:40:00Z", accessExpiresAt: "2027-08-25T00:00:00Z", reservationId: "reservation-1", idempotencyKey: "stable-key", basketKey: "festival=1", reference: "TO-ABCDEFGHIJ", ticketIds: ["ticket-1"] };
 
@@ -15,6 +15,21 @@ test("persists order access in localStorage and indexes tickets without putting 
     expect(listOrderAccess()).toEqual([record]);
     expect([...values.values()].join()).toContain("private-token");
     expect(parseOrderAccess(JSON.stringify({ ...record, expiresAt: "invalid" }))).toBeNull();
+  } finally {
+    removeOrderAccess(record.orderId);
+    if (original) Object.defineProperty(globalThis, "localStorage", original);
+    else delete (globalThis as { localStorage?: Storage }).localStorage;
+  }
+});
+
+test("reloaded tickets update the persisted ticket index and access expiry", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map<string, string>();
+  const storage = { get length() { return values.size; }, key: (index: number) => [...values.keys()][index] ?? null, getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); }, clear: () => values.clear() } as Storage;
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+  try {
+    expect(saveOrderTicketAccess({ ...record, ticketIds: [] }, "2027-08-26T00:00:00Z", ["ticket-2"])).toBe(true);
+    expect(getOrderAccessForTicket("ticket-2")).toMatchObject({ orderId: record.orderId, accessExpiresAt: "2027-08-26T00:00:00Z", ticketIds: ["ticket-2"] });
   } finally {
     removeOrderAccess(record.orderId);
     if (original) Object.defineProperty(globalThis, "localStorage", original);
@@ -95,14 +110,15 @@ test("tab storage preserves order recovery when local storage is unavailable", (
     basketKey: "basket-1", reference: "TO-ORDER1", ticketIds: ["ticket-1"],
   };
   try {
-    expect(saveOrderAccess(record)).toBe(true);
+    expect(saveOrderTicketAccess({ ...record, ticketIds: [] }, record.accessExpiresAt, ["ticket-2"])).toBe(true);
     expect(hasPersistentOrderAccess(record.orderId)).toBe(true);
-    expect(hasPersistentTicketAccess(record.orderId, "ticket-1")).toBe(true);
-    expect(listOrderAccess()).toContainEqual(record);
+    expect(hasPersistentTicketAccess(record.orderId, "ticket-2")).toBe(true);
+    expect(getOrderAccessForTicket("ticket-2")).toMatchObject({ orderId: record.orderId, ticketIds: ["ticket-2"] });
     Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { setItem() { throw new Error("blocked"); }, getItem() { throw new Error("blocked"); } } });
     const volatile = { ...record, orderId: "order-memory-only" };
-    expect(saveOrderAccess(volatile)).toBe(false);
+    expect(saveOrderTicketAccess(volatile, volatile.accessExpiresAt, ["ticket-2"])).toBe(false);
     expect(hasPersistentOrderAccess(volatile.orderId)).toBe(false);
+    expect(hasPersistentTicketAccess(volatile.orderId, "ticket-2")).toBe(false);
   } finally {
     removeOrderAccess(record.orderId);
     removeOrderAccess("order-memory-only");
