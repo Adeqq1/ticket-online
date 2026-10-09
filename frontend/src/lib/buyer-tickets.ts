@@ -1,5 +1,5 @@
 import { ApiError, getOrder, listOrderTickets, type ApiTicket, type OrderDetail } from "./api.ts";
-import type { OrderAccess } from "./order-access.ts";
+import { saveOrderAccess, type OrderAccess } from "./order-access.ts";
 
 export type BuyerOrderTickets = {
   access: OrderAccess;
@@ -15,7 +15,9 @@ export async function loadBuyerOrderTickets(access: OrderAccess, signal?: AbortS
   } catch (error) {
     return { access, detail: null, tickets: [], error: error instanceof Error ? error : new ApiError("Order belum dapat dimuat.", 0) };
   }
-  if (detail.status !== "PAID") return { access, detail, tickets: [], error: null };
+  access = { ...access, accessExpiresAt: detail.accessExpiresAt };
+  saveOrderAccess(access);
+  if (!["PAID", "REFUND_PENDING", "REFUNDED"].includes(detail.status)) return { access, detail, tickets: [], error: null };
   try {
     const tickets = await listOrderTickets(access.orderId, access.accessToken, signal);
     const expected = detail.items.reduce((count, item) => count + item.quantity, 0);

@@ -1,4 +1,4 @@
-import { eventDate, type Concert, type Genre, type StageZone, type TicketStatus, type TicketTier } from "./concerts.ts";
+import { eventDate, type Concert, type EventState, type Genre, type StageZone, type TicketStatus, type TicketTier } from "./concerts.ts";
 import type { Buyer } from "./checkout.ts";
 import { isRecoveryResult } from "./ticket-recovery.ts";
 
@@ -6,7 +6,7 @@ export type ApiZone = { id: string; name: string; description: string };
 export type ApiTicketTier = { id: string; name: string; zoneId: string; price: number; availableQuantity: number; maxPerOrder: number; benefit: string; gate: string; seating: "assigned" | "free-standing" };
 export type AdminTicketTier = ApiTicketTier & { capacity: number; boundQuantity: number; gateLocked: boolean };
 export type PublicationStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
-export type ApiEvent = { id: string; artist: string; city: string; venue: string; address: string; startsAt: string; genre: string; status: string; publicationStatus: PublicationStatus; image: string; description: string; lineup: string[]; price: number; zones: ApiZone[]; ticketTiers: ApiTicketTier[]; scheduleLocked: boolean };
+export type ApiEvent = { currentEvent?: EventState; id: string; artist: string; city: string; venue: string; address: string; startsAt: string; genre: string; status: string; publicationStatus: PublicationStatus; image: string; description: string; lineup: string[]; price: number; zones: ApiZone[]; ticketTiers: ApiTicketTier[]; scheduleLocked: boolean };
 export type AdminApiEvent = Omit<ApiEvent, "ticketTiers"> & { ticketTiers: AdminTicketTier[]; locationLocked: boolean };
 export type AdminEventInput = Pick<ApiEvent, "id" | "artist" | "city" | "venue" | "address" | "startsAt" | "genre" | "status" | "publicationStatus" | "image" | "description" | "lineup">;
 export type ApiErrorBody = { error?: { code?: string; message?: string; expectedGate?: string }; status?: string; ticket?: CheckInTicket; checkedInAt?: string };
@@ -19,11 +19,11 @@ export type PaymentStatus = "PENDING" | "FAILED" | "SUCCEEDED";
 export type OrderAttendeeInput = { tierId: string; names: string[] };
 export type CreateOrderRequest = { buyer: Buyer; attendees: OrderAttendeeInput[]; voucherCode?: string };
 export type OrderBase = { id: string; reference: string; reservationId: string; status: OrderStatus; expiresAt: string; subtotal: number; adminFee: number; discount: number; total: number; items: OrderItem[] };
-export type OrderResponse = OrderBase & { accessToken: string; accessExpiresAt: string };
-export type OrderDetail = OrderBase & { buyer: Buyer; attendees: Array<{ tierId: string; ticketNumber: number; name: string }>; payment: PaymentSummary | null; createdAt: string; updatedAt: string; eventStartsAt: string; accessExpiresAt: string };
+export type OrderResponse = OrderBase & { accessToken: string; accessExpiresAt: string | null };
+export type OrderDetail = OrderBase & { buyer: Buyer; attendees: Array<{ tierId: string; ticketNumber: number; name: string }>; payment: PaymentSummary | null; createdAt: string; updatedAt: string; eventStartsAt: string; accessExpiresAt: string | null; currentEvent?: EventState; refundRight?: { requested: boolean; deadline: string | null } | null; refund?: { status: string; amount: number } | null };
 export type PaymentSummary = { id: string; method: PaymentMethod; amount: number; status: PaymentStatus; paidAt?: string };
 export type SimulatePaymentRequest = { method: PaymentMethod; result: PaymentStatus };
-export type ApiTicket = { id: string; code: string; attendeeName: string; orderReference: string; eventId: string; eventArtist: string; eventCity: string; eventVenue: string; eventAddress: string; eventStartsAt: string; tierName: string; gate: string; issuedAt: string };
+export type ApiTicket = { currentEvent?: EventState; usable?: boolean; id: string; code: string; attendeeName: string; orderReference: string; eventId: string; eventArtist: string; eventCity: string; eventVenue: string; eventAddress: string; eventStartsAt: string; tierName: string; gate: string; issuedAt: string };
 export type PaymentResult = { id: string; orderId: string; orderStatus: "PENDING" | "PAID"; method: PaymentMethod; amount: number; status: PaymentStatus; paidAt?: string; tickets: ApiTicket[] };
 export type StaffRole = "ADMIN" | "STAFF";
 export type StaffAssignment = { eventId: string; gate: string };
@@ -35,8 +35,8 @@ export type UpdateStaffRequest = { name?: string; active?: boolean };
 export type CheckInTicket = { id: string; code: string; attendeeName: string; tierName: string; eventId: string; gate: string };
 export type CheckInResult = { status: "CHECKED_IN"; ticket: CheckInTicket; checkedInAt: string };
 export type CheckInRequest = { eventId: string; gate: string; code: string };
-export type TicketCheckInStatus = { status: "CHECKED_IN" | "NOT_CHECKED_IN"; ticket: CheckInTicket; orderStatus: OrderStatus; checkedInAt: string | null };
-export type CheckInOutcome = "CHECKED_IN" | "TICKET_ALREADY_USED" | "INVALID_REQUEST" | "TICKET_NOT_FOUND" | "ORDER_NOT_PAID" | "WRONG_GATE" | "FORBIDDEN";
+export type TicketCheckInStatus = { status: "CHECKED_IN" | "NOT_CHECKED_IN"; ticket: CheckInTicket; orderStatus: OrderStatus; checkedInAt: string | null; currentEvent?: EventState; canCheckIn?: boolean };
+export type CheckInOutcome = "CHECKED_IN" | "TICKET_ALREADY_USED" | "INVALID_REQUEST" | "TICKET_NOT_FOUND" | "ORDER_NOT_PAID" | "WRONG_GATE" | "FORBIDDEN" | "EVENT_CHANGED";
 export type CheckInHistoryItem = { id: string; code: string | null; eventId: string | null; eventName: string | null; gate: string | null; staff: { id: string; name: string }; outcome: CheckInOutcome; recordedAt: string; checkedInAt: string | null };
 export type CheckInHistoryEvent = { id: string; name: string; gates: string[] };
 export type CheckInHistoryPage = { items: CheckInHistoryItem[]; nextCursor: string | null; filterOptions: CheckInHistoryEvent[] };
@@ -44,13 +44,13 @@ export type CheckInHistoryFilter = { eventId?: string; gate?: string; q?: string
 export type AdminOrder = { id: string; reference: string; status: OrderStatus; eventId: string; eventName: string; buyerName: string; createdAt: string; ticketCount: number; total: number };
 export type AdminOrderItem = { tierId: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
 export type AdminOrderTicket = { id: string; code: string; attendeeName: string; tierName: string; gate: string; status: "CHECKED_IN" | "NOT_CHECKED_IN"; checkedInAt: string | null; checkedInBy: string | null };
-export type AdminOrderDetail = AdminOrder & { buyer: { name: string; email: string; phone: string; identityMasked: string }; subtotal: number; adminFee: number; discount: number; expiresAt: string; items: AdminOrderItem[]; payment: { method: PaymentMethod; amount: number; status: PaymentStatus; paidAt: string | null } | null; tickets: AdminOrderTicket[] };
+export type AdminOrderDetail = AdminOrder & { buyer: { name: string; email: string; phone: string; identityMasked: string }; subtotal: number; adminFee: number; discount: number; expiresAt: string; items: AdminOrderItem[]; payment: { method: PaymentMethod; amount: number; status: PaymentStatus; paidAt: string | null } | null; tickets: AdminOrderTicket[]; currentEvent?: EventState; refund?: { status: string; amount: number; reason: string; manualReference: string; manualPaidAt: string | null } | null };
 export type AdminOrderFilter = { q?: string; eventId?: string; status?: OrderStatus; dateFrom?: string; dateTo?: string; cursor?: string };
 export type AdminOrderPage = { items: AdminOrder[]; nextCursor: string | null; filterOptions: { events: Array<{ id: string; name: string }> } };
 export type AdminIssueAudit = { action: string; actorName: string; createdAt: string; data: Record<string, unknown> };
 export type AdminPaymentCase = { id: string; status: "OPEN" | "RESOLVED"; orderId: string; reference: string; eventName: string; orderStatus: OrderStatus; paymentStatus: PaymentStatus; providerStatus: string; reason: string; amount: number; createdAt: string; updatedAt: string; lastCheckedAt: string | null; lastCheckError: string; checkInProgress: boolean };
 export type AdminPaymentCaseDetail = AdminPaymentCase & { total: number; expiresAt: string; gatewayOrderId: string; canRecheck: boolean; canResolve: boolean; notes: AdminIssueAudit[]; history: AdminIssueAudit[] };
-export type AdminEmailJob = { id: string; kind: "TICKETS" | "RECOVERY" | "REFUND"; status: "FAILED" | "PENDING" | "SENT" | "PROCESSING"; reference: string; recipient: string; attempts: number; lastError: string; updatedAt: string; supersededBy: string | null };
+export type AdminEmailJob = { id: string; kind: "TICKETS" | "RECOVERY" | "REFUND" | "EVENT_CHANGE"; status: "FAILED" | "PENDING" | "SENT" | "PROCESSING"; reference: string; recipient: string; attempts: number; lastError: string; updatedAt: string; supersededBy: string | null };
 export type AdminEmailDetail = AdminEmailJob & { orderStatus: string; canRetry: boolean; retryReason: string; retryJobId: string | null; history: AdminIssueAudit[] };
 export type AdminWorkerStatus = { name: string; running: boolean; startedAt: string | null; lastFinishedAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; consecutiveFailures: number };
 export type AdminOperations = { collectedAt: string; api5xxLast5m: number; failedEmailJobs: number; oldestPendingEmailSeconds: number; openPaymentCases: number; openRefunds: number; heldTickets: number; pendingPayments: number; workers: AdminWorkerStatus[]; alerts: string[] };
@@ -58,6 +58,9 @@ export type AdminSalesAmounts = { successfulTransactions: number; paymentAmount:
 export type AdminSalesReport = { period: { eventId: string | null; dateFrom: string; dateTo: string; timeZone: "Asia/Jakarta" }; summary: AdminSalesAmounts; daily: Array<{ date: string } & AdminSalesAmounts>; byEvent: Array<{ id: string; name: string } & AdminSalesAmounts>; filterOptions: { events: Array<{ id: string; name: string }> }; dataUpdatedAt: string };
 export type AdminAttendanceAmounts = { capacity: number; available: number; issued: number; eligible: number; heldForRefund: number; checkedIn: number; attendanceRate: number | null };
 export type AdminAttendanceReport = { event: { id: string; name: string }; gate: string | null; timeZone: "Asia/Jakarta"; summary: AdminAttendanceAmounts; byCategory: Array<{ id: number; name: string } & AdminAttendanceAmounts>; byGate: Array<{ gate: string | null } & AdminAttendanceAmounts>; hourly: Array<{ hour: string; checkedIn: number }>; filterOptions: { gates: string[] }; dataUpdatedAt: string };
+export type ConversionStage = { detail: number; reservation: number; order: number; paymentStarted: number; paymentSucceeded: number };
+export type ConversionBreakdown = { eventId?: string; eventName?: string; device?: string; total: ConversionStage; matured: ConversionStage; pendingObservation: number; lost: Record<string, number> };
+export type ConversionReport = { period: { eventId: string; device: string; dateFrom: string; dateTo: string; timeZone: "Asia/Jakarta"; observationHours: number }; summary: ConversionBreakdown; byEvent: ConversionBreakdown[]; byDevice: ConversionBreakdown[]; blockers: Array<{ kind: string; reason: string; count: number }>; unattributedReservations: number | null; unattributedPayments: number | null; dataUpdatedAt: string };
 
 export class ApiError extends Error {
   code: string;
@@ -132,7 +135,7 @@ export function saveAdminReportCSV(blob: Blob, filename: string) {
 
 export function mapApiEvent(event: ApiEvent): Concert {
   return {
-    id: event.id, artist: event.artist, city: event.city, venue: event.venue, address: event.address,
+    currentEvent: event.currentEvent, id: event.id, artist: event.artist, city: event.city, venue: event.venue, address: event.address,
     date: eventDate(event.startsAt), startsAt: event.startsAt, genre: event.genre as Genre,
     price: event.price, status: event.status as TicketStatus, image: event.image, description: event.description,
     lineup: event.lineup, zones: event.zones as StageZone[], ticketTiers: event.ticketTiers.map((tier) => ({ ...tier, stock: tier.availableQuantity, seating: tier.seating as TicketTier["seating"] })),
@@ -196,6 +199,11 @@ export function getAdminAttendanceReport(accessToken: string, filters: { eventId
   if (filters.gate) query.set("gate", filters.gate);
   return adminIssueRequest<AdminAttendanceReport>(accessToken, `/api/v1/admin/reports/attendance?${query}`, signal);
 }
+export function getAdminConversionReport(accessToken: string, filters: { eventId?: string; device?: string; dateFrom?: string; dateTo?: string } = {}, signal?: AbortSignal) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+  return adminIssueRequest<ConversionReport>(accessToken, `/api/v1/admin/reports/conversion${query.size ? `?${query}` : ""}`, signal);
+}
 export function exportAdminAttendanceReportCSV(accessToken: string, filters: { eventId: string; gate?: string }, signal?: AbortSignal) {
   const query = new URLSearchParams({ eventId: filters.eventId });
   if (filters.gate) query.set("gate", filters.gate);
@@ -216,16 +224,16 @@ export type AdminTierInput = Omit<AdminTicketTier,"availableQuantity"|"boundQuan
 export function createAdminTier(accessToken: string, eventId: string, payload: AdminTierInput) { return request<AdminTicketTier>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/ticket-tiers`, undefined, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 201); }
 export function updateAdminTier(accessToken: string, eventId: string, tierId: string, payload: Omit<AdminTierInput,"id">) { return request<AdminTicketTier>(`/api/v1/admin/events/${encodeURIComponent(eventId)}/ticket-tiers/${encodeURIComponent(tierId)}`, undefined, { method: "PUT", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
 
-export function createReservation(eventId: string, items: Array<{ tierId: string; quantity: number }>, idempotencyKey: string, signal?: AbortSignal) {
-  return request<Reservation>("/api/v1/reservations", signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ eventId, items }) });
+export function createReservation(eventId: string, items: Array<{ tierId: string; quantity: number }>, idempotencyKey: string, signal?: AbortSignal, journeyId?: string) {
+  return request<Reservation>("/api/v1/reservations", signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, ...(journeyId ? { "X-Conversion-Journey": journeyId } : {}) }, body: JSON.stringify({ eventId, items }) });
 }
 
 export function getReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}`, signal); }
 
 export function convertReservation(id: string, signal?: AbortSignal) { return request<Reservation>(`/api/v1/reservations/${encodeURIComponent(id)}/convert`, signal, { method: "POST" }); }
 
-export function createOrder(reservationId: string, payload: CreateOrderRequest, idempotencyKey: string, signal?: AbortSignal) {
-  return request<OrderResponse>(`/api/v1/reservations/${encodeURIComponent(reservationId)}/checkout`, signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(payload) });
+export function createOrder(reservationId: string, payload: CreateOrderRequest, idempotencyKey: string, signal?: AbortSignal, journeyId?: string) {
+  return request<OrderResponse>(`/api/v1/reservations/${encodeURIComponent(reservationId)}/checkout`, signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, ...(journeyId ? { "X-Conversion-Journey": journeyId } : {}) }, body: JSON.stringify(payload) });
 }
 
 function privateHeaders(accessToken: string): HeadersInit { return { Authorization: `Bearer ${accessToken}` }; }
@@ -329,7 +337,7 @@ export function getAdminCheckInHistory(accessToken: string, filters: CheckInHist
 function isCheckInHistoryPage(value: unknown): value is CheckInHistoryPage {
   if (!value || typeof value !== "object") return false;
   const page = value as Partial<CheckInHistoryPage>;
-  const outcomes: CheckInOutcome[] = ["CHECKED_IN", "TICKET_ALREADY_USED", "INVALID_REQUEST", "TICKET_NOT_FOUND", "ORDER_NOT_PAID", "WRONG_GATE", "FORBIDDEN"];
+  const outcomes: CheckInOutcome[] = ["CHECKED_IN", "TICKET_ALREADY_USED", "INVALID_REQUEST", "TICKET_NOT_FOUND", "ORDER_NOT_PAID", "WRONG_GATE", "FORBIDDEN", "EVENT_CHANGED"];
   return Array.isArray(page.items) && (page.nextCursor === null || (typeof page.nextCursor === "string" && /^[1-9]\d*$/.test(page.nextCursor))) && Array.isArray(page.filterOptions) &&
     page.items.every((item) => Boolean(item && typeof item.id === "string" && /^\d+$/.test(item.id) &&
       (item.code === null || (typeof item.code === "string" && /^ET-[0-9A-F]{32}$/.test(item.code))) &&
@@ -346,9 +354,9 @@ function isTicketCheckInStatus(value: unknown): value is TicketCheckInStatus {
   if (!value || typeof value !== "object") return false;
   const result = value as Partial<TicketCheckInStatus>;
   const ticket = result.ticket;
-  if (!ticket || typeof ticket !== "object" || !["PENDING", "PAID", "CANCELLED", "EXPIRED"].includes(result.orderStatus ?? "")) return false;
+  if (!ticket || typeof ticket !== "object" || !["PENDING", "PAID", "CANCELLED", "EXPIRED", "REFUND_PENDING", "REFUNDED"].includes(result.orderStatus ?? "")) return false;
   const checkedIn = result.status === "CHECKED_IN";
-  if ((!checkedIn && result.status !== "NOT_CHECKED_IN") || (checkedIn && (typeof result.checkedInAt !== "string" || !Number.isFinite(Date.parse(result.checkedInAt)) || result.orderStatus !== "PAID")) || (!checkedIn && result.checkedInAt !== null)) return false;
+  if ((!checkedIn && result.status !== "NOT_CHECKED_IN") || (checkedIn && (typeof result.checkedInAt !== "string" || !Number.isFinite(Date.parse(result.checkedInAt)))) || (!checkedIn && result.checkedInAt !== null)) return false;
   const candidate = ticket as Partial<CheckInTicket>;
   return typeof candidate.id === "string" && /^[0-9a-f]{32}$/.test(candidate.id) && typeof candidate.code === "string" &&
     candidate.code === `ET-${candidate.id.toUpperCase()}` && typeof candidate.attendeeName === "string" && Boolean(candidate.attendeeName.trim()) &&
@@ -367,4 +375,25 @@ function isCheckInResult(value: unknown, request: CheckInRequest): value is Chec
     candidate.eventId === request.eventId && candidate.gate === request.gate &&
     typeof candidate.attendeeName === "string" && candidate.attendeeName.trim() &&
     typeof candidate.tierName === "string" && candidate.tierName.trim());
+}
+
+export type EventChangeInput = { action: "POSTPONED" | "RESCHEDULED" | "CANCELLED"; reason: string; announcement: string; startsAt: string | null; refundDeadline: string | null; expectedVersion: number; snapshot: string };
+export type EventChangeImpact = { activeReservations: number; pendingOrders: number; pendingPayments: number; paidOrders: number; issuedTickets: number; checkIns: number; existingRefunds: number; automaticAmount: number; manualAmount: number };
+export type EventChangePreview = { event: EventState; snapshot: string; impact: EventChangeImpact };
+export type EventChange = { id: string; version: number; action: EventChangeInput["action"]; reason: string; announcement: string; previousStartsAt: string | null; startsAt: string | null; refundDeadline: string | null; staffId: string; createdAt: string; remainingOrders: number; errors: number };
+export function previewEventChange(token: string, id: string, input: EventChangeInput, signal?: AbortSignal) {
+  return request<EventChangePreview>(`/api/v1/admin/events/${encodeURIComponent(id)}/changes/preview`, signal, staffJSON(token, input));
+}
+export function commitEventChange(token: string, id: string, input: EventChangeInput, key: string) {
+  const init = staffJSON(token, input);
+  return request<{ id: string; version: number }>(`/api/v1/admin/events/${encodeURIComponent(id)}/changes`, undefined, { ...init, headers: { ...init.headers, "Idempotency-Key": key } });
+}
+export function getEventChanges(token: string, id: string, signal?: AbortSignal) {
+  return request<EventChange[]>(`/api/v1/admin/events/${encodeURIComponent(id)}/changes`, signal, { headers: staffHeaders(token) });
+}
+export function requestEventRefund(id: string, token: string) {
+  return request<{ status: string }>(`/api/v1/orders/${encodeURIComponent(id)}/refund-request`, undefined, { method: "POST", headers: privateHeaders(token) });
+}
+export function completeManualRefund(token: string, id: string, input: { reference: string; paidAt: string; note: string }) {
+  return request<{ status: string; amount: number }>(`/api/v1/admin/orders/${encodeURIComponent(id)}/refund/manual`, undefined, staffJSON(token, input));
 }

@@ -189,7 +189,38 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 25 {
+		if err := resumeConversion(ctx, db, item); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 
+	if item.version == 26 {
+		if err := resumeEventChanges(ctx, db, item); err != nil {
+			return fmt.Errorf("apply migration %s: %w", item.name, err)
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version,name,checksum,applied_at) VALUES (?,?,?,UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
+	if item.version == 27 {
+		// Each ALTER is atomic in MySQL 8.4, but the sequence can be interrupted.
+		for _, statement := range statements(string(item.data)) {
+			fields := strings.Fields(statement)
+			var exists bool
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?)`, fields[2], fields[5]).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := db.ExecContext(ctx, statement); err != nil {
+					return fmt.Errorf("apply migration %s: %w", item.name, err)
+				}
+			}
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version,name,checksum,applied_at) VALUES (?,?,?,UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration %s: %w", item.name, err)
@@ -205,6 +236,29 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration %s: %w", item.name, err)
+	}
+	return nil
+}
+
+func resumeConversion(ctx context.Context, db *sql.Conn, item migration) error {
+	items := statements(string(item.data))
+	if len(items) < 2 {
+		return fmt.Errorf("conversion migration is incomplete")
+	}
+	for _, statement := range items[:len(items)-1] {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='payments' AND COLUMN_NAME='started_at')`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := db.ExecContext(ctx, items[len(items)-1]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -592,4 +646,53 @@ func statements(sqlText string) []string {
 		}
 	}
 	return result
+}
+
+func resumeEventChanges(ctx context.Context, db *sql.Conn, item migration) error {
+	for _, column := range []struct{ table, name, definition string }{
+		{"events", "lifecycle_status", "ENUM('SCHEDULED','POSTPONED','RESCHEDULED','CANCELLED') NOT NULL DEFAULT 'SCHEDULED'"},
+		{"events", "change_version", "BIGINT UNSIGNED NOT NULL DEFAULT 0"},
+		{"events", "sales_paused", "BOOLEAN NOT NULL DEFAULT FALSE"},
+		{"orders", "access_deadline", "DATETIME(6) NULL"},
+		{"order_refunds", "manual_reference", "VARCHAR(160) NOT NULL DEFAULT ''"},
+		{"order_refunds", "manual_paid_at", "DATETIME(6) NULL"},
+		{"email_queue", "event_change_id", "CHAR(32) NULL"},
+	} {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?)`, column.table, column.name).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.ExecContext(ctx, "ALTER TABLE "+column.table+" ADD COLUMN "+column.name+" "+column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	for _, statement := range statements(string(item.data)) {
+		if strings.HasPrefix(statement, "ALTER TABLE events") || strings.HasPrefix(statement, "ALTER TABLE orders") {
+			continue
+		}
+		if strings.HasPrefix(statement, "ALTER TABLE order_refunds") {
+			statement = "ALTER TABLE order_refunds MODIFY status ENUM('REQUESTED','PROCESSING','SUCCEEDED','FAILED','UNKNOWN','MANUAL_REQUIRED') NOT NULL"
+		}
+		if strings.HasPrefix(statement, "ALTER TABLE email_queue") {
+			if _, err := db.ExecContext(ctx, "ALTER TABLE email_queue MODIFY kind ENUM('TICKETS','RECOVERY','REFUND','EVENT_CHANGE') NOT NULL"); err != nil {
+				return err
+			}
+			var exists bool
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='email_queue' AND CONSTRAINT_NAME='chk_email_queue_target')`).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				if _, err := db.ExecContext(ctx, "ALTER TABLE email_queue DROP CHECK chk_email_queue_target"); err != nil {
+					return err
+				}
+			}
+			statement = "ALTER TABLE email_queue " + statement[strings.Index(statement, "ADD CONSTRAINT"):]
+		}
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }

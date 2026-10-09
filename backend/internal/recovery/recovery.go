@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/go-sql-driver/mysql"
 )
@@ -87,10 +88,15 @@ type Order struct {
 	ID, Reference, ReservationID, Status, BuyerName, BuyerEmail string
 	ExpiresAt, StartsAt                                         time.Time
 	Complete                                                    bool
+	Changed, AccessHeld, TicketActive                           bool
+	AccessDeadline                                              time.Time
 }
 
 // Eligible reports whether the order may be recovered or have its tickets resent.
 func (o Order) Eligible(now time.Time) bool {
+	if o.Changed {
+		return o.AccessHeld || now.Before(o.AccessDeadline)
+	}
 	return o.Status == "PAID" && o.Complete && now.Before(orderaccess.Expiry(o.StartsAt))
 }
 
@@ -122,6 +128,21 @@ func findOrder(ctx context.Context, q querier, query, value string) (Order, bool
 	if err != nil {
 		return Order{}, false, fmt.Errorf("find recovery order: %w", err)
 	}
+	state, err := eventstate.ForOrder(ctx, q, order.ID, false)
+	if err != nil {
+		return order, false, err
+	}
+	order.Changed = state.Version > 0
+	order.AccessDeadline, err = eventstate.Deadline(ctx, q, order.ID)
+	if err != nil {
+		return order, false, err
+	}
+	order.AccessHeld = order.AccessDeadline.IsZero()
+	var requested bool
+	if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM event_refund_rights WHERE order_id=? AND requested=TRUE)", order.ID).Scan(&requested); err != nil {
+		return order, false, err
+	}
+	order.TicketActive = order.Status == "PAID" && order.Complete && state.StartsAt != nil && !requested
 	return order, true, nil
 }
 

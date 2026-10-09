@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/email"
+	"github.com/Adeqq1/ticket-online/backend/internal/eventchange"
 	"github.com/Adeqq1/ticket-online/backend/internal/operations"
+	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
 	"github.com/Adeqq1/ticket-online/backend/internal/refund"
@@ -69,6 +71,7 @@ func main() {
 	go payment.NewRepositoryWithMidtransEnvironment(db, cfg.MidtransEnvironment).RunExpiryWorker(serverCtx, cfg.ExpiryInterval, cfg.MidtransServerKey, logger)
 	go refund.New(db, staffauth.New(db), cfg.MidtransServerKey, cfg.MidtransEnvironment, cfg.MidtransRefundMethods, logger).Run(serverCtx, cfg.ExpiryInterval)
 	go metrics.Run(serverCtx, logger)
+	go eventchange.New(db, staffauth.New(db), orderaccess.New(db, cfg.OrderAccessSecret), refund.New(db, staffauth.New(db), cfg.MidtransServerKey, cfg.MidtransEnvironment, cfg.MidtransRefundMethods, logger), payment.NewRepositoryWithMidtransEnvironment(db, cfg.MidtransEnvironment), cfg.MidtransServerKey, logger).Run(serverCtx, cfg.ExpiryInterval)
 	emailWorker := email.NewService(db, email.Config{
 		Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
 		From: cfg.SMTPFrom, TLSMode: cfg.SMTPTLSMode, FrontendURL: cfg.FrontendURL, AccessSecret: cfg.OrderAccessSecret,

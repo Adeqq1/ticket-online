@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { getOrderAccess, getOrderAccessForTicket, hasPersistentOrderAccess, hasPersistentTicketAccess, listOrderAccess, parseOrderAccess, saveOrderAccess, type OrderAccess } from "./order-access.ts";
+import { getOrderAccess, getOrderAccessForTicket, hasPersistentOrderAccess, hasPersistentTicketAccess, listOrderAccess, parseOrderAccess, removeOrderAccess, saveOrderAccess, type OrderAccess } from "./order-access.ts";
 
 const record = { orderId: "order-1", accessToken: "private-token", expiresAt: "2027-08-24T12:40:00Z", accessExpiresAt: "2027-08-25T00:00:00Z", reservationId: "reservation-1", idempotencyKey: "stable-key", basketKey: "festival=1", reference: "TO-ABCDEFGHIJ", ticketIds: ["ticket-1"] };
 
@@ -16,6 +16,7 @@ test("persists order access in localStorage and indexes tickets without putting 
     expect([...values.values()].join()).toContain("private-token");
     expect(parseOrderAccess(JSON.stringify({ ...record, expiresAt: "invalid" }))).toBeNull();
   } finally {
+    removeOrderAccess(record.orderId);
     if (original) Object.defineProperty(globalThis, "localStorage", original);
     else delete (globalThis as { localStorage?: Storage }).localStorage;
   }
@@ -30,6 +31,7 @@ test("keeps order access in memory when localStorage cannot persist it", () => {
     expect(getOrderAccess("order-1")).toEqual(record);
     expect(listOrderAccess().find(({ orderId }) => orderId === "order-1")).toEqual(record);
   } finally {
+    removeOrderAccess(record.orderId);
     if (original) Object.defineProperty(globalThis, "localStorage", original);
     else delete (globalThis as { localStorage?: Storage }).localStorage;
   }
@@ -68,6 +70,7 @@ test("a ticket link requires that exact ticket ID in persistent order access", (
     expect(hasPersistentTicketAccess(record.orderId, "ticket-1")).toBe(true);
     expect(hasPersistentTicketAccess("another-order", "ticket-1")).toBe(false);
   } finally {
+    removeOrderAccess(record.orderId);
     if (original) Object.defineProperty(globalThis, "localStorage", original);
     else Reflect.deleteProperty(globalThis, "localStorage");
   }
@@ -101,6 +104,9 @@ test("tab storage preserves order recovery when local storage is unavailable", (
     expect(saveOrderAccess(volatile)).toBe(false);
     expect(hasPersistentOrderAccess(volatile.orderId)).toBe(false);
   } finally {
+    removeOrderAccess(record.orderId);
+    removeOrderAccess("order-memory-only");
+    values.clear();
     if (originalLocal) Object.defineProperty(globalThis, "localStorage", originalLocal); else Reflect.deleteProperty(globalThis, "localStorage");
     if (originalSession) Object.defineProperty(globalThis, "sessionStorage", originalSession); else Reflect.deleteProperty(globalThis, "sessionStorage");
   }

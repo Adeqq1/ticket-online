@@ -71,7 +71,7 @@ function failed(state: ScannerState, cause: unknown, checkInSent: boolean, onUna
   state.checkedInAt = apiError?.checkedInAt ?? "";
   state.resultDetail = apiError?.message ?? "Tidak dapat menghubungi server.";
   if (apiError?.status === 401) { onUnauthorized(); return; }
-  if (apiError?.status === 403) state.status = "denied";
+  if (apiError?.status === 403 || apiError?.code === "EVENT_CHANGED") state.status = "denied";
   else if (apiError?.code === "TICKET_ALREADY_USED") state.status = "used";
   else if (apiError?.code === "WRONG_GATE") state.status = "wrong-gate";
   else if (apiError?.code === "TICKET_NOT_FOUND") state.status = "not-found";

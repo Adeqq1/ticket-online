@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 )
 
 var (
@@ -39,19 +41,21 @@ type Payment struct {
 }
 
 type Ticket struct {
-	ID             string `json:"id"`
-	Code           string `json:"code"`
-	AttendeeName   string `json:"attendeeName"`
-	OrderReference string `json:"orderReference"`
-	EventID        string `json:"eventId"`
-	EventArtist    string `json:"eventArtist"`
-	EventCity      string `json:"eventCity"`
-	EventVenue     string `json:"eventVenue"`
-	EventAddress   string `json:"eventAddress"`
-	EventStartsAt  string `json:"eventStartsAt"`
-	TierName       string `json:"tierName"`
-	Gate           string `json:"gate"`
-	IssuedAt       string `json:"issuedAt"`
+	ID             string            `json:"id"`
+	Code           string            `json:"code"`
+	AttendeeName   string            `json:"attendeeName"`
+	OrderReference string            `json:"orderReference"`
+	EventID        string            `json:"eventId"`
+	EventArtist    string            `json:"eventArtist"`
+	EventCity      string            `json:"eventCity"`
+	EventVenue     string            `json:"eventVenue"`
+	EventAddress   string            `json:"eventAddress"`
+	EventStartsAt  string            `json:"eventStartsAt"`
+	TierName       string            `json:"tierName"`
+	Gate           string            `json:"gate"`
+	IssuedAt       string            `json:"issuedAt"`
+	CurrentEvent   *eventstate.State `json:"currentEvent,omitempty"`
+	Usable         *bool             `json:"usable,omitempty"`
 }
 
 func Validate(request Request) (Request, error) {
@@ -96,6 +100,20 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 	}
 	defer tx.Rollback()
 
+	state, err := eventstate.ForOrder(ctx, tx, orderID, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Payment{}, false, ErrOrderNotFound
+	}
+	if err != nil {
+		return Payment{}, false, err
+	}
+	blocked, err := eventstate.PaymentBlocked(ctx, tx, orderID, state)
+	if err != nil {
+		return Payment{}, false, err
+	}
+	if blocked {
+		return Payment{}, false, ErrOrderNotPayable
+	}
 	var orderStatus string
 	var amount uint64
 	var expiresAt time.Time
@@ -152,8 +170,12 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 		if request.Result == "SUCCEEDED" {
 			succeededAt = now
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE payments SET method = ?, amount = ?, status = ?, paid_at = ?, updated_at = ? WHERE order_id = ?", request.Method, amount, request.Result, succeededAt, now, orderID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE payments SET method = ?, amount = ?, status = ?, started_at = COALESCE(started_at, ?), paid_at = ?, updated_at = ? WHERE order_id = ?", request.Method, amount, request.Result, now, succeededAt, now, orderID); err != nil {
 			return Payment{}, false, fmt.Errorf("update payment: %w", err)
+		}
+		if request.Result == "FAILED" {
+			_, _ = tx.ExecContext(ctx, `INSERT IGNORE INTO conversion_events (journey_id,kind,reason,created_at)
+				SELECT cr.journey_id,'PAYMENT_FAILURE','PAYMENT_PROVIDER',UTC_TIMESTAMP(6) FROM conversion_reservations cr JOIN orders o ON o.reservation_id=cr.reservation_id WHERE o.id=?`, orderID)
 		}
 		existing.Method = request.Method
 		existing.Amount = amount
@@ -192,9 +214,13 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 	if request.Result == "SUCCEEDED" {
 		succeededAt = now
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO payments (id, order_id, method, amount, status, paid_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, existing.ID, orderID, request.Method, amount, request.Result, succeededAt, now, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO payments (id, order_id, method, amount, status, started_at, paid_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, existing.ID, orderID, request.Method, amount, request.Result, now, succeededAt, now, now); err != nil {
 		return Payment{}, false, fmt.Errorf("insert payment: %w", err)
+	}
+	if request.Result == "FAILED" {
+		_, _ = tx.ExecContext(ctx, `INSERT IGNORE INTO conversion_events (journey_id,kind,reason,created_at)
+			SELECT cr.journey_id,'PAYMENT_FAILURE','PAYMENT_PROVIDER',UTC_TIMESTAMP(6) FROM conversion_reservations cr JOIN orders o ON o.reservation_id=cr.reservation_id WHERE o.id=?`, orderID)
 	}
 	existing.OrderID = orderID
 	existing.Method = request.Method
@@ -322,35 +348,79 @@ func loadTickets(ctx context.Context, tx *sql.Tx, predicate string, args ...any)
 }
 
 func (r *Repository) TicketsForOrder(ctx context.Context, orderID string) ([]Ticket, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	var status string
-	if err := r.db.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = ?", orderID).Scan(&status); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id=?", orderID).Scan(&status); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrOrderNotFound
 	} else if err != nil {
-		return nil, fmt.Errorf("find order for e-tickets: %w", err)
+		return nil, err
 	}
-	if status != "PAID" {
+	if status != "PAID" && status != "REFUND_PENDING" && status != "REFUNDED" {
 		return nil, ErrOrderNotFound
 	}
-	rows, err := r.db.QueryContext(ctx, "SELECT snapshot FROM etickets WHERE order_id = ? ORDER BY issued_at, id", orderID)
+	state, err := eventstate.ForOrder(ctx, tx, orderID, false)
 	if err != nil {
-		return nil, fmt.Errorf("read order e-tickets: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-	return decodeTickets(rows)
+	rows, err := tx.QueryContext(ctx, "SELECT snapshot FROM etickets WHERE order_id=? ORDER BY issued_at,id", orderID)
+	if err != nil {
+		return nil, err
+	}
+	tickets, err := decodeTickets(rows)
+	closeErr := rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	for i := range tickets {
+		if err := ticketView(ctx, tx, &tickets[i], orderID, status, state); err != nil {
+			return nil, err
+		}
+	}
+	return tickets, tx.Commit()
 }
-
 func (r *Repository) Ticket(ctx context.Context, ticketID string) (Ticket, error) {
-	var snapshot []byte
-	if err := r.db.QueryRowContext(ctx, "SELECT t.snapshot FROM etickets t JOIN orders o ON o.id=t.order_id WHERE t.id = ? AND o.status='PAID'", ticketID).Scan(&snapshot); errors.Is(err, sql.ErrNoRows) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return Ticket{}, err
+	}
+	defer tx.Rollback()
+	var raw []byte
+	var orderID, status string
+	if err := tx.QueryRowContext(ctx, "SELECT t.snapshot,o.id,o.status FROM etickets t JOIN orders o ON o.id=t.order_id WHERE t.id=?", ticketID).Scan(&raw, &orderID, &status); errors.Is(err, sql.ErrNoRows) {
 		return Ticket{}, ErrTicketNotFound
 	} else if err != nil {
-		return Ticket{}, fmt.Errorf("read e-ticket: %w", err)
+		return Ticket{}, err
 	}
 	var ticket Ticket
-	if err := json.Unmarshal(snapshot, &ticket); err != nil {
-		return Ticket{}, fmt.Errorf("decode e-ticket snapshot: %w", err)
+	if err := json.Unmarshal(raw, &ticket); err != nil {
+		return Ticket{}, err
 	}
-	return ticket, nil
+	state, err := eventstate.ForOrder(ctx, tx, orderID, false)
+	if err != nil {
+		return Ticket{}, err
+	}
+	if err := ticketView(ctx, tx, &ticket, orderID, status, state); err != nil {
+		return Ticket{}, err
+	}
+	return ticket, tx.Commit()
+}
+func ticketView(ctx context.Context, q eventstate.Query, ticket *Ticket, orderID, status string, state eventstate.State) error {
+	var held, used bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM event_refund_rights WHERE order_id=? AND requested=TRUE),
+ EXISTS(SELECT 1 FROM ticket_checkins WHERE ticket_id=?)`, orderID, ticket.ID).Scan(&held, &used); err != nil {
+		return err
+	}
+	usable := status == "PAID" && state.StartsAt != nil && !held && !used
+	ticket.CurrentEvent = &state
+	ticket.Usable = &usable
+	return nil
 }
 
 func decodeTickets(rows *sql.Rows) ([]Ticket, error) {

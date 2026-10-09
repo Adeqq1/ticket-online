@@ -54,7 +54,7 @@
   function selectEvent(value: string) { eventId = value; gate = ""; }
 
   function outcomeLabel(outcome: CheckInHistoryItem["outcome"]) {
-    return ({ CHECKED_IN: "Check-in berhasil", TICKET_ALREADY_USED: "Tiket sudah digunakan", INVALID_REQUEST: "Kode tidak valid", TICKET_NOT_FOUND: "Tiket tidak ditemukan", ORDER_NOT_PAID: "Order belum dibayar", WRONG_GATE: "Gate tidak cocok", FORBIDDEN: "Akses ditolak" })[outcome];
+    return ({ CHECKED_IN: "Check-in berhasil", TICKET_ALREADY_USED: "Tiket sudah digunakan", INVALID_REQUEST: "Kode tidak valid", TICKET_NOT_FOUND: "Tiket tidak ditemukan", ORDER_NOT_PAID: "Order belum dibayar", WRONG_GATE: "Gate tidak cocok", FORBIDDEN: "Akses ditolak", EVENT_CHANGED: "Acara berubah / check-in ditutup" })[outcome];
   }
 
   function localTime(value: string) { return new Date(value).toLocaleString("id-ID"); }

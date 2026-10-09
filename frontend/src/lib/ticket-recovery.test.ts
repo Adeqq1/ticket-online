@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { findOrderForActiveReservation } from "./checkout-recovery.ts";
-import { getOrderAccessForTicket, hasPersistentTicketAccess, parseOrderAccess, saveOrderAccess } from "./order-access.ts";
+import { getOrderAccessForTicket, hasPersistentTicketAccess, parseOrderAccess, removeOrderAccess, saveOrderAccess } from "./order-access.ts";
 import { isRecoveryResult, recoveredOrderAccess, recoveryToken, type RecoveryResult } from "./ticket-recovery.ts";
 
 const result: RecoveryResult = {
@@ -52,6 +52,7 @@ test("a recovered order is usable on a browser with empty storage", () => {
     expect(getOrderAccessForTicket(result.ticketIds[0]!)?.accessToken).toBe(result.accessToken);
     expect(getOrderAccessForTicket("f".repeat(32))).toBeNull();
   } finally {
+    removeOrderAccess(result.orderId);
     if (original) Object.defineProperty(globalThis, "localStorage", original);
     else Reflect.deleteProperty(globalThis, "localStorage");
   }

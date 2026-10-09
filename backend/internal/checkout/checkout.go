@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 )
 
 const adminFee uint64 = 7500
@@ -59,18 +61,18 @@ type Item struct {
 }
 
 type Order struct {
-	ID              string `json:"id"`
-	Reference       string `json:"reference"`
-	ReservationID   string `json:"reservationId"`
-	Status          string `json:"status"`
-	ExpiresAt       string `json:"expiresAt"`
-	Subtotal        uint64 `json:"subtotal"`
-	AdminFee        uint64 `json:"adminFee"`
-	Discount        uint64 `json:"discount"`
-	Total           uint64 `json:"total"`
-	Items           []Item `json:"items"`
-	AccessToken     string `json:"accessToken,omitempty"`
-	AccessExpiresAt string `json:"accessExpiresAt,omitempty"`
+	ID              string  `json:"id"`
+	Reference       string  `json:"reference"`
+	ReservationID   string  `json:"reservationId"`
+	Status          string  `json:"status"`
+	ExpiresAt       string  `json:"expiresAt"`
+	Subtotal        uint64  `json:"subtotal"`
+	AdminFee        uint64  `json:"adminFee"`
+	Discount        uint64  `json:"discount"`
+	Total           uint64  `json:"total"`
+	Items           []Item  `json:"items"`
+	AccessToken     string  `json:"accessToken,omitempty"`
+	AccessExpiresAt *string `json:"accessExpiresAt"`
 }
 
 type Attendee struct {
@@ -89,14 +91,25 @@ type PaymentSummary struct {
 
 type Detail struct {
 	Order
-	Buyer         Buyer           `json:"buyer"`
-	Attendees     []Attendee      `json:"attendees"`
-	Payment       *PaymentSummary `json:"payment"`
-	CreatedAt     string          `json:"createdAt"`
-	UpdatedAt     string          `json:"updatedAt"`
-	EventStartsAt string          `json:"eventStartsAt"`
+	Buyer         Buyer            `json:"buyer"`
+	Attendees     []Attendee       `json:"attendees"`
+	Payment       *PaymentSummary  `json:"payment"`
+	CreatedAt     string           `json:"createdAt"`
+	UpdatedAt     string           `json:"updatedAt"`
+	EventStartsAt string           `json:"eventStartsAt"`
+	CurrentEvent  eventstate.State `json:"currentEvent"`
+	RefundRight   *RefundRight     `json:"refundRight"`
+	Refund        *RefundSummary   `json:"refund"`
 }
 
+type RefundRight struct {
+	Requested bool    `json:"requested"`
+	Deadline  *string `json:"deadline"`
+}
+type RefundSummary struct {
+	Status string `json:"status"`
+	Amount uint64 `json:"amount"`
+}
 type Repository struct{ db *sql.DB }
 
 func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
@@ -172,6 +185,13 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 	}
 	defer tx.Rollback()
 
+	state, err := eventstate.ForReservation(ctx, tx, reservationID, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Order{}, false, ErrReservationNotFound
+	}
+	if err != nil {
+		return Order{}, false, err
+	}
 	var status, storedKey string
 	var expiresAt time.Time
 	err = tx.QueryRowContext(ctx, "SELECT status, idempotency_key, expires_at FROM reservations WHERE id = ? FOR UPDATE", reservationID).Scan(&status, &storedKey, &expiresAt)
@@ -203,13 +223,8 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Order{}, false, fmt.Errorf("find existing order: %w", err)
 	}
-	var eventID string
-	if err := tx.QueryRowContext(ctx, "SELECT event_id FROM reservations WHERE id = ?", reservationID).Scan(&eventID); err != nil {
-		return Order{}, false, fmt.Errorf("find checkout event: %w", err)
-	}
-	var lockedEvent string
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM events WHERE id = ? FOR SHARE", eventID).Scan(&lockedEvent); err != nil {
-		return Order{}, false, fmt.Errorf("lock checkout event: %w", err)
+	if !state.CanSell() {
+		return Order{}, false, eventstate.ErrClosed
 	}
 	switch status {
 	case "CANCELLED":
@@ -360,7 +375,31 @@ func (r *Repository) Get(ctx context.Context, orderID string) (Detail, error) {
 	detail.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 	detail.ExpiresAt = expiresAt.UTC().Format(time.RFC3339Nano)
 	detail.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-	detail.EventStartsAt = startsAt.UTC().Format(time.RFC3339Nano)
+	detail.CurrentEvent, err = eventstate.ForOrder(ctx, tx, orderID, false)
+	if err != nil {
+		return Detail{}, err
+	}
+	if detail.CurrentEvent.StartsAt != nil {
+		detail.EventStartsAt = *detail.CurrentEvent.StartsAt
+	}
+	var right RefundRight
+	var deadline sql.NullTime
+	err = tx.QueryRowContext(ctx, "SELECT requested,deadline FROM event_refund_rights WHERE order_id=?", orderID).Scan(&right.Requested, &deadline)
+	if err == nil {
+		if deadline.Valid {
+			right.Deadline = eventstate.TimeJSON(deadline.Time)
+		}
+		detail.RefundRight = &right
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Detail{}, err
+	}
+	var refund RefundSummary
+	err = tx.QueryRowContext(ctx, "SELECT status,amount FROM order_refunds WHERE order_id=?", orderID).Scan(&refund.Status, &refund.Amount)
+	if err == nil {
+		detail.Refund = &refund
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Detail{}, err
+	}
 	if err := loadItems(ctx, tx, &detail.Order); err != nil {
 		return Detail{}, err
 	}

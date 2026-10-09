@@ -13,9 +13,9 @@
   ];
 
   const refundRules = [
-    { question: "Apakah tiket bisa dibatalkan atau di-refund?", answer: "Untuk versi produksi, refund dan pembatalan mengikuti kebijakan masing-masing acara. Sebelum membayar, periksa ketentuan refund pada detail konser. Pada versi simulasi ini belum ada transaksi atau proses refund nyata." },
-    { question: "Bagaimana jika acara dibatalkan penyelenggara?", answer: "Jika acara dibatalkan atau dijadwalkan ulang, penyelenggara akan menentukan opsi pengembalian dana atau penggunaan tiket. Informasi resmi akan dikirim melalui kontak pemesan yang terdaftar." },
-    { question: "Apakah tiket yang sudah dipindai masih bisa digunakan lagi?", answer: "Pada versi produksi, QR valid akan digunakan sekali untuk satu kali check-in. Demo scanner di /admin/scan juga mengubah status tiket lokal menjadi sudah digunakan, tetapi tidak terhubung ke venue atau database produksi." }
+    { question: "Apakah tiket bisa dibatalkan atau di-refund?", answer: "Pembatalan acara memberi refund penuh untuk semua order lunas, termasuk biaya admin. Jika acara ditunda atau dijadwalkan ulang, pembeli lama dapat meminta refund penuh dari halaman pesanan sampai tenggat yang diumumkan. Kanal yang tidak mendukung refund otomatis ditangani manual oleh tim." },
+    { question: "Bagaimana jika acara dibatalkan penyelenggara?", answer: "Jika acara dibatalkan, tiket tidak berlaku dan refund semua order lunas diproses. Jika jadwal berubah, QR tetap sama; jadwal terbaru dan hak refund tampil pada acara, order, dan tiket serta dikirim ke email pembeli." },
+    { question: "Apakah tiket yang sudah dipindai masih bisa digunakan lagi?", answer: "Tiket yang sudah check-in tetap terpakai, termasuk setelah penjadwalan ulang. Riwayat tetap tersimpan dan QR tidak dapat digunakan untuk masuk lagi." }
   ];
 
   const wristbandSteps = [

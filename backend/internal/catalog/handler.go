@@ -6,25 +6,28 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 )
 
 type Event struct {
-	ID                string       `json:"id"`
-	Artist            string       `json:"artist"`
-	City              string       `json:"city"`
-	Venue             string       `json:"venue"`
-	Address           string       `json:"address"`
-	StartsAt          string       `json:"startsAt"`
-	Genre             string       `json:"genre"`
-	Status            string       `json:"status"`
-	PublicationStatus string       `json:"publicationStatus"`
-	Image             string       `json:"image"`
-	Description       string       `json:"description"`
-	Lineup            []string     `json:"lineup"`
-	Price             uint64       `json:"price"`
-	Zones             []Zone       `json:"zones"`
-	TicketTiers       []TicketTier `json:"ticketTiers"`
-	ScheduleLocked    bool         `json:"scheduleLocked"`
+	CurrentEvent      eventstate.State `json:"currentEvent"`
+	ID                string           `json:"id"`
+	Artist            string           `json:"artist"`
+	City              string           `json:"city"`
+	Venue             string           `json:"venue"`
+	Address           string           `json:"address"`
+	StartsAt          string           `json:"startsAt"`
+	Genre             string           `json:"genre"`
+	Status            string           `json:"status"`
+	PublicationStatus string           `json:"publicationStatus"`
+	Image             string           `json:"image"`
+	Description       string           `json:"description"`
+	Lineup            []string         `json:"lineup"`
+	Price             uint64           `json:"price"`
+	Zones             []Zone           `json:"zones"`
+	TicketTiers       []TicketTier     `json:"ticketTiers"`
+	ScheduleLocked    bool             `json:"scheduleLocked"`
 }
 
 type Zone struct {

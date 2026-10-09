@@ -3,10 +3,13 @@ package reservation
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Adeqq1/ticket-online/backend/internal/conversion"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 )
 
 type Reservation struct {
@@ -32,10 +35,15 @@ type ResponseItem struct {
 type Handler struct {
 	repository *Repository
 	logger     *slog.Logger
+	conversion *conversion.Service
 }
 
-func NewHandler(repository *Repository, logger *slog.Logger) *Handler {
-	return &Handler{repository: repository, logger: logger}
+func NewHandler(repository *Repository, logger *slog.Logger, metrics ...*conversion.Service) *Handler {
+	h := &Handler{repository: repository, logger: logger}
+	if len(metrics) > 0 {
+		h.conversion = metrics[0]
+	}
+	return h
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -63,8 +71,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.repository.Create(r.Context(), request, key)
 	if err != nil {
+		if h.conversion != nil {
+			journey := r.Header.Get("X-Conversion-Journey")
+			if errors.Is(err, ErrInsufficientStock) {
+				h.conversion.Record(r.Context(), journey, "STOCK_UNAVAILABLE", "RESERVATION")
+			}
+			if errors.Is(err, ErrReservationExpired) {
+				h.conversion.Record(r.Context(), journey, "RESERVATION_EXPIRED", "RESERVATION")
+			}
+		}
 		h.respondError(w, r, err)
 		return
+	}
+	if h.conversion != nil {
+		h.conversion.Link(r.Context(), r.Header.Get("X-Conversion-Journey"), request.EventID, value.ID)
 	}
 	writeJSON(w, http.StatusCreated, value)
 }
@@ -95,6 +115,8 @@ func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, eventstate.ErrClosed):
+		writeError(w, 409, "EVENT_CHANGED", eventstate.ErrClosed.Error())
 	case errors.Is(err, ErrEventNotFound):
 		writeError(w, http.StatusNotFound, "EVENT_NOT_FOUND", "Event tidak ditemukan")
 	case errors.Is(err, ErrTierNotFound):

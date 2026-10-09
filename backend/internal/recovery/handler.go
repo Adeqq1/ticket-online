@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 )
 
@@ -104,7 +105,8 @@ type VerifyResult struct {
 	Reference       string   `json:"reference"`
 	ReservationID   string   `json:"reservationId"`
 	ExpiresAt       string   `json:"expiresAt"`
-	AccessExpiresAt string   `json:"accessExpiresAt"`
+	AccessExpiresAt *string  `json:"accessExpiresAt"`
+	ChangedEvent    bool     `json:"changedEvent"`
 	TicketIDs       []string `json:"ticketIds"`
 }
 
@@ -173,7 +175,7 @@ func (h *Handler) consume(ctx context.Context, tokenHash string) (VerifyResult, 
 		return VerifyResult{}, fmt.Errorf("list recovered tickets: %w", err)
 	}
 	result := VerifyResult{OrderID: order.ID, AccessToken: h.access.Token(order.ID), Reference: order.Reference, ReservationID: order.ReservationID,
-		ExpiresAt: order.ExpiresAt.UTC().Format(time.RFC3339Nano), AccessExpiresAt: orderaccess.Expiry(order.StartsAt).Format(time.RFC3339), TicketIDs: []string{}}
+		ExpiresAt: order.ExpiresAt.UTC().Format(time.RFC3339Nano), AccessExpiresAt: eventstate.TimeJSON(order.AccessDeadline), ChangedEvent: order.Changed, TicketIDs: []string{}}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
@@ -228,7 +230,7 @@ func (h *Handler) Resend(w http.ResponseWriter, r *http.Request) {
 		h.internal(w, r, err)
 		return
 	}
-	if !found || !order.Eligible(time.Now()) {
+	if !found || !order.Eligible(time.Now()) || !order.TicketActive {
 		writeError(w, http.StatusConflict, "ORDER_NOT_ELIGIBLE", "Email tiket hanya dapat dikirim ulang untuk pesanan lunas dengan tiket lengkap")
 		return
 	}

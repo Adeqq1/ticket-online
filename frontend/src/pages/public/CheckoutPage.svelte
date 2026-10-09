@@ -1,4 +1,5 @@
 <script lang="ts">
+ import EventNotice from "../../components/EventNotice.svelte";
   import { onMount, tick } from "svelte";
   import { createOrder, createReservation, createSnapPayment, getEvent, getReservationEvent, getOrder, getReservation, listOrderTickets, simulatePayment, ApiError, type ApiTicket, type CreateOrderRequest, type OrderBase, type OrderDetail, type OrderResponse, type PaymentMethod, type Reservation } from "../../lib/api.ts";
   import { eventDate, formatRupiah, type Concert } from "../../lib/concerts.ts";
@@ -9,6 +10,7 @@
   import Toast from "../../components/Toast.svelte";
   import { concertTerms } from "../../lib/terms.ts";
   import { RESERVATION_DURATION_MS, isReservationExpired, remainingReservationSeconds, reservationBasketKey, parseCheckoutAttempt, parseStoredReservation, serializeStoredReservation, type StoredReservation } from "../../lib/reservation.ts";
+  import { journeyId, recordConversion, trackConversionActivity } from "../../lib/conversion.ts";
   let { id }: { id: string } = $props();
   let concert = $state<Concert | undefined>();
   let restoredReservation = $state<Reservation | null>(null);
@@ -65,7 +67,7 @@
     return valid;
   }
   function setAttendeeName(tierId: string, index: number, value: string) { if (checkoutUncertain || activeOrder) return; const names = [...(attendeeNames[tierId] ?? [])]; names[index] = value; attendeeNames[tierId] = names; }
-  async function submitBuyer(event: SubmitEvent) { event.preventDefault(); if (checkoutUncertain || activeOrder || checkExpiry()) return; const valid = (["name", "email", "phone", "identity"] as const).map(validate).every(Boolean); const attendeesValid = lines.every((line) => { const names = attendeeNames[line.tier.id] ?? []; const messages = names.map((name) => name.trim().length >= 2 && name.trim().length <= 80 ? "" : "Nama peserta harus 2–80 karakter."); attendeeErrors[line.tier.id] = messages; return names.length === line.quantity && messages.every((error) => !error); }); if (valid && attendeesValid) await goToStep(2); else await tick().then(() => document.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()); }
+  async function submitBuyer(event: SubmitEvent) { event.preventDefault(); if (checkoutUncertain || activeOrder || checkExpiry()) return; const valid = (["name", "email", "phone", "identity"] as const).map(validate).every(Boolean); const attendeesValid = lines.every((line) => { const names = attendeeNames[line.tier.id] ?? []; const messages = names.map((name) => name.trim().length >= 2 && name.trim().length <= 80 ? "" : "Nama peserta harus 2–80 karakter."); attendeeErrors[line.tier.id] = messages; return names.length === line.quantity && messages.every((error) => !error); }); if (valid && attendeesValid) await goToStep(2); else { recordConversion(id, "VALIDATION_FAILED", valid ? "ATTENDEE_DATA" : "BUYER_DATA"); await tick().then(() => document.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus()); } }
   async function submitPayment(event: SubmitEvent) { event.preventDefault(); if (checkExpiry()) return; paymentError = payment ? "" : "Pilih metode pembayaran terlebih dahulu."; if (!payment) { await tick(); document.querySelector<HTMLInputElement>('input[name="payment"]')?.focus(); return; } await goToStep(3); }
   function showToast(message: string, tone: "success" | "info" | "error" = "info") { toast = { id: ++toastId, message, tone }; }
   function openTerms() { termsDialog?.showModal(); }
@@ -149,7 +151,7 @@
         checkoutUncertain = true;
         try { sessionStorage.setItem(checkoutAttemptKey, JSON.stringify(payload)); }
         catch { storageFailed = true; showToast("Data retry hanya tersimpan selama halaman ini terbuka.", "error"); }
-        const created = await createOrder(reservation.id, payload, storedReservation.idempotencyKey);
+        const created = await createOrder(reservation.id, payload, storedReservation.idempotencyKey, undefined, journeyId(concert.id));
         activeOrder = created;
         persistOrderAccessRecord(created, storedReservation.idempotencyKey);
         reference = created.reference;
@@ -219,6 +221,7 @@
         window.location.assign(redirectUrl);
       }
     } catch (value) {
+      if (value instanceof ApiError && (value.status === 0 || value.status >= 500) && value.code !== "PAYMENT_PROVIDER_ERROR") recordConversion(id, "SERVICE_FAILURE", "SERVICE");
       if (!activeOrder && value instanceof ApiError && value.status === 422) clearCheckoutAttempt();
       if (value instanceof ApiError && ["RESERVATION_EXPIRED", "ORDER_NOT_PAYABLE"].includes(value.code)) {
         reservationExpired = true;
@@ -315,7 +318,7 @@
       try { sessionStorage.setItem(reservationKey, serializeStoredReservation(stored)); } catch { storageFailed = true; }
     }
     try {
-      reservation = sameBasket && stored?.reservationId ? await getReservation(stored.reservationId, signal) : await createReservation(payload.eventId, payload.items, idempotencyKey, signal);
+      reservation = sameBasket && stored?.reservationId ? await getReservation(stored.reservationId, signal) : await createReservation(payload.eventId, payload.items, idempotencyKey, signal, journeyId(concert.id));
       if (reservation.event.id !== concert.id || reservation.items.length !== lines.length || reservation.items.some((item) => item.quantity !== quantityMap[item.tierId] || !quantityMap[item.tierId])) throw new ApiError("Data reservasi tidak cocok dengan keranjang.", 409, "RESERVATION_MISMATCH");
       storedReservation = { reservationId: reservation.id, idempotencyKey, eventId: concert.id, basketKey };
       try { sessionStorage.setItem(reservationKey, serializeStoredReservation(storedReservation)); } catch { storageFailed = true; }
@@ -333,7 +336,7 @@
       voucherInput = voucher;
       attendeeNames = Object.fromEntries(pendingCheckoutPayload.attendees.map((attendee) => [attendee.tierId, attendee.names]));
       try {
-        const created = await createOrder(reservation.id, pendingCheckoutPayload, idempotencyKey, signal);
+        const created = await createOrder(reservation.id, pendingCheckoutPayload, idempotencyKey, signal, journeyId(concert.id));
         if (signal.aborted) return;
         activeOrder = created;
         persistOrderAccessRecord(created, idempotencyKey);
@@ -363,6 +366,7 @@
   }
   onMount(() => {
     const controller = new AbortController();
+    const stopTracking = trackConversionActivity(id);
     let cleanupReservation: (() => void) | undefined;
     const recoveryHint = savedReservationForEvent();
     (async () => {
@@ -373,12 +377,12 @@
           if (!(cause instanceof ApiError && cause.code === "EVENT_NOT_FOUND" && recoveryHint?.reservationId)) throw cause;
           event = await getReservationEvent(recoveryHint.reservationId, recoveryHint.idempotencyKey, controller.signal);
         }
-        if (!controller.signal.aborted) { concert = event; loading = false; cleanupReservation = await setupReservation(controller.signal, recoveryHint); }
+        if (!controller.signal.aborted) { concert = event; loading = false; recordConversion(event.id, "CHECKOUT_STARTED"); cleanupReservation = await setupReservation(controller.signal, recoveryHint); }
       } catch (value) {
         if (!controller.signal.aborted) { loadError = value instanceof ApiError && value.code === "EVENT_NOT_FOUND" ? "not-found" : value instanceof ApiError ? value.message : "Checkout belum dapat dimuat."; loading = false; }
       }
     })();
-    return () => { controller.abort(); cleanupReservation?.(); };
+    return () => { controller.abort(); stopTracking(); cleanupReservation?.(); };
   });
 </script>
 
@@ -398,7 +402,8 @@
 {:else if creatingReservation || !reservation}
   <p class="shell" role="status" aria-live="polite">Menahan tiket sementara...</p>
 {:else}
-   <section class="checkout shell"><a class="back-link" href={`/konser/${concert.id}?${location.search.slice(1)}`}>Kembali ke detail konser</a><div class="checkout-heading"><p class="checkout-kicker">Checkout aman</p><h1>Selesaikan pesananmu.</h1><p>{concert.artist} · {concert.date} · {concert.venue}</p></div>{#if !completed}<div class:reservation-warning={remainingSeconds <= 60} class="reservation-banner" role="timer"><span class="reservation-icon" aria-hidden="true">◷</span><span><b>{activeOrder ? "Pesanan menunggu pembayaran" : "Reservasi tiket sementara"}</b><small>Selesaikan pembayaran dalam {String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:{String(remainingSeconds % 60).padStart(2, "0")}</small></span></div>{/if}<ol class="checkout-steps" aria-label="Tahap checkout">{#each ["Data Diri", "Metode Bayar", "Konfirmasi"] as label, index}<li class:is-complete={index + 1 < step || completed} aria-current={index + 1 === step && !completed ? "step" : undefined}><span>{index + 1}</span><b>{label}</b></li>{/each}</ol>
+   <section class="checkout shell">
+ {#if concert}<EventNotice state={concert.currentEvent} />{/if}<a class="back-link" href={`/konser/${concert.id}?${location.search.slice(1)}`}>Kembali ke detail konser</a><div class="checkout-heading"><p class="checkout-kicker">Checkout aman</p><h1>Selesaikan pesananmu.</h1><p>{concert.artist} · {concert.date} · {concert.venue}</p></div>{#if !completed}<div class:reservation-warning={remainingSeconds <= 60} class="reservation-banner" role="timer"><span class="reservation-icon" aria-hidden="true">◷</span><span><b>{activeOrder ? "Pesanan menunggu pembayaran" : "Reservasi tiket sementara"}</b><small>Selesaikan pembayaran dalam {String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:{String(remainingSeconds % 60).padStart(2, "0")}</small></span></div>{/if}<ol class="checkout-steps" aria-label="Tahap checkout">{#each ["Data Diri", "Metode Bayar", "Konfirmasi"] as label, index}<li class:is-complete={index + 1 < step || completed} aria-current={index + 1 === step && !completed ? "step" : undefined}><span>{index + 1}</span><b>{label}</b></li>{/each}</ol>
     <div class="checkout-layout"><section class="checkout-panel">
        {#if completed}
          <section class="checkout-success">

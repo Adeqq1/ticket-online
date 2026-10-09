@@ -307,7 +307,7 @@ type emailPage struct {
 func (s *Service) ListEmailJobs(ctx context.Context, token string, filter EmailFilter) (emailPage, error) {
 	var result emailPage
 	filter.Query = strings.TrimSpace(filter.Query)
-	if len(filter.Query) > 32 || len(filter.Cursor) > 256 || (filter.Kind != "" && filter.Kind != "TICKETS" && filter.Kind != "RECOVERY" && filter.Kind != "REFUND") {
+	if len(filter.Query) > 32 || len(filter.Cursor) > 256 || (filter.Kind != "" && filter.Kind != "TICKETS" && filter.Kind != "RECOVERY" && filter.Kind != "REFUND" && filter.Kind != "EVENT_CHANGE") {
 		return result, ErrInvalidRequest
 	}
 	var cursorAt any
@@ -439,10 +439,21 @@ func (s *Service) EmailDetail(ctx context.Context, token, id string) (EmailDetai
 		if err != nil {
 			return result, err
 		}
-		if found && order.Eligible(time.Now()) {
+		if found && order.Eligible(time.Now()) && order.TicketActive {
 			result.CanRetry = true
 		} else {
 			result.RetryReason = "Pesanan belum lunas, tiket belum lengkap, atau akses pesanan sudah kedaluwarsa."
+		}
+	} else if result.Kind == "EVENT_CHANGE" {
+		var valid bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM email_queue q JOIN event_changes c ON c.id=q.event_change_id
+  JOIN orders o ON o.id=q.order_id JOIN reservations r ON r.id=o.reservation_id AND r.event_id=c.event_id
+  JOIN order_buyers b ON b.order_id=o.id WHERE q.id=? AND b.email=q.recipient)`, id).Scan(&valid); err != nil {
+			return result, err
+		}
+		result.CanRetry = valid
+		if !valid {
+			result.RetryReason = "Keputusan atau penerima tidak dapat diverifikasi."
 		}
 	} else if result.Kind == "REFUND" {
 		var snapshot refundEmailSnapshot

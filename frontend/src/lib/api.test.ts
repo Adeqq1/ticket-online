@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
+import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -36,6 +36,23 @@ test("admin sales report API serializes filters and sends the staff session", as
     expect(result.daily).toEqual([]);
     expect(request?.url).toBe("/api/v1/admin/reports/sales?eventId=nusa+malam&dateFrom=2026-10-01&dateTo=2026-10-08");
     expect(new Headers(request?.init?.headers).get("Authorization")).toBe("Bearer staff-token");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("conversion report API sends ADMIN filters and reservation attribution header", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), init });
+    return new Response(JSON.stringify({ period: {}, summary: {}, byEvent: [], byDevice: [], blockers: [] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await getAdminConversionReport("staff-token", { device: "mobile", dateFrom: "2026-10-01", dateTo: "2026-10-08" });
+    await createReservation("event-1", [{ tierId: "tier-1", quantity: 1 }], "idempotency-key", undefined, "a".repeat(32));
+    expect(requests[0]?.url).toBe("/api/v1/admin/reports/conversion?device=mobile&dateFrom=2026-10-01&dateTo=2026-10-08");
+    expect(new Headers(requests[0]?.init?.headers).get("Authorization")).toBe("Bearer staff-token");
+    expect(new Headers(requests[1]?.init?.headers).get("X-Conversion-Journey")).toBe("a".repeat(32));
+    expect(new Headers(requests[1]?.init?.headers).get("Idempotency-Key")).toBe("idempotency-key");
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -163,7 +180,8 @@ test("uses checkout idempotency and Bearer auth for order, payment, and ticket A
   try {
     const signal = new AbortController().signal;
     const payload = { buyer: { name: "Pembeli", email: "buyer@example.com", phone: "+6281234567890", identity: "123456789012" }, attendees: [{ tierId: "tier-a", names: ["Peserta Satu", "Peserta Dua"] }, { tierId: "tier-b", names: ["Peserta Tiga"] }], voucherCode: "HEMAT10" };
-    expect(await createOrder("reservation-id", payload, "reservation-key-123456", signal)).toMatchObject({ id: "order-id", accessToken: "secret" });
+    expect(await createOrder("reservation-id", payload, "reservation-key-123456", signal, "a".repeat(32))).toMatchObject({ id: "order-id", accessToken: "secret" });
+    expect(new Headers(calls[0]?.init?.headers).get("X-Conversion-Journey")).toBe("a".repeat(32));
     expect(await getOrder("order-id", "secret", signal)).toMatchObject({ payment: null, reservationId: "reservation-id" });
     expect(await simulatePayment("order-id", { method: "QRIS", result: "FAILED" }, "secret", signal)).toMatchObject({ status: "FAILED", tickets: [] });
     expect(await listOrderTickets("order-id", "secret", signal)).toEqual([ticket]);

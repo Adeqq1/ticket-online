@@ -1,6 +1,6 @@
 import type { OrderAccess } from "./order-access.ts";
 
-export type RecoveryResult = { orderId: string; accessToken: string; reference: string; reservationId: string; expiresAt: string; accessExpiresAt: string; ticketIds: string[] };
+export type RecoveryResult = { orderId: string; accessToken: string; reference: string; reservationId: string; expiresAt: string; accessExpiresAt: string | null; ticketIds: string[]; changedEvent?: boolean };
 
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const idPattern = /^[0-9a-f]{32}$/;
@@ -17,8 +17,8 @@ export function isRecoveryResult(value: unknown): value is RecoveryResult {
   const result = value as Partial<RecoveryResult>;
   return typeof result.orderId === "string" && idPattern.test(result.orderId) && typeof result.accessToken === "string" && tokenPattern.test(result.accessToken) &&
     typeof result.reference === "string" && /^TO-[0-9a-f]{20}$/.test(result.reference) && typeof result.reservationId === "string" && idPattern.test(result.reservationId) &&
-    typeof result.expiresAt === "string" && Number.isFinite(Date.parse(result.expiresAt)) && typeof result.accessExpiresAt === "string" && Number.isFinite(Date.parse(result.accessExpiresAt)) &&
-    Array.isArray(result.ticketIds) && result.ticketIds.length > 0 && result.ticketIds.every((id) => typeof id === "string" && idPattern.test(id));
+    typeof result.expiresAt === "string" && Number.isFinite(Date.parse(result.expiresAt)) && (result.accessExpiresAt === null || typeof result.accessExpiresAt === "string" && Number.isFinite(Date.parse(result.accessExpiresAt))) &&
+    Array.isArray(result.ticketIds) && (result.ticketIds.length > 0 || result.changedEvent === true) && result.ticketIds.every((id) => typeof id === "string" && idPattern.test(id));
 }
 
 /** Converts a recovery result to a stored record; checkout metadata stays absent so checkout never reuses it. */

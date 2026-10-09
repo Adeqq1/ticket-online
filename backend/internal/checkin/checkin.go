@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
 
@@ -44,10 +45,12 @@ type Result struct {
 }
 
 type TicketStatus struct {
-	Status      string     `json:"status"`
-	Ticket      Ticket     `json:"ticket"`
-	OrderStatus string     `json:"orderStatus"`
-	CheckedInAt *time.Time `json:"checkedInAt"`
+	Status       string           `json:"status"`
+	Ticket       Ticket           `json:"ticket"`
+	OrderStatus  string           `json:"orderStatus"`
+	CurrentEvent eventstate.State `json:"currentEvent"`
+	CanCheckIn   bool             `json:"canCheckIn"`
+	CheckedInAt  *time.Time       `json:"checkedInAt"`
 }
 
 type HistoryFilter struct {
@@ -143,6 +146,10 @@ func (s *Service) GetTicketStatus(ctx context.Context, token, code string) (Tick
 	} else if err != nil {
 		return TicketStatus{}, fmt.Errorf("find ticket status order: %w", err)
 	}
+	state, err := eventstate.ForOrder(ctx, tx, orderID, true)
+	if err != nil {
+		return TicketStatus{}, err
+	}
 	var orderStatus, eventID string
 	if err := tx.QueryRowContext(ctx, `SELECT o.status, r.event_id FROM orders o
 		JOIN reservations r ON r.id = o.reservation_id WHERE o.id = ? FOR SHARE`, orderID).Scan(&orderStatus, &eventID); errors.Is(err, sql.ErrNoRows) {
@@ -166,10 +173,15 @@ func (s *Service) GetTicketStatus(ctx context.Context, token, code string) (Tick
 	if err := s.staff.AuthorizeTicketStatusTx(ctx, tx, principal, eventID, ticket.Gate); err != nil {
 		return TicketStatus{}, err
 	}
-	result := TicketStatus{Status: "NOT_CHECKED_IN", Ticket: ticket, OrderStatus: orderStatus}
+	var held bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM event_refund_rights WHERE order_id=? AND requested=TRUE)", orderID).Scan(&held); err != nil {
+		return TicketStatus{}, err
+	}
+	result := TicketStatus{Status: "NOT_CHECKED_IN", Ticket: ticket, OrderStatus: orderStatus, CurrentEvent: state, CanCheckIn: orderStatus == "PAID" && !held && state.CanCheckIn(time.Now())}
 	var checkedInAt sql.NullTime
 	if err := tx.QueryRowContext(ctx, "SELECT checked_in_at FROM ticket_checkins WHERE ticket_id = ?", ticketID).Scan(&checkedInAt); err == nil {
 		result.Status = "CHECKED_IN"
+		result.CanCheckIn = false
 		checkedInAtUTC := checkedInAt.Time.UTC()
 		result.CheckedInAt = &checkedInAtUTC
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -212,6 +224,10 @@ func (s *Service) CheckIn(ctx context.Context, token string, request Request) (R
 	if err != nil {
 		return Result{}, fmt.Errorf("find ticket order: %w", err)
 	}
+	state, err := eventstate.ForOrder(ctx, tx, orderID, true)
+	if err != nil {
+		return Result{}, err
+	}
 	var orderStatus string
 	var eventID string
 	err = tx.QueryRowContext(ctx, `SELECT o.status, r.event_id FROM orders o
@@ -227,6 +243,14 @@ func (s *Service) CheckIn(ctx context.Context, token string, request Request) (R
 	}
 	if eventID != request.EventID {
 		return Result{}, s.finishAttempt(ctx, tx, principal, request, "TICKET_NOT_FOUND", nil, ErrTicketNotFound)
+	}
+
+	var held bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM event_refund_rights WHERE order_id=? AND requested=TRUE)", orderID).Scan(&held); err != nil {
+		return Result{}, err
+	}
+	if held || !state.CanCheckIn(time.Now()) {
+		return Result{}, s.finishAttempt(ctx, tx, principal, request, "EVENT_CHANGED", nil, eventstate.ErrClosed)
 	}
 
 	var snapshot []byte

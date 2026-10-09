@@ -56,12 +56,14 @@ type AttendanceReport struct {
 }
 
 type attendanceCategoryState struct {
-	row  AttendanceCategory
-	gate string
+	row              AttendanceCategory
+	gate             string
+	eligibleCheckIns int64
 }
 
 type attendanceGateState struct {
-	row AttendanceGate
+	row              AttendanceGate
+	eligibleCheckIns int64
 }
 
 func attendanceRate(checkedIn, eligible int64) *float64 {
@@ -185,13 +187,15 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 		AND COALESCE(JSON_TYPE(JSON_EXTRACT(t.snapshot,'$.code')),'NULL') IN ('STRING','NULL')
 		AND COALESCE(JSON_TYPE(JSON_EXTRACT(t.snapshot,'$.attendeeName')),'NULL') IN ('STRING','NULL')
 		AND COALESCE(JSON_TYPE(JSON_EXTRACT(t.snapshot,'$.tierName')),'NULL') IN ('STRING','NULL')`
+	const eligibleTicket = `o.status='PAID' AND e.lifecycle_status IN ('SCHEDULED','RESCHEDULED') AND NOT EXISTS(SELECT 1 FROM event_refund_rights rr WHERE rr.order_id=o.id AND rr.requested=TRUE) AND (` + validTicketSnapshot + `)`
 	rows, err = tx.QueryContext(r.Context(), `SELECT t.ticket_tier_id, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot,'$.gate')),'') AS ticket_gate,
 		COALESCE(tt.name,'Kategori tidak diketahui'), COALESCE(tt.gate,''),
-		COUNT(*) AS issued, COALESCE(SUM(o.status='PAID' AND (`+validTicketSnapshot+`)),0) AS eligible,
+		COUNT(*) AS issued, COALESCE(SUM(`+eligibleTicket+`),0) AS eligible,
 		SUM(o.status='REFUND_PENDING'
 			AND (?='' OR BINARY JSON_UNQUOTE(JSON_EXTRACT(t.snapshot,'$.gate'))=BINARY ?)) AS held,
-		SUM(c.ticket_id IS NOT NULL) AS checked_in
-		FROM etickets t JOIN orders o ON o.id=t.order_id JOIN reservations r ON r.id=o.reservation_id
+		SUM(c.ticket_id IS NOT NULL) AS checked_in,
+ COALESCE(SUM(c.ticket_id IS NOT NULL AND (`+eligibleTicket+`)),0) AS eligible_checked_in
+		FROM etickets t JOIN orders o ON o.id=t.order_id JOIN reservations r ON r.id=o.reservation_id JOIN events e ON e.id=r.event_id
 		LEFT JOIN ticket_tiers tt ON tt.id=t.ticket_tier_id AND tt.event_id=r.event_id
 		LEFT JOIN ticket_checkins c ON c.ticket_id=t.id
 		WHERE r.event_id=? AND (?='' OR (JSON_TYPE(JSON_EXTRACT(t.snapshot,'$.gate'))='STRING'
@@ -205,8 +209,8 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 	for rows.Next() {
 		var tierID uint64
 		var gate, categoryName, tierGate string
-		var issued, eligible, held, checkedIn int64
-		if err := rows.Scan(&tierID, &gate, &categoryName, &tierGate, &issued, &eligible, &held, &checkedIn); err != nil {
+		var issued, eligible, held, checkedIn, eligibleCheckIns int64
+		if err := rows.Scan(&tierID, &gate, &categoryName, &tierGate, &issued, &eligible, &held, &checkedIn, &eligibleCheckIns); err != nil {
 			rows.Close()
 			return result, fmt.Errorf("scan admin attendance ticket aggregate: %w", err)
 		}
@@ -219,6 +223,7 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 		category.row.Eligible += eligible
 		category.row.HeldForRefund += held
 		category.row.CheckedIn += checkedIn
+		category.eligibleCheckIns += eligibleCheckIns
 		key := gate
 		gateState := gates[key]
 		if gateState == nil {
@@ -233,6 +238,7 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 		gateState.row.Eligible += eligible
 		gateState.row.HeldForRefund += held
 		gateState.row.CheckedIn += checkedIn
+		gateState.eligibleCheckIns += eligibleCheckIns
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -241,6 +247,7 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 	if err := rows.Close(); err != nil {
 		return result, fmt.Errorf("close admin attendance ticket aggregates: %w", err)
 	}
+	var eligibleCheckIns int64
 	for _, category := range categories {
 		gate := gates[category.gate]
 		if gate == nil {
@@ -250,7 +257,7 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 		}
 		gate.row.Capacity += category.row.Capacity
 		gate.row.Available += category.row.Available
-		category.row.AttendanceRate = attendanceRate(category.row.CheckedIn, category.row.Eligible)
+		category.row.AttendanceRate = attendanceRate(category.eligibleCheckIns, category.row.Eligible)
 		result.ByCategory = append(result.ByCategory, category.row)
 		result.Summary.Capacity += category.row.Capacity
 		result.Summary.Available += category.row.Available
@@ -258,10 +265,11 @@ func (s *Service) Attendance(r *http.Request, token string, filter AttendanceFil
 		result.Summary.Eligible += category.row.Eligible
 		result.Summary.HeldForRefund += category.row.HeldForRefund
 		result.Summary.CheckedIn += category.row.CheckedIn
+		eligibleCheckIns += category.eligibleCheckIns
 	}
-	result.Summary.AttendanceRate = attendanceRate(result.Summary.CheckedIn, result.Summary.Eligible)
+	result.Summary.AttendanceRate = attendanceRate(eligibleCheckIns, result.Summary.Eligible)
 	for _, gate := range gates {
-		gate.row.AttendanceRate = attendanceRate(gate.row.CheckedIn, gate.row.Eligible)
+		gate.row.AttendanceRate = attendanceRate(gate.eligibleCheckIns, gate.row.Eligible)
 		result.ByGate = append(result.ByGate, gate.row)
 	}
 	sort.Slice(result.ByCategory, func(i, j int) bool {

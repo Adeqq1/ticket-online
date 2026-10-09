@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
@@ -145,6 +145,13 @@ func (s *Service) applyProviderResult(ctx context.Context, token string, actor s
 	if _, err := s.staff.AuthenticateTx(ctx, tx, token); err != nil {
 		return nil, err
 	}
+	var targetID string
+	if err := tx.QueryRowContext(ctx, "SELECT order_id FROM payments WHERE gateway_order_id=?", gatewayOrderID).Scan(&targetID); err != nil {
+		return nil, err
+	}
+	if _, err := eventstate.ForOrder(ctx, tx, targetID, true); err != nil {
+		return nil, err
+	}
 	var orderID, orderStatus, paymentStatus string
 	var paymentAmount, caseAmount uint64
 	err = tx.QueryRowContext(ctx, `SELECT o.id, o.status, p.status, p.amount, c.amount FROM orders o
@@ -265,6 +272,21 @@ func (s *Service) RetryEmailJob(ctx context.Context, token, id string) (map[stri
 	var kind, status string
 	var orderID, requestID sql.NullString
 	var refundSnapshot []byte
+	// Order-bound retries follow the same event -> order -> outbox lock order as settlement.
+	if err := tx.QueryRowContext(ctx, "SELECT order_id FROM email_queue WHERE id=?", id).Scan(&orderID); errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	if orderID.Valid {
+		if _, err := eventstate.ForOrder(ctx, tx, orderID.String, true); err != nil {
+			return nil, err
+		}
+		var locked string
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM orders WHERE id=? FOR UPDATE", orderID.String).Scan(&locked); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT kind, status, order_id, recovery_request_id, refund_snapshot
 		FROM email_queue WHERE id = ? FOR UPDATE`, id).Scan(&kind, &status, &orderID, &requestID, &refundSnapshot); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -298,7 +320,11 @@ func (s *Service) RetryEmailJob(ctx context.Context, token, id string) (map[stri
 			FROM etickets WHERE order_id = ?`, orderID.String, orderID.String).Scan(&tickets, &expected); err != nil {
 			return nil, err
 		}
-		if orderStatus != "PAID" || tickets == 0 || tickets != expected || !time.Now().Before(orderaccess.Expiry(eventStart)) {
+		order, found, err := recovery.FindOrderByID(ctx, tx, orderID.String)
+		if err != nil {
+			return nil, err
+		}
+		if !found || !order.TicketActive || !order.Eligible(time.Now()) || orderStatus != "PAID" || tickets == 0 || tickets != expected {
 			return nil, ErrConflict
 		}
 		blocked, wait, err := recovery.CheckRateLimitsTx(ctx, tx, recovery.RateLimit{Bucket: s.access.Digest("limit/resend-order", orderID.String), Max: 1, Period: time.Minute})
@@ -400,6 +426,27 @@ func (s *Service) RetryEmailJob(ctx context.Context, token, id string) (map[stri
 		if _, err := tx.ExecContext(ctx, `UPDATE email_queue SET recipient=?, attempts=0, next_attempt_at=UTC_TIMESTAMP(6),
 			sent_at=NULL, last_error='', claim_token=NULL, lease_until=NULL, status='PENDING', updated_at=UTC_TIMESTAMP(6)
 			WHERE id=? AND status='FAILED' AND superseded_by IS NULL`, buyerEmail, id); err != nil {
+			return nil, err
+		}
+		retryID = id
+	} else if kind == "EVENT_CHANGE" {
+		var recipient string
+		if err := tx.QueryRowContext(ctx, `SELECT b.email FROM email_queue q JOIN event_changes c ON c.id=q.event_change_id
+  JOIN orders o ON o.id=q.order_id JOIN reservations r ON r.id=o.reservation_id AND r.event_id=c.event_id
+  JOIN order_buyers b ON b.order_id=o.id WHERE q.id=?`, id).Scan(&recipient); err != nil {
+			return nil, err
+		}
+		blocked, wait, err := recovery.CheckRateLimitsTx(ctx, tx, recovery.RateLimit{Bucket: s.access.Digest("limit/change-email-retry", orderID.String), Max: 1, Period: time.Minute})
+		if err != nil {
+			return nil, err
+		}
+		if blocked >= 0 {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return nil, rateLimitError{wait: wait}
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE email_queue SET recipient=?,attempts=0,next_attempt_at=UTC_TIMESTAMP(6),sent_at=NULL,last_error='',claim_token=NULL,lease_until=NULL,status='PENDING',updated_at=UTC_TIMESTAMP(6) WHERE id=? AND status='FAILED'", recipient, id); err != nil {
 			return nil, err
 		}
 		retryID = id

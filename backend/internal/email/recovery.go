@@ -56,9 +56,11 @@ func (s *Service) sendRecovery(ctx context.Context, current job) error {
 		return s.retry(ctx, current, "token pemulihan tidak dapat dibuat")
 	}
 	var expiresAt time.Time
-	if err := s.db.QueryRowContext(ctx, "SELECT LEAST(expires_at, ?) FROM recovery_requests WHERE id = ?",
-		orderaccess.Expiry(order.StartsAt), current.requestID).Scan(&expiresAt); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT expires_at FROM recovery_requests WHERE id = ?", current.requestID).Scan(&expiresAt); err != nil {
 		return s.retry(ctx, current, "masa berlaku pemulihan tidak dapat dibaca")
+	}
+	if !order.AccessDeadline.IsZero() && order.AccessDeadline.Before(expiresAt) {
+		expiresAt = order.AccessDeadline
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO recovery_tokens (token_hash, request_id, order_id, expires_at, created_at)
 		VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))`, hash, current.requestID, order.ID, expiresAt); err != nil {

@@ -97,8 +97,14 @@ func expireLockedOrder(ctx context.Context, tx *sql.Tx, id string) error {
 			return fmt.Errorf("restore unpaid order stock: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE orders SET status = 'EXPIRED', updated_at = UTC_TIMESTAMP(6) WHERE id = ?", id); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE orders SET status = IF(EXISTS(SELECT 1 FROM event_change_orders WHERE order_id=? AND stop_pending=TRUE),'CANCELLED','EXPIRED'), updated_at = UTC_TIMESTAMP(6) WHERE id = ?", id, id); err != nil {
 		return fmt.Errorf("mark order expired: %w", err)
 	}
 	return nil
+}
+
+// ReconcileClosedOrder uses the same provider confirmation and stock release as expiry.
+// Event decisions have already shortened pending order deadlines and blocked new attempts.
+func (r *Repository) ReconcileClosedOrder(ctx context.Context, id, key string) error {
+	return r.expireOrderWithMidtrans(ctx, id, key)
 }

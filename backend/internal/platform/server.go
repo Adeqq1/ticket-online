@@ -19,6 +19,8 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/catalog"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkin"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
+	"github.com/Adeqq1/ticket-online/backend/internal/conversion"
+	"github.com/Adeqq1/ticket-online/backend/internal/eventchange"
 	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
@@ -52,17 +54,20 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	mux := http.NewServeMux()
 	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
-	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger)
-	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access)
+	staffService := staffauth.New(db)
+	conversionService := conversion.New(db, staffService)
+	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger, conversionService)
+	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access, conversionService)
 	paymentRepository := payment.NewRepositoryWithMidtransEnvironment(db, environment)
 	paymentHandler := payment.NewHandlerWithMidtrans(paymentRepository, logger, access, midtransKey, frontendURL, environment)
-	staffService := staffauth.New(db)
+	conversionService.Register(mux, logger)
 	staffauth.NewHandler(staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
 	adminorders.NewHandler(adminorders.NewService(db, staffService), logger).Register(mux)
 	adminreports.NewHandler(adminreports.NewService(db, staffService), logger).Register(mux)
 	refundService := refund.New(db, staffService, midtransKey, environment, refundMethods, logger)
 	refund.NewHandler(refundService, logger).Register(mux)
+	eventchange.New(db, staffService, access, refundService, paymentRepository, midtransKey, logger).Register(mux)
 	adminissues.NewHandler(adminissues.NewService(db, staffService, access, paymentRepository, midtransKey), logger).Register(mux)
 	if metrics == nil {
 		metrics = operations.NewService(db, staffService, operations.Process)

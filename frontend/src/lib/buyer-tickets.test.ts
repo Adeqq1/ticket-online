@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { loadBuyerOrderTickets, uniqueBuyerTickets } from "./buyer-tickets.ts";
-import type { OrderAccess } from "./order-access.ts";
+import { removeOrderAccess, type OrderAccess } from "./order-access.ts";
 
 const accessForOrder = (orderId: string): OrderAccess => ({ orderId, accessToken: `${orderId}-token`, expiresAt: "2027-08-24T12:30:00Z", accessExpiresAt: "2027-08-25T00:00:00Z", reservationId: "reservation-id", idempotencyKey: "stable-key", basketKey: "basket", reference: orderId, ticketIds: [] });
 const detail = (orderId: string, status: "PAID" | "PENDING") => ({ id: orderId, reference: orderId, reservationId: "reservation-id", status, expiresAt: "2027-08-24T12:30:00Z", subtotal: 100, adminFee: 10, discount: 0, total: 110, items: [{ quantity: 1 }], buyer: { name: "Pembeli", email: "buyer@example.com", phone: "08123456789", identity: "123456789012" }, attendees: [], payment: null, createdAt: "2027-08-24T10:00:00Z", updatedAt: "2027-08-24T10:00:00Z", eventStartsAt: "2027-08-24T12:30:00Z", accessExpiresAt: "2027-08-25T00:00:00Z" });
@@ -24,7 +24,10 @@ test("loads paid order tickets independently, skips pending tickets, and keeps s
     expect(uniqueBuyerTickets(results)).toEqual([ticket]);
     expect(calls).not.toContain("/api/v1/orders/pending-order/tickets");
     expect(calls).toContain("/api/v1/orders/failed-order");
-  } finally { globalThis.fetch = originalFetch; }
+  } finally {
+    for (const id of ["paid-order", "pending-order", "failed-order", "partial-order"]) removeOrderAccess(id);
+    globalThis.fetch = originalFetch;
+  }
 });
 
 const access: OrderAccess = {
@@ -73,6 +76,7 @@ test("retains paid order details when ticket listing fails, then loads tickets o
     expect(retried.tickets).toHaveLength(1);
     expect(retried.error).toBeNull();
   } finally {
+    removeOrderAccess(access.orderId);
     globalThis.fetch = originalFetch;
   }
 });

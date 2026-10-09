@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { currentStart, eventStatus } from "../../lib/event-changes.ts";
   import { onMount } from "svelte";
   import { eventDate } from "../../lib/concerts.ts";
   import { ApiError, type ApiTicket } from "../../lib/api.ts";
@@ -13,7 +14,7 @@
   let demoDataPresent = $state(false);
   const tickets = $derived(uniqueBuyerTickets(orders));
   const ordersNeedingRetry = $derived(orders.filter((order) => order.error || order.detail?.status !== "PAID" || !order.tickets.length));
-  const upcoming = (ticket: ApiTicket) => Date.parse(ticket.eventStartsAt) > Date.now();
+  const upcoming = (ticket: ApiTicket) => Date.parse(currentStart(ticket) ?? "") > Date.now();
   function persistTickets(access: BuyerOrderTickets["access"], ticketList: ApiTicket[]) {
     if (!ticketList.length) return;
     const saved = saveOrderAccess({ ...access, ticketIds: [...new Set([...access.ticketIds, ...ticketList.map((ticket) => ticket.id)])] });
@@ -82,11 +83,11 @@
               <div class="my-ticket-poster" aria-hidden="true">{ticket.code}</div>
               <div class="my-ticket-card-body">
                 <div class="my-ticket-card-topline">
-                  <span class:past={!upcoming(ticket)} class="my-ticket-status">{upcoming(ticket) ? "Mendatang" : "Selesai"}</span>
+                  <span class:past={!upcoming(ticket)} class="my-ticket-status">{eventStatus(ticket.currentEvent) || (ticket.usable === false ? "Tidak aktif" : upcoming(ticket) ? "Mendatang" : "Selesai")}</span>
                   {#if access}<a class="my-ticket-reference" href={`/pesanan/${encodeURIComponent(access.orderId)}`}>{ticket.orderReference}</a>{:else}<span class="my-ticket-reference">{ticket.orderReference}</span>{/if}
                 </div>
                 <h2>{ticket.eventArtist}</h2>
-                <p class="my-ticket-date">{eventDate(ticket.eventStartsAt)}</p>
+                <p class="my-ticket-date">{eventDate(currentStart(ticket))}</p>
                 <p class="my-ticket-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
                 <p class="my-ticket-venue">{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</p>
                 {#if persistent}

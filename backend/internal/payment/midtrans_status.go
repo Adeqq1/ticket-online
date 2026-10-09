@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 )
 
 type midtransStatus struct {
@@ -163,6 +165,9 @@ func (r *Repository) expireOrderLocally(ctx context.Context, id, expectedGateway
 		return fmt.Errorf("begin order expiration: %w", err)
 	}
 	defer tx.Rollback()
+	if _, err := eventstate.ForOrder(ctx, tx, id, true); err != nil {
+		return err
+	}
 	var status, paymentStatus, gatewayOrderID string
 	var expiresAt time.Time
 	err = tx.QueryRowContext(ctx, `SELECT o.status, o.expires_at, COALESCE(p.status, ''), COALESCE(p.gateway_order_id, '')

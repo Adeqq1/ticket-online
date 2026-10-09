@@ -30,8 +30,10 @@ tags:
     description: Pemantauan API, worker, email gagal, dan kasus pembayaran terbuka khusus ADMIN.
   - name: Admin Laporan
     description: Ringkasan pembayaran berhasil dan refund berdasarkan waktu transaksi keuangan.
+  - name: Konversi
+    description: Pencatatan perjalanan anonim dan laporan funnel ADMIN.
   - name: Admin Pesanan
-    description: Detail dan refund penuh order oleh ADMIN. Refund hanya untuk QRIS/GoPay yang diaktifkan lewat allowlist konfigurasi.
+    description: Detail dan refund penuh order oleh ADMIN. Refund otomatis memakai QRIS/GoPay terverifikasi; keputusan acara menyediakan antrean manual untuk transaksi yang tidak mendukung otomatis.
 paths:
   /api/v1/events:
     get:
@@ -183,7 +185,7 @@ paths:
       operationId: updateAdminEvent
       tags: [Admin Konser]
       summary: Mengubah informasi, lineup, dan status publikasi konser
-      description: Jadwal dan lokasi terkunci sejak reservasi pertama. Mengirim nilai jadwal/lokasi yang sama tetap diizinkan.
+      description: Jadwal dan lokasi terkunci sejak reservasi pertama. Perubahan jadwal memakai endpoint changes agar audit dan hak pembeli tetap terjaga. Mengirim nilai jadwal/lokasi yang sama tetap diizinkan.
       security: [{StaffSessionToken: []}]
       requestBody:
         required: true
@@ -312,6 +314,11 @@ paths:
         dikonfigurasi server.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: X-Conversion-Journey
+          in: header
+          required: false
+          description: ID perjalanan anonim untuk menghubungkan reservasi. Diabaikan jika tidak valid atau tidak cocok dengan event.
+          schema: {type: string, pattern: '^[a-fA-F0-9]{32}$'}
       requestBody:
         required: true
         content:
@@ -1165,7 +1172,7 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
               example: {error: {code: TICKET_NOT_FOUND, message: Tiket tidak ditemukan}}
         '409':
-          description: Gate salah, tiket sudah digunakan, atau order belum dibayar.
+          description: Gate salah, tiket sudah digunakan, order belum dibayar, atau perubahan acara menghalangi masuk (EVENT_CHANGED).
           content:
             application/json:
               schema:
@@ -1293,7 +1300,7 @@ paths:
                 type: object
                 required: [status, amount, reason]
                 properties:
-                  status: {type: string, enum: [UNKNOWN, PROCESSING, SUCCEEDED, FAILED]}
+                  status: {type: string, enum: [REQUESTED, UNKNOWN, PROCESSING, SUCCEEDED, FAILED, MANUAL_REQUIRED]}
                   amount: {type: integer, minimum: 1}
                   reason: {type: string}
         '400': {$ref: '#/components/responses/InvalidCheckInRequest'}
@@ -1407,7 +1414,7 @@ paths:
       security: [{StaffSessionToken: []}]
       parameters:
         - {name: q, in: query, schema: {type: string, maxLength: 32}}
-        - {name: kind, in: query, schema: {type: string, enum: [TICKETS, RECOVERY, REFUND]}}
+        - {name: kind, in: query, schema: {type: string, enum: [TICKETS, RECOVERY, REFUND, EVENT_CHANGE]}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 256}}
       responses:
         '200':
@@ -1439,7 +1446,7 @@ paths:
       operationId: retryAdminEmailJob
       tags: [Admin Operasional]
       summary: Jadwalkan ulang email gagal
-      description: Memakai cooldown yang sama dengan pengiriman ulang publik; retry pemulihan membuat request dan tautan baru. Retry REFUND hanya mengirim ulang email hasil refund dan tidak mengirim refund ke provider.
+      description: Memakai cooldown yang sama dengan pengiriman ulang publik; retry pemulihan membuat request dan tautan baru. Retry REFUND hanya mengirim ulang email hasil refund dan tidak mengirim refund ke provider. Retry EVENT_CHANGE memakai keputusan dan informasi acara terbaru.
       security: [{StaffSessionToken: []}]
       parameters:
         - {name: jobID, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}}
@@ -1453,6 +1460,60 @@ paths:
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '409': {description: Job tidak lagi gagal, telah digantikan, atau order tidak memenuhi syarat.}
         '429': {description: Batas kirim ulang tercapai.}
+  /api/v1/conversion/events:
+    post:
+      operationId: recordConversionEvent
+      tags: [Konversi]
+      summary: Mencatat aktivitas perjalanan anonim
+      description: >-
+        Tidak menerima identitas pembeli, token, URL, query, atau teks bebas. ID perjalanan acak per event dan tab;
+        timestamp ditetapkan server. Pengulangan aktivitas dideduplikasi.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [journeyId, eventId, device, kind]
+              properties:
+                journeyId: {type: string, pattern: '^[a-fA-F0-9]{32}$'}
+                eventId: {type: string, minLength: 1, maxLength: 64}
+                device: {type: string, enum: [mobile, desktop, unknown]}
+                kind: {type: string, enum: [DETAIL_VIEWED, CHECKOUT_STARTED, VALIDATION_FAILED, SERVICE_FAILURE]}
+                reason: {type: string, enum: [BUYER_DATA, ATTENDEE_DATA, SERVICE]}
+      responses:
+        '204': {description: Aktivitas tercatat atau sudah pernah dicatat.}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '503': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/reports/conversion:
+    get:
+      operationId: getAdminConversionReport
+      tags: [Konversi]
+      summary: Laporan konversi pembeli
+      description: >-
+        Hanya ADMIN aktif. Tanggal cohort inklusif memakai Asia/Jakarta, default 30 hari terakhir dan maksimal 366 hari.
+        Tiap perjalanan dihitung sekali; hasil matang setelah 24 jam. Detail, reservasi, order, pembayaran dimulai,
+        dan pembayaran berhasil berasal dari bukti frontend/backend yang sesuai. Setiap tahap harus tercapai dalam 24 jam sejak awal cohort. Checkout langsung tidak menambah tahap detail.
+      security: [{StaffSessionToken: []}]
+      parameters:
+        - {name: eventId, in: query, required: false, schema: {type: string, maxLength: 64}}
+        - {name: device, in: query, required: false, schema: {type: string, enum: [mobile, desktop, unknown]}}
+        - {name: dateFrom, in: query, required: false, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: false, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Snapshot agregat tanpa data pribadi atau token.
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+          content:
+            application/json:
+              schema: {type: object, description: Jumlah tahap total dan matang, kehilangan per tahap, hambatan, rincian event/perangkat, cakupan tanpa atribusi, serta waktu snapshot.}
+        '400': {$ref: '#/components/responses/InvalidIDOrJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
   /api/v1/admin/reports/sales:
     get:
       operationId: getAdminSalesReport
@@ -1519,7 +1580,7 @@ paths:
       description: >-
         Hanya ADMIN aktif. Event wajib; gate opsional. Inventori, tiket, refund tertahan, dan check-in menunjukkan kondisi
         pada snapshot saat laporan dibuat. Tiket eligible mengikuti status order PAID serta validasi ID, event, dan gate snapshot
-        yang dipakai backend check-in. Tingkat kehadiran adalah check-in berhasil dibagi tiket eligible; nilainya null jika tidak ada.
+        yang dipakai backend check-in. Tingkat kehadiran menghitung check-in pada tiket yang masih eligible; nilainya null jika tidak ada tiket eligible. Jumlah check-in historis tetap dipertahankan sesudah perubahan acara atau refund.
         Check-in per jam dihitung dari ticket_checkins, bukan percobaan scan.
       security: [{StaffSessionToken: []}]
       parameters:
@@ -1609,13 +1670,247 @@ paths:
         '401': {$ref: '#/components/responses/StaffUnauthorized'}
         '403': {$ref: '#/components/responses/AdminForbidden'}
         '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/events/{eventID}/changes/preview:
+    parameters:
+    - $ref: '#/components/parameters/EventID'
+    post:
+      tags:
+      - Admin Konser
+      security:
+      - StaffSessionToken: []
+      operationId: previewEventChange
+      summary: Pratinjau dampak pembatalan atau perubahan jadwal
+      description: Hanya ADMIN. Hitungan dan fingerprint mencakup reservasi, order,
+        pembayaran, refund, tiket, dan check-in. startsAt serta refundDeadline wajib
+        untuk RESCHEDULED; null untuk keputusan lain. expectedVersion harus versi terbaru.
+        snapshot boleh kosong saat pratinjau.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventChangeInput'
+      responses:
+        '200':
+          description: Dampak terkini dan snapshot untuk konfirmasi.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventChangePreview'
+        '401':
+          $ref: '#/components/responses/StaffUnauthorized'
+        '403':
+          $ref: '#/components/responses/AdminForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '409':
+          description: Pratinjau berubah, keputusan final, atau pekerjaan pembayaran
+            lama belum selesai; EVENT_CHANGE_CONFLICT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Data keputusan tidak valid; INVALID_REQUEST.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/admin/events/{eventID}/changes:
+    parameters:
+    - $ref: '#/components/parameters/EventID'
+    get:
+      tags:
+      - Admin Konser
+      security:
+      - StaffSessionToken: []
+      operationId: listEventChanges
+      summary: Riwayat keputusan dan progres penanganan
+      responses:
+        '200':
+          description: Keputusan terbaru terlebih dahulu, termasuk pekerjaan belum selesai
+            dan jumlah gangguan.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventChange'
+        '401':
+          $ref: '#/components/responses/StaffUnauthorized'
+        '403':
+          $ref: '#/components/responses/AdminForbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+      - Admin Konser
+      security:
+      - StaffSessionToken: []
+      operationId: commitEventChange
+      summary: Menerapkan keputusan acara yang telah dipratinjau
+      description: Hanya ADMIN. snapshot dan expectedVersion wajib cocok dengan dampak
+        terbaru. Idempotency-Key wajib dipertahankan untuk retry keputusan identik.
+        Pembatalan final; penundaan mempertahankan QR; jadwal baru memerlukan tenggat
+        refund di masa depan sebelum konser dan tidak memendekkan hak yang sudah diberikan.
+        Penjualan dihentikan selama pembayaran lama belum pasti. Nominal refund penuh
+        termasuk biaya admin berasal dari database.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventChangeInput'
+      responses:
+        '200':
+          description: Keputusan dan audit tersimpan; penanganan serta email melalui
+            worker.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - version
+                properties:
+                  id:
+                    type: string
+                  version:
+                    type: integer
+                    minimum: 1
+        '401':
+          $ref: '#/components/responses/StaffUnauthorized'
+        '403':
+          $ref: '#/components/responses/AdminForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '409':
+          description: Pratinjau berubah, keputusan final, atau pekerjaan pembayaran
+            lama belum selesai; EVENT_CHANGE_CONFLICT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Data keputusan tidak valid; INVALID_REQUEST.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orders/{orderID}/refund-request:
+    parameters:
+    - $ref: '#/components/parameters/OrderID'
+    post:
+      tags:
+      - Checkout
+      operationId: requestEventRefund
+      summary: Meminta refund penuh sesuai hak perubahan acara
+      description: Token order privat diperlukan. Permintaan berulang aman; tenggat
+        memakai waktu server. Tiket langsung ditahan sejak permintaan. Pembatalan dan
+        settlement terlambat tidak memerlukan permintaan pembeli.
+      security:
+      - OrderAccessToken: []
+      responses:
+        '200':
+          description: Permintaan tercatat untuk pemrosesan otomatis atau manual.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - status
+                properties:
+                  status:
+                    type: string
+                    const: REQUESTED
+        '401':
+          description: Token order tidak valid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Pratinjau berubah, keputusan final, atau pekerjaan pembayaran
+            lama belum selesai; EVENT_CHANGE_CONFLICT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: Masa akses order berakhir.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/admin/orders/{orderID}/refund/manual:
+    parameters:
+    - $ref: '#/components/parameters/OrderID'
+    post:
+      tags:
+      - Admin Pesanan
+      operationId: completeManualEventRefund
+      summary: Mencatat bukti transfer refund manual yang sudah berhasil
+      description: Hanya ADMIN dan hanya MANUAL_REQUIRED. Aplikasi tidak mentransfer
+        dana bank. Referensi, waktu transfer aktual, dan catatan wajib; waktu tidak
+        boleh mendahului pembayaran atau berada di masa depan. UNKNOWN harus direkonsiliasi
+        lebih dahulu. Retry dengan referensi dan waktu identik aman. Penyelesaian, audit,
+        stok, masa akses dan email disimpan atomik.
+      security:
+      - StaffSessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualRefundInput'
+      responses:
+        '200':
+          description: Transfer berhasil dikonfirmasi.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundResult'
+        '400':
+          description: JSON atau bukti tidak valid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/StaffUnauthorized'
+        '403':
+          $ref: '#/components/responses/AdminForbidden'
+        '409':
+          description: Refund belum memenuhi syarat manual.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Data keputusan tidak valid; INVALID_REQUEST.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     OrderAccessToken:
       type: http
       scheme: bearer
       bearerFormat: opaque
-      description: Token opaque order dari respons checkout; terikat pada order dan berlaku sampai tengah malam WIB setelah tanggal konser.
+      description: Token opaque order dari respons checkout; terikat pada order. Batas akses mengikuti accessExpiresAt; perubahan acara mempertahankan akses selama penundaan atau hasil pembayaran/refund belum pasti, dan menyediakan minimal 90 hari sesudah pembatalan atau refund berhasil.
     StaffSessionToken:
       type: http
       scheme: bearer
@@ -1807,7 +2102,7 @@ components:
             type: object
             required: [name, running, consecutiveFailures]
             properties:
-              name: {type: string, enum: [reservation, payment_expiry, email, refund]}
+              name: {type: string, enum: [reservation, payment_expiry, email, refund, event_changes]}
               running: {type: boolean}
               startedAt: {type: [string, 'null'], format: date-time}
               lastFinishedAt: {type: [string, 'null'], format: date-time}
@@ -1942,7 +2237,8 @@ components:
         reference: {type: string}
         reservationId: {type: string}
         expiresAt: {type: string, format: date-time, description: Deadline order.}
-        accessExpiresAt: {type: string, format: date-time}
+        accessExpiresAt: {type: [string, 'null'], format: date-time, description: 'Batas akses final; null selama perubahan acara atau refund belum selesai.'}
+        changedEvent: {type: boolean, description: Memungkinkan pemulihan order perubahan acara tanpa tiket terbit.}
         ticketIds:
           type: array
           items: {type: string}
@@ -2026,6 +2322,8 @@ components:
       type: object
       required: [status, ticket, orderStatus, checkedInAt]
       properties:
+        currentEvent: {$ref: '#/components/schemas/EventState'}
+        canCheckIn: {type: boolean, description: Kelayakan masuk menurut jadwal terkini dan hak refund.}
         status: {type: string, enum: [CHECKED_IN, NOT_CHECKED_IN]}
         ticket: {$ref: '#/components/schemas/CheckInTicket'}
         orderStatus: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED, REFUND_PENDING, REFUNDED]}
@@ -2067,6 +2365,9 @@ components:
         - type: object
           required: [buyer, subtotal, adminFee, discount, expiresAt, items, payment, tickets]
           properties:
+            currentEvent: {$ref: '#/components/schemas/EventState'}
+            refund:
+              oneOf: [{$ref: '#/components/schemas/AdminRefund'}, {type: 'null'}]
             buyer:
               type: object
               required: [name, email, phone, identityMasked]
@@ -2155,7 +2456,7 @@ components:
       required: [id, kind, status, reference, recipient, attempts, lastError, updatedAt, supersededBy]
       properties:
         id: {type: string, pattern: '^[0-9a-f]{32}$'}
-        kind: {type: string, enum: [TICKETS, RECOVERY, REFUND]}
+        kind: {type: string, enum: [TICKETS, RECOVERY, REFUND, EVENT_CHANGE]}
         status: {type: string, enum: [FAILED, PENDING, SENT, PROCESSING]}
         reference: {type: string}
         recipient: {type: string, description: Email sebagian disamarkan pada daftar; nilai lengkap hanya tersedia pada detail admin.}
@@ -2195,7 +2496,7 @@ components:
           properties:
             id: {type: string, pattern: '^[0-9a-f]{32}$'}
             name: {type: string}
-        outcome: {type: string, enum: [CHECKED_IN, TICKET_ALREADY_USED, INVALID_REQUEST, TICKET_NOT_FOUND, ORDER_NOT_PAID, WRONG_GATE, FORBIDDEN]}
+        outcome: {type: string, enum: [CHECKED_IN, TICKET_ALREADY_USED, INVALID_REQUEST, TICKET_NOT_FOUND, ORDER_NOT_PAID, WRONG_GATE, FORBIDDEN, EVENT_CHANGED]}
         recordedAt: {type: string, format: date-time}
         checkedInAt: {type: [string, 'null'], format: date-time}
     CheckInHistoryEvent:
@@ -2252,7 +2553,8 @@ components:
         city: {type: string}
         venue: {type: string}
         address: {type: string}
-        startsAt: {type: string, format: date-time}
+        startsAt: {type: string, description: 'Jadwal efektif RFC3339; kosong untuk acara tanpa jadwal aktif.'}
+        currentEvent: {$ref: '#/components/schemas/EventState'}
         genre: {type: string}
         status: {type: string, enum: [Early Bird, Presale, Sold Out]}
         publicationStatus: {type: string, enum: [DRAFT, PUBLISHED, ARCHIVED]}
@@ -2456,7 +2758,7 @@ components:
           required: [accessToken, accessExpiresAt]
           properties:
             accessToken: {type: string, description: Token akses privat order; simpan di browser pembeli.}
-            accessExpiresAt: {type: string, format: date-time, description: Akhir masa berlaku token akses.}
+            accessExpiresAt: {type: [string, 'null'], format: date-time, description: 'Batas akses final; null selama perubahan acara atau refund belum selesai.'}
     OrderDetail:
       allOf:
         - $ref: '#/components/schemas/OrderBase'
@@ -2486,8 +2788,13 @@ components:
                 - type: 'null'
             createdAt: {type: string, format: date-time}
             updatedAt: {type: string, format: date-time}
-            eventStartsAt: {type: string, format: date-time}
-            accessExpiresAt: {type: string, format: date-time}
+            eventStartsAt: {type: string, description: 'Jadwal efektif RFC3339; kosong saat ditunda atau dibatalkan.'}
+            currentEvent: {$ref: '#/components/schemas/EventState'}
+            refundRight:
+              oneOf: [{$ref: '#/components/schemas/EventRefundRight'}, {type: 'null'}]
+            refund:
+              oneOf: [{$ref: '#/components/schemas/RefundSummary'}, {type: 'null'}]
+            accessExpiresAt: {type: [string, 'null'], format: date-time, description: 'Batas akses final; null selama perubahan acara atau refund belum selesai.'}
     PaymentSummary:
       type: object
       required: [id, method, amount, status]
@@ -2544,6 +2851,8 @@ components:
       type: object
       required: [id, code, attendeeName, orderReference, eventId, eventArtist, eventCity, eventVenue, eventAddress, eventStartsAt, tierName, gate, issuedAt]
       properties:
+        currentEvent: {$ref: '#/components/schemas/EventState'}
+        usable: {type: boolean, description: Tiket aktif untuk jadwal terkini; tetap periksa check-in backend.}
         id: {type: string, pattern: '^[0-9a-f]{32}$'}
         code: {type: string}
         attendeeName: {type: string}
@@ -2553,7 +2862,301 @@ components:
         eventCity: {type: string}
         eventVenue: {type: string}
         eventAddress: {type: string}
-        eventStartsAt: {type: string, format: date-time}
+        eventStartsAt: {type: string, format: date-time, description: Snapshot saat penerbitan; currentEvent.startsAt menjadi acuan jadwal terbaru.}
         tierName: {type: string}
         gate: {type: string}
         issuedAt: {type: string, format: date-time}
+    EventState:
+      type: object
+      required:
+      - id
+      - status
+      - version
+      - salesPaused
+      - startsAt
+      - announcement
+      - refundDeadline
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+          - SCHEDULED
+          - POSTPONED
+          - RESCHEDULED
+          - CANCELLED
+        version:
+          type: integer
+          minimum: 0
+        salesPaused:
+          type: boolean
+        startsAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        announcement:
+          type: string
+        refundDeadline:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      description: Informasi acara terkini yang menjadi acuan jadwal dan keberlakuan tiket.
+        Snapshot penerbitan tetap historis.
+    EventChangeInput:
+      type: object
+      required:
+      - action
+      - reason
+      - announcement
+      - startsAt
+      - refundDeadline
+      - expectedVersion
+      - snapshot
+      properties:
+        action:
+          type: string
+          enum:
+          - POSTPONED
+          - RESCHEDULED
+          - CANCELLED
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+        announcement:
+          type: string
+          minLength: 3
+          maxLength: 2000
+        startsAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        refundDeadline:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        expectedVersion:
+          type: integer
+          minimum: 0
+        snapshot:
+          type: string
+          description: Fingerprint pratinjau; kosong saat meminta pratinjau, 64 hex saat
+            commit.
+      additionalProperties: false
+    EventChangeImpact:
+      type: object
+      required:
+      - activeReservations
+      - pendingOrders
+      - pendingPayments
+      - paidOrders
+      - issuedTickets
+      - checkIns
+      - existingRefunds
+      - automaticAmount
+      - manualAmount
+      properties:
+        activeReservations:
+          type: integer
+          minimum: 0
+        pendingOrders:
+          type: integer
+          minimum: 0
+        pendingPayments:
+          type: integer
+          minimum: 0
+        paidOrders:
+          type: integer
+          minimum: 0
+        issuedTickets:
+          type: integer
+          minimum: 0
+        checkIns:
+          type: integer
+          minimum: 0
+        existingRefunds:
+          type: integer
+          minimum: 0
+        automaticAmount:
+          type: integer
+          minimum: 0
+        manualAmount:
+          type: integer
+          minimum: 0
+    EventChangePreview:
+      type: object
+      required:
+      - event
+      - snapshot
+      - impact
+      properties:
+        event:
+          $ref: '#/components/schemas/EventState'
+        snapshot:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        impact:
+          $ref: '#/components/schemas/EventChangeImpact'
+    EventChange:
+      type: object
+      required:
+      - id
+      - version
+      - action
+      - reason
+      - announcement
+      - previousStartsAt
+      - startsAt
+      - refundDeadline
+      - staffId
+      - createdAt
+      - remainingOrders
+      - errors
+      properties:
+        id:
+          type: string
+        version:
+          type: integer
+          minimum: 0
+        action:
+          type: string
+          enum:
+          - POSTPONED
+          - RESCHEDULED
+          - CANCELLED
+        reason:
+          type: string
+        announcement:
+          type: string
+        previousStartsAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        startsAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        refundDeadline:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        staffId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        remainingOrders:
+          type: integer
+          minimum: 0
+        errors:
+          type: integer
+          minimum: 0
+    ManualRefundInput:
+      type: object
+      required:
+      - reference
+      - paidAt
+      - note
+      properties:
+        reference:
+          type: string
+          minLength: 3
+          maxLength: 160
+        paidAt:
+          type: string
+          format: date-time
+        note:
+          type: string
+          minLength: 3
+          maxLength: 500
+      additionalProperties: false
+    RefundResult:
+      type: object
+      required:
+      - status
+      - amount
+      - reason
+      properties:
+        status:
+          type: string
+          enum:
+          - REQUESTED
+          - PROCESSING
+          - UNKNOWN
+          - FAILED
+          - SUCCEEDED
+          - MANUAL_REQUIRED
+        amount:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+    RefundSummary:
+      type: object
+      required:
+      - status
+      - amount
+      properties:
+        status:
+          type: string
+          enum:
+          - REQUESTED
+          - PROCESSING
+          - UNKNOWN
+          - FAILED
+          - SUCCEEDED
+          - MANUAL_REQUIRED
+        amount:
+          type: integer
+          minimum: 0
+    EventRefundRight:
+      type: object
+      required:
+      - requested
+      - deadline
+      properties:
+        requested:
+          type: boolean
+        deadline:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    AdminRefund:
+      type: object
+      required:
+      - status
+      - amount
+      - reason
+      - manualReference
+      - manualPaidAt
+      properties:
+        status:
+          type: string
+          enum:
+          - REQUESTED
+          - PROCESSING
+          - UNKNOWN
+          - FAILED
+          - SUCCEEDED
+          - MANUAL_REQUIRED
+        amount:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+        manualReference:
+          type: string
+        manualPaidAt:
+          type:
+          - string
+          - 'null'
+          format: date-time

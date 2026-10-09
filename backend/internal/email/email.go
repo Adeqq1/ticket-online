@@ -24,6 +24,7 @@ import (
 
 	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
+	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
 )
 
 const (
@@ -192,6 +193,9 @@ type ticket struct {
 }
 
 func (s *Service) send(ctx context.Context, current job) error {
+	if current.kind == "EVENT_CHANGE" {
+		return s.sendEventChange(ctx, current)
+	}
 	if current.kind == "RECOVERY" {
 		return s.sendRecovery(ctx, current)
 	}
@@ -201,8 +205,15 @@ func (s *Service) send(ctx context.Context, current job) error {
 	if !mailbox(current.recipient) {
 		return s.finishFailure(ctx, current, "alamat penerima tidak valid")
 	}
+	order, found, err := recovery.FindOrderByID(ctx, s.db, current.orderID)
+	if err != nil {
+		return s.retry(ctx, current, "status tiket belum dapat dibaca")
+	}
+	if !found || !order.Eligible(time.Now()) || !order.TicketActive {
+		return s.finishFailure(ctx, current, "tiket tidak lagi aktif")
+	}
 	var summary orderSummary
-	err := s.db.QueryRowContext(ctx, `SELECT b.name, o.reference, e.artist, e.city, e.venue, e.address, e.starts_at,
+	err = s.db.QueryRowContext(ctx, `SELECT b.name, o.reference, e.artist, e.city, e.venue, e.address, e.starts_at,
 		o.subtotal, o.admin_fee, o.discount, o.total FROM orders o
 		JOIN order_buyers b ON b.order_id = o.id JOIN reservations r ON r.id = o.reservation_id
 		JOIN events e ON e.id = r.event_id WHERE o.id = ? AND o.status = 'PAID'`, current.orderID).Scan(
@@ -259,8 +270,8 @@ func (s *Service) send(ctx context.Context, current job) error {
 	if len(tickets) == 0 || len(items) == 0 {
 		return s.finishFailure(ctx, current, "tiket pesanan tidak tersedia")
 	}
-	linkExpiry := orderaccess.Expiry(summary.startsAt)
-	if !time.Now().Before(linkExpiry) {
+	linkExpiry := order.AccessDeadline
+	if !linkExpiry.IsZero() && !time.Now().Before(linkExpiry) {
 		return s.finishFailure(ctx, current, "akses tiket telah kedaluwarsa")
 	}
 	access := orderaccess.New(s.db, s.config.AccessSecret).Token(current.orderID)

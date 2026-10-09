@@ -248,7 +248,7 @@ func (s *Service) Sales(r *http.Request, token string, filter Filter) (Report, e
 	rows, err = tx.QueryContext(r.Context(), `SELECT event_id, SUM(unfinished_refunds), SUM(open_cases) FROM (
 		SELECT r.event_id, COUNT(*) AS unfinished_refunds, 0 AS open_cases
 		FROM order_refunds f JOIN orders o ON o.id=f.order_id JOIN reservations r ON r.id=o.reservation_id
-		WHERE f.status IN ('REQUESTED','PROCESSING','UNKNOWN') AND (? = '' OR r.event_id = ?) GROUP BY r.event_id
+		WHERE f.status IN ('REQUESTED','PROCESSING','UNKNOWN','MANUAL_REQUIRED') AND (? = '' OR r.event_id = ?) GROUP BY r.event_id
 		UNION ALL
 		SELECT r.event_id, 0 AS unfinished_refunds, COUNT(*) AS open_cases
 		FROM payment_reconciliation_cases c JOIN orders o ON o.id=c.order_id JOIN reservations r ON r.id=o.reservation_id

@@ -173,7 +173,7 @@ func (s *Service) Collect(ctx context.Context) (Metrics, error) {
 		return next, err
 	}
 	next.OpenPaymentCases = int(open)
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM order_refunds WHERE status IN ('REQUESTED','PROCESSING','UNKNOWN')").Scan(&open); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM order_refunds WHERE status IN ('REQUESTED','PROCESSING','UNKNOWN','MANUAL_REQUIRED')").Scan(&open); err != nil {
 		return next, err
 	}
 	next.OpenRefunds = int(open)
