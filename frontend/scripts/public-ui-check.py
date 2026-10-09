@@ -98,6 +98,17 @@ def reply(path, scenario, page_state="standard"):
         return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Layanan sedang tidak tersedia."}}
     events = [event("POSTPONED" if state == "changed" else "SCHEDULED")]
     if endpoint == "/api/v1/events":
+        if scenario == "phase21-search":
+            events = [{**events[0], "id": f"fixture-{index}", "artist": f"Konser Contoh {index}", "venue": f"Venue {index}"} for index in range(1, 5)]
+            events.append({**events[0], "id": "fixture-fifth", "artist": "Panggung Terakhir", "venue": "Gedung Musik", "image": "https://picsum.photos/seed/nusa-malam/900/1100"})
+        elif scenario == "phase21-card-states":
+            base = events[0]
+            sold_out = {**base, "id": "sold-out", "artist": "Konser Habis", "status": "Sold Out", "ticketTiers": [{**base["ticketTiers"][0], "availableQuantity": 0}]}
+            no_tickets = {**base, "id": "no-tickets", "artist": "Tiket Menyusul", "ticketTiers": []}
+            changed = event("RESCHEDULED")
+            changed.update({"id": "rescheduled", "artist": "Jadwal Baru"})
+            broken_poster = {**base, "id": "broken-poster", "artist": "Poster Gagal", "image": "/missing-poster.jpg"}
+            events = [sold_out, no_tickets, changed, broken_poster]
         return 200, {"events": [] if scenario == "empty" else events}
     if endpoint.startswith("/api/v1/events/"):
         return 200, event("POSTPONED" if state == "changed" else "SCHEDULED")
@@ -154,10 +165,14 @@ async def capture(page, name, description):
 
 
 async def main():
-    global MODE
+    global MODE, OUTPUT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--current", action="store_true", help="Capture with the current UI instead of baseline tokens.")
-    MODE = "current" if parser.parse_args().current else "baseline"
+    parser.add_argument("--output-dir", type=Path, help="Write captures to a directory separate from the Phase 20 baseline.")
+    args = parser.parse_args()
+    MODE = "current" if args.current else "baseline"
+    if args.output_dir:
+        OUTPUT = args.output_dir if args.output_dir.is_absolute() else ROOT / args.output_dir
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
     captures = []
     layout_checks = []
@@ -200,6 +215,8 @@ async def main():
             for route_name, url, label in routes:
                 await page.goto(BASE_URL + url, wait_until="domcontentloaded")
                 await page.wait_for_timeout(350)
+                if route_name == "catalog" and viewport_name == "desktop":
+                    assert await page.locator(".filters").evaluate("element => element.open"), "Catalog filters should start open on desktop."
                 captures.append(await capture(page, f"{viewport_name}-{label}", f"{viewport_name}, {label}, standard"))
             for page_name, url, label in (("home", "/?scenario=loading", "beranda"), ("catalog", "/konser?scenario=empty", "katalog-kosong"), ("catalog", "/konser?scenario=error", "katalog-error"), ("detail", "/konser/nusa-malam?scenario=error", "detail-error")):
                 await page.goto(BASE_URL + url, wait_until="domcontentloaded")
@@ -230,6 +247,47 @@ async def main():
                 await page.wait_for_timeout(150)
                 captures.append(await capture(page, f"{viewport_name}-checkout-{label}", f"{viewport_name}, checkout langkah {step}"))
             if viewport_name == "mobile":
+                await page.set_viewport_size({"width": 360, "height": 800})
+                await page.goto(BASE_URL + "/?scenario=phase21-search", wait_until="domcontentloaded")
+                await page.locator(".concert-card").first.wait_for()
+                assert await page.locator(".concert-card").count() == 4, "The home page should initially show four events."
+                await page.locator("#event-query").fill("Panggung Terakhir")
+                await page.locator("#event-query").press("Enter")
+                assert await page.get_by_role("heading", name="Panggung Terakhir").count() == 1, "Home search should find events beyond the first four."
+                assert await page.locator(".concert-card").count() == 1, "The home search should show only matching events."
+                await page.locator("#event-query").fill("tidak cocok")
+                await page.locator("#event-query").press("Enter")
+                assert await page.get_by_text("Tidak ada konser yang cocok dengan pencarianmu.").is_visible(), "Home search should announce an empty result."
+                await page.locator("#event-query").fill("")
+                await page.locator("#event-query").press("Enter")
+                first_card = await page.locator(".concert-card").first.bounding_box()
+                assert first_card and first_card["y"] + first_card["height"] <= 800, f"The first home result should fit within 360×800; got {first_card}."
+                assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "The home page should not overflow at 360px."
+                await page.locator("#event-query").evaluate("element => element.blur()")
+                captures.append(await capture(page, "mobile360-beranda", "mobile 360×800, beranda"))
+
+                await page.goto(BASE_URL + "/konser?scenario=phase21-card-states", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Konser Habis").wait_for()
+                assert await page.get_by_text("Habis", exact=True).is_visible(), "Sold-out events should have a visible availability status."
+                no_tickets = page.locator(".concert-card").filter(has=page.get_by_role("heading", name="Tiket Menyusul"))
+                assert await no_tickets.locator(".concert-status").inner_text() == "Tiket belum tersedia", "Events without tiers should show ticket availability."
+                assert await page.get_by_text("Jadwal diperbarui", exact=True).is_visible(), "Changed event schedules should be visible on the card."
+                await page.locator(".poster-unavailable").wait_for(state="attached")
+                assert await page.locator(".poster-unavailable").count() == 1, "A failed event poster should leave the neutral poster fallback."
+
+                await page.goto(BASE_URL + "/konser", wait_until="domcontentloaded")
+                await page.locator("#concert-query").fill("Nusa")
+                await page.locator("#concert-query").press("Enter")
+                await page.locator(".filters summary").click()
+                await page.locator("#concert-city").select_option(label="Jakarta")
+                await page.locator(".filters summary").click()
+                assert "Jakarta" in await page.locator(".filters summary").inner_text(), "The closed filter summary should show the active city."
+                await page.locator(".reset-filters").click()
+                assert await page.locator("#concert-city").input_value() == "", "Reset should clear the city filter."
+                assert await page.locator("#concert-query").input_value() == "", "Reset should clear the catalog search."
+                assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "The catalog should not overflow at 360px."
+                captures.append(await capture(page, "mobile360-katalog", "mobile 360×800, katalog"))
+
                 await page.set_viewport_size({"width": 320, "height": 740})
                 for route_name, url, label in routes:
                     await page.goto(BASE_URL + url, wait_until="domcontentloaded")
@@ -250,7 +308,7 @@ async def main():
         assert any(check.get("kind") == "public-font" and check["loaded"] for check in isolation_checks), "The locally hosted Manrope font did not load."
         assert any(check.get("kind") == "dark-mode" and check["accent"] == "#769dff" for check in isolation_checks), "The public dark-mode accent token is missing."
         assert any(check.get("kind") == "admin-isolation" and not check["publicWrapper"] and check["adminMain"] for check in isolation_checks), "Admin was included in the public visual wrapper."
-    manifest = {"captureMode": MODE, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit, "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844", "narrow": "320x740"}, "api": "Responses are intercepted and generated from the current OpenAPI contract; no live buyer data is used.", "photoFixtures": "Existing Picsum URLs are served from docs/phase20/fixtures for repeatable captures.", "captures": captures, "layoutChecks": layout_checks, "isolationChecks": isolation_checks}
+    manifest = {"captureMode": MODE, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit, "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844", "checkpoint": "360x800", "narrow": "320x740"}, "api": "Responses are intercepted and generated from the current OpenAPI contract; no live buyer data is used.", "photoFixtures": "Existing Picsum URLs are served from docs/phase20/fixtures for repeatable captures.", "captures": captures, "layoutChecks": layout_checks, "isolationChecks": isolation_checks}
     OUTPUT.mkdir(parents=True, exist_ok=True)
     index = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
     (OUTPUT / f"index-{MODE}.json").write_text(index)
