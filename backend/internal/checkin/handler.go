@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
@@ -97,6 +98,8 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error, result Result) {
 	switch {
+	case errors.Is(err, eventstate.ErrClosed):
+		writeError(w, 409, "EVENT_CHANGED", eventstate.ErrClosed.Error())
 	case errors.Is(err, ErrInvalidRequest):
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Kode atau data check-in tidak valid")
 	case errors.Is(err, staffauth.ErrUnauthorized):

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/sha512"
 	"database/sql"
 	"encoding/hex"
@@ -22,6 +23,12 @@ import (
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/email"
+	"github.com/Adeqq1/ticket-online/backend/internal/eventchange"
+	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
+	"github.com/Adeqq1/ticket-online/backend/internal/payment"
+	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
+	"github.com/Adeqq1/ticket-online/backend/internal/refund"
+	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 	"github.com/Adeqq1/ticket-online/backend/migrations"
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -49,7 +56,7 @@ func TestEmailFailureWebhookReplayAndCrossDeviceRecovery(t *testing.T) {
 	suffix := randomHex(t, 16)
 	eventID := "email-delivery-" + suffix
 	const zoneID, gate, serverKey = "email-delivery", "Email Gate", "sandbox-test-key"
-	reservationID, orderID, reference := "", "", ""
+	reservationID, orderID, reference, adminID := "", "", "", ""
 	now := time.Now().UTC()
 	if _, err := db.ExecContext(ctx, `INSERT INTO events
 		(id, artist, city, venue, address, starts_at, genre, status, publication_status, image_url, description, created_at, updated_at)
@@ -69,6 +76,12 @@ func TestEmailFailureWebhookReplayAndCrossDeviceRecovery(t *testing.T) {
 		_, _ = db.Exec("DELETE FROM email_queue WHERE recovery_request_id IN (SELECT id FROM recovery_requests WHERE reference = ?)", reference)
 		_, _ = db.Exec("DELETE FROM recovery_requests WHERE reference = ?", reference)
 		_, _ = db.Exec("DELETE FROM email_queue WHERE order_id = ?", orderID)
+		_, _ = db.Exec("DELETE FROM event_refund_rights WHERE order_id=?", orderID)
+		_, _ = db.Exec("DELETE FROM event_change_orders WHERE order_id=?", orderID)
+		_, _ = db.Exec("DELETE FROM event_changes WHERE event_id=?", eventID)
+		_, _ = db.Exec("DELETE FROM admin_audit_log WHERE actor_id=?", adminID)
+		_, _ = db.Exec("DELETE FROM staff_sessions WHERE staff_id=?", adminID)
+		_, _ = db.Exec("DELETE FROM staff_users WHERE id=?", adminID)
 		_, _ = db.Exec("DELETE FROM etickets WHERE order_id = ?", orderID)
 		_, _ = db.Exec("DELETE FROM order_attendees WHERE order_id = ?", orderID)
 		_, _ = db.Exec("DELETE FROM payments WHERE order_id = ?", orderID)
@@ -294,4 +307,73 @@ func TestEmailFailureWebhookReplayAndCrossDeviceRecovery(t *testing.T) {
 	expect(call(http.MethodGet, "/api/v1/orders/"+orderID+"/tickets", nil, bearer(recovered.AccessToken)), http.StatusOK)
 	// Reusing the link fails.
 	expect(verify(), http.StatusGone)
+
+	// Two decisions wait in the outbox while SMTP is stopped. Both notices must
+	// use the latest schedule, and their private order link must work on device B.
+	stopWorker()
+	<-workerDone
+	adminID = randomHex(t, 16)
+	adminToken, _, err := recovery.NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256([]byte(adminToken))
+	if _, err := db.ExecContext(ctx, `INSERT INTO staff_users(id,name,email,password_hash,role,active,created_at,updated_at)
+ VALUES (?,'Change Admin',?,'unused','ADMIN',TRUE,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, adminID, adminID+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO staff_sessions(token_hash,staff_id,expires_at,created_at) VALUES (?,?,UTC_TIMESTAMP(6)+INTERVAL 1 HOUR,UTC_TIMESTAMP(6))", hash[:], adminID); err != nil {
+		t.Fatal(err)
+	}
+	staff := staffauth.New(db)
+	changes := eventchange.New(db, staff, orderaccess.New(db, secret), refund.New(db, staff, "", "sandbox", nil, logger), payment.NewRepository(db), "", logger)
+	newStart := time.Now().Add(120 * time.Hour).UTC().Truncate(time.Microsecond)
+	start := newStart.Format(time.RFC3339Nano)
+	deadline := newStart.Add(-24 * time.Hour).Format(time.RFC3339Nano)
+	for version, action := range []string{"POSTPONED", "RESCHEDULED"} {
+		in := eventchange.Input{Action: action, Reason: "Perubahan jadwal disetujui", Announcement: "Gunakan jadwal terbaru.", ExpectedVersion: uint64(version)}
+		if action == "RESCHEDULED" {
+			in.StartsAt = &start
+			in.RefundDeadline = &deadline
+		}
+		preview := call(http.MethodPost, "/api/v1/admin/events/"+eventID+"/changes/preview", in, bearer(adminToken))
+		expect(preview, http.StatusOK)
+		var impact eventchange.Preview
+		if err := json.Unmarshal(preview.Body.Bytes(), &impact); err != nil {
+			t.Fatal(err)
+		}
+		in.Snapshot = impact.Snapshot
+		headers := bearer(adminToken)
+		headers["Idempotency-Key"] = randomHex(t, 16)
+		expect(call(http.MethodPost, "/api/v1/admin/events/"+eventID+"/changes", in, headers), http.StatusOK)
+		if err := changes.Process(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	noticeCtx, stopNotices := context.WithCancel(ctx)
+	noticeDone := make(chan struct{})
+	t.Cleanup(func() { stopNotices(); <-noticeDone })
+	go func() {
+		defer close(noticeDone)
+		email.NewService(db, email.Config{Host: "127.0.0.1", Port: port, From: "tickets@example.com", TLSMode: "none", FrontendURL: "http://localhost:5173", AccessSecret: secret}, logger).Run(noticeCtx, 50*time.Millisecond)
+	}()
+	latestDay := newStart.In(time.FixedZone("WIB", 7*3600)).Format("02 January 2006 15:04")
+	for range 2 {
+		notice := nextMail("Jadwal")
+		if !strings.Contains(notice.plain, latestDay) || strings.Contains(notice.plain, "Jadwal belum diumumkan") {
+			t.Fatalf("decision notice has contradictory schedule: %q", notice.plain)
+		}
+		match := regexp.MustCompile(`/pesanan/([0-9a-f]{32})#access_token=([A-Za-z0-9_-]{43})`).FindStringSubmatch(notice.plain)
+		if match == nil || match[1] != orderID {
+			t.Fatal("decision notice has no private order link")
+		}
+		expect(call(http.MethodGet, "/api/v1/orders/"+match[1], nil, bearer(match[2])), http.StatusOK)
+	}
+	waitFor("both decision notices", "SELECT COUNT(*)=2 FROM email_queue WHERE order_id=? AND kind='EVENT_CHANGE' AND status='SENT'", orderID)
+	current := call(http.MethodGet, "/api/v1/orders/"+orderID, nil, bearer(order.AccessToken))
+	expect(current, http.StatusOK)
+	var view struct{ EventStartsAt string }
+	if err := json.Unmarshal(current.Body.Bytes(), &view); err != nil || view.EventStartsAt != start {
+		t.Fatalf("current order schedule=%s, error=%v", view.EventStartsAt, err)
+	}
 }

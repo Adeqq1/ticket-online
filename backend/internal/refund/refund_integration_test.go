@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -42,12 +43,19 @@ func TestRefundQueueResumesAfterRestartAndFinalizesOnlyConfirmedResults(t *testi
 		t.Fatal(err)
 	}
 
-	for _, rejected := range []bool{false, true} {
-		name := "accepted"
-		if rejected {
-			name = "definite_rejection"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, scenario := range []struct {
+		name                                string
+		rejected, event, stale, unavailable bool
+	}{
+		{name: "accepted"},
+		{name: "definite_rejection", rejected: true},
+		{name: "event_accepted", event: true},
+		{name: "event_definite_rejection", event: true, rejected: true},
+		{name: "event_provider_window_expired", event: true, stale: true},
+		{name: "event_provider_temporarily_unavailable", event: true, unavailable: true},
+	} {
+		rejected := scenario.rejected
+		t.Run(scenario.name, func(t *testing.T) {
 			orderID, _ := newID()
 			reservationID, _ := newID()
 			staffID, _ := newID()
@@ -79,6 +87,8 @@ func TestRefundQueueResumesAfterRestartAndFinalizesOnlyConfirmedResults(t *testi
 				_, _ = db.Exec("DELETE FROM email_queue WHERE order_id=?", orderID)
 				_, _ = db.Exec("DELETE FROM order_refund_audit WHERE refund_id IN (SELECT id FROM order_refunds WHERE order_id=?)", orderID)
 				_, _ = db.Exec("DELETE FROM order_refunds WHERE order_id=?", orderID)
+				_, _ = db.Exec("DELETE FROM event_refund_rights WHERE order_id=?", orderID)
+				_, _ = db.Exec("DELETE FROM event_changes WHERE id=?", orderID)
 				_, _ = db.Exec("DELETE FROM payments WHERE order_id=?", orderID)
 				_, _ = db.Exec("DELETE FROM order_items WHERE order_id=?", orderID)
 				_, _ = db.Exec("DELETE FROM order_buyers WHERE order_id=?", orderID)
@@ -115,6 +125,22 @@ func TestRefundQueueResumesAfterRestartAndFinalizesOnlyConfirmedResults(t *testi
 				t.Fatal(err)
 			}
 
+			if scenario.event {
+				if _, err := db.ExecContext(ctx, `INSERT INTO event_changes(id,event_id,version,action,reason,announcement,staff_id,idempotency_key,request_hash,created_at)
+ SELECT ?,'nusa-malam',COALESCE(MAX(version),0)+1,'CANCELLED','Acara dibatalkan','Refund penuh',?,?,REPEAT('a',64),UTC_TIMESTAMP(6)
+ FROM event_changes WHERE event_id='nusa-malam'`, orderID, staffID, orderID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, "INSERT INTO event_refund_rights(order_id,change_id,requested) VALUES (?,?,TRUE)", orderID, orderID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			settlement := now
+			if scenario.stale {
+				settlement = now.Add(-8 * 24 * time.Hour)
+			}
+			unavailable := scenario.unavailable
+
 			var mu sync.Mutex
 			providerStatus := "settlement"
 			refundAmount := "0.00"
@@ -126,7 +152,11 @@ func TestRefundQueueResumesAfterRestartAndFinalizesOnlyConfirmedResults(t *testi
 				mu.Lock()
 				defer mu.Unlock()
 				if r.Method == http.MethodGet {
-					_ = json.NewEncoder(w).Encode(map[string]string{"order_id": gatewayID, "transaction_id": transactionID, "gross_amount": "17500.00", "payment_type": "qris", "settlement_time": now.In(time.FixedZone("WIB", 7*3600)).Format("2006-01-02 15:04:05"), "transaction_status": providerStatus, "refund_amount": refundAmount})
+					if unavailable {
+						w.WriteHeader(503)
+						return
+					}
+					_ = json.NewEncoder(w).Encode(map[string]string{"order_id": gatewayID, "transaction_id": transactionID, "gross_amount": "17500.00", "payment_type": "qris", "settlement_time": settlement.In(time.FixedZone("WIB", 7*3600)).Format("2006-01-02 15:04:05"), "transaction_status": providerStatus, "refund_amount": refundAmount})
 					return
 				}
 				postCount++
@@ -144,7 +174,40 @@ func TestRefundQueueResumesAfterRestartAndFinalizesOnlyConfirmedResults(t *testi
 			defer server.Close()
 			service := New(db, staffauth.New(db), "test-key", "sandbox", []string{"QRIS"}, nil)
 			service.base = server.URL
-			result, err := service.Submit(ctx, token, orderID, "approved buyer request")
+			submit := func() (Result, error) {
+				if scenario.event {
+					return service.SubmitEvent(ctx, orderID)
+				}
+				return service.Submit(ctx, token, orderID, "approved buyer request")
+			}
+			result, err := submit()
+			if scenario.unavailable {
+				if err == nil {
+					t.Fatal("unavailable provider accepted refund")
+				}
+				var queued int
+				if e := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM order_refunds WHERE order_id=?", orderID).Scan(&queued); e != nil || queued != 0 {
+					t.Fatalf("unverified refund was queued: %d, %v", queued, e)
+				}
+				mu.Lock()
+				unavailable = false
+				mu.Unlock()
+				result, err = submit()
+			}
+			if scenario.stale {
+				if err != nil || result.Status != "MANUAL_REQUIRED" {
+					t.Fatalf("expired provider settlement: %#v, %v", result, err)
+				}
+				if _, err := service.CompleteManual(ctx, token, orderID, ManualInput{Reference: "bank-" + orderID, PaidAt: time.Now().UTC().Format(time.RFC3339Nano), Note: "Transfer penuh terverifikasi"}); err != nil {
+					t.Fatal(err)
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				if postCount != 0 {
+					t.Fatal("expired settlement submitted automatic refund")
+				}
+				return
+			}
 			if err != nil || result.Status != "REQUESTED" {
 				t.Fatalf("submit = %#v, %v", result, err)
 			}
@@ -172,6 +235,11 @@ func TestRefundQueueResumesAfterRestartAndFinalizesOnlyConfirmedResults(t *testi
 					t.Fatalf("order status = %s, error %v", orderState, err)
 				}
 			} else {
+				if scenario.event {
+					if _, err := restarted.CompleteManual(ctx, token, orderID, ManualInput{Reference: "bank-" + orderID, PaidAt: time.Now().UTC().Format(time.RFC3339Nano), Note: "Transfer penuh terverifikasi"}); !errors.Is(err, ErrUnavailable) {
+						t.Fatalf("unknown automatic result allowed manual refund: %v", err)
+					}
+				}
 				if refundState != "UNKNOWN" {
 					t.Fatalf("accepted POST status = %s, want UNKNOWN pending provider reconciliation", refundState)
 				}
@@ -195,12 +263,23 @@ func TestRefundQueueResumesAfterRestartAndFinalizesOnlyConfirmedResults(t *testi
 					t.Fatalf("repeated finalization changed stock to %d, want %d, error %v", stock, originalStock+1, err)
 				}
 			}
+			expectedEmails := 1
+			if scenario.event && rejected {
+				result, err := restarted.SubmitEvent(ctx, orderID)
+				if err != nil || result.Status != "MANUAL_REQUIRED" {
+					t.Fatalf("failed provider did not enter manual queue: %#v, %v", result, err)
+				}
+				if _, err := restarted.CompleteManual(ctx, token, orderID, ManualInput{Reference: "bank-" + orderID, PaidAt: time.Now().UTC().Format(time.RFC3339Nano), Note: "Transfer penuh terverifikasi"}); err != nil {
+					t.Fatal(err)
+				}
+				expectedEmails = 2
+			}
 			var emails int
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM email_queue WHERE order_id=? AND kind='REFUND'", orderID).Scan(&emails); err != nil || emails != 1 {
-				t.Fatalf("refund email count = %d, want 1, error %v", emails, err)
+			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM email_queue WHERE order_id=? AND kind='REFUND'", orderID).Scan(&emails); err != nil || emails != expectedEmails {
+				t.Fatalf("refund email count = %d, want %d, error %v", emails, expectedEmails, err)
 			}
 			var emailID string
-			if err := db.QueryRowContext(ctx, "SELECT id FROM email_queue WHERE order_id=? AND kind='REFUND'", orderID).Scan(&emailID); err != nil {
+			if err := db.QueryRowContext(ctx, "SELECT id FROM email_queue WHERE order_id=? AND kind='REFUND' ORDER BY created_at DESC LIMIT 1", orderID).Scan(&emailID); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := db.ExecContext(ctx, "UPDATE email_queue SET status='FAILED',attempts=3,last_error='smtp unavailable' WHERE id=?", emailID); err != nil {

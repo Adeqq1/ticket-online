@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -44,6 +45,13 @@ func (r *Repository) Create(ctx context.Context, request Request, idempotencyKey
 		return Reservation{}, fmt.Errorf("begin reservation: %w", err)
 	}
 	defer tx.Rollback()
+	state, err := eventstate.Read(ctx, tx, request.EventID, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Reservation{}, ErrEventNotFound
+	}
+	if err != nil {
+		return Reservation{}, err
+	}
 	var existingHash string
 	var existingID string
 	err = tx.QueryRowContext(ctx, "SELECT id, request_hash FROM reservations WHERE idempotency_key = ? FOR UPDATE", idempotencyKey).Scan(&existingID, &existingHash)
@@ -65,6 +73,9 @@ func (r *Repository) Create(ctx context.Context, request Request, idempotencyKey
 	}
 	if publicationStatus != "PUBLISHED" {
 		return Reservation{}, ErrEventNotFound
+	}
+	if !state.CanSell() {
+		return Reservation{}, eventstate.ErrClosed
 	}
 	items := append([]ItemRequest(nil), request.Items...)
 	sort.Slice(items, func(i, j int) bool { return items[i].TierID < items[j].TierID })
@@ -168,6 +179,13 @@ func (r *Repository) Cancel(ctx context.Context, id string) (Reservation, error)
 		return Reservation{}, fmt.Errorf("begin cancellation: %w", err)
 	}
 	defer tx.Rollback()
+	_, err = eventstate.ForReservation(ctx, tx, id, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Reservation{}, ErrReservationNotFound
+	}
+	if err != nil {
+		return Reservation{}, err
+	}
 	var lockedStatus string
 	if err := tx.QueryRowContext(ctx, "SELECT status FROM reservations WHERE id = ? FOR UPDATE", id).Scan(&lockedStatus); errors.Is(err, sql.ErrNoRows) {
 		return Reservation{}, ErrReservationNotFound
@@ -220,6 +238,9 @@ func (r *Repository) expireOne(ctx context.Context, id string) error {
 		return fmt.Errorf("begin expiration: %w", err)
 	}
 	defer tx.Rollback()
+	if _, err := eventstate.ForReservation(ctx, tx, id, true); err != nil {
+		return err
+	}
 	var status string
 	var expiresAt time.Time
 	if err := tx.QueryRowContext(ctx, "SELECT status, expires_at FROM reservations WHERE id = ? FOR UPDATE", id).Scan(&status, &expiresAt); errors.Is(err, sql.ErrNoRows) {
@@ -273,6 +294,16 @@ func (r *Repository) Convert(ctx context.Context, id string) (Reservation, error
 		return Reservation{}, fmt.Errorf("begin conversion: %w", err)
 	}
 	defer tx.Rollback()
+	state, err := eventstate.ForReservation(ctx, tx, id, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Reservation{}, ErrReservationNotFound
+	}
+	if err != nil {
+		return Reservation{}, err
+	}
+	if !state.CanSell() {
+		return Reservation{}, eventstate.ErrClosed
+	}
 	record, err := r.getForUpdate(ctx, tx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Reservation{}, ErrReservationNotFound

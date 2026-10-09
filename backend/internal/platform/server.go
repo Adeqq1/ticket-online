@@ -20,6 +20,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/checkin"
 	"github.com/Adeqq1/ticket-online/backend/internal/checkout"
 	"github.com/Adeqq1/ticket-online/backend/internal/conversion"
+	"github.com/Adeqq1/ticket-online/backend/internal/eventchange"
 	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
@@ -66,6 +67,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	adminreports.NewHandler(adminreports.NewService(db, staffService), logger).Register(mux)
 	refundService := refund.New(db, staffService, midtransKey, environment, refundMethods, logger)
 	refund.NewHandler(refundService, logger).Register(mux)
+	eventchange.New(db, staffService, access, refundService, paymentRepository, midtransKey, logger).Register(mux)
 	adminissues.NewHandler(adminissues.NewService(db, staffService, access, paymentRepository, midtransKey), logger).Register(mux)
 	if metrics == nil {
 		metrics = operations.NewService(db, staffService, operations.Process)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/conversion"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 )
@@ -86,7 +87,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			h.respondError(w, r, err)
 			return
 		}
-		order.AccessExpiresAt = expiresAt.Format(time.RFC3339)
+		order.AccessExpiresAt = eventstate.TimeJSON(expiresAt)
 	}
 	status := http.StatusCreated
 	if replay {
@@ -117,7 +118,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, r, err)
 		return
 	}
-	detail.AccessExpiresAt = expiresAt.Format(time.RFC3339)
+	detail.AccessExpiresAt = eventstate.TimeJSON(expiresAt)
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -145,6 +146,8 @@ func (h *Handler) respondAccessError(w http.ResponseWriter, r *http.Request, err
 
 func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, eventstate.ErrClosed):
+		writeError(w, 409, "EVENT_CHANGED", eventstate.ErrClosed.Error())
 	case errors.Is(err, ErrInvalidRequest):
 		writeError(w, http.StatusUnprocessableEntity, "INVALID_REQUEST", "Data checkout tidak valid")
 	case errors.Is(err, ErrInvalidVoucher):

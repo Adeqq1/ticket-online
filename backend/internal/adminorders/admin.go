@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
@@ -95,7 +96,16 @@ type Order struct {
 	Total       uint64    `json:"total"`
 }
 
+type Refund struct {
+	Status          string  `json:"status"`
+	Amount          uint64  `json:"amount"`
+	Reason          string  `json:"reason"`
+	ManualReference string  `json:"manualReference"`
+	ManualPaidAt    *string `json:"manualPaidAt"`
+}
 type Detail struct {
+	CurrentEvent eventstate.State `json:"currentEvent"`
+	Refund       *Refund          `json:"refund"`
 	Order
 	Buyer struct {
 		Name           string `json:"name"`
@@ -274,7 +284,7 @@ func (s *Service) Detail(r *http.Request, token, id string) (Detail, error) {
 		return detail, ErrInvalidRequest
 	}
 	// AuthenticateTx takes shared locks so session revocation cannot race this read.
-	tx, err := s.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return detail, fmt.Errorf("begin admin order detail: %w", err)
 	}
@@ -285,6 +295,21 @@ func (s *Service) Detail(r *http.Request, token, id string) (Detail, error) {
 	}
 	if principal.Role != "ADMIN" {
 		return detail, staffauth.ErrForbidden
+	}
+	detail.CurrentEvent, err = eventstate.ForOrder(r.Context(), tx, id, true)
+	if err != nil {
+		return detail, err
+	}
+	var refund Refund
+	var manualPaid sql.NullTime
+	err = tx.QueryRowContext(r.Context(), "SELECT status,amount,reason,manual_reference,manual_paid_at FROM order_refunds WHERE order_id=?", id).Scan(&refund.Status, &refund.Amount, &refund.Reason, &refund.ManualReference, &manualPaid)
+	if err == nil {
+		if manualPaid.Valid {
+			refund.ManualPaidAt = eventstate.TimeJSON(manualPaid.Time)
+		}
+		detail.Refund = &refund
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return detail, err
 	}
 	var identity string
 	err = tx.QueryRowContext(r.Context(), `SELECT o.id, o.reference, o.status, e.id, e.artist, b.name, o.created_at,

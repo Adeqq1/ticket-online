@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -289,11 +290,21 @@ func (r *Repository) UpdateEvent(ctx context.Context, id string, input EventInpu
 	if err != nil {
 		return fmt.Errorf("lock event: %w", err)
 	}
+	state, err := eventstate.Read(ctx, tx, id, false)
+	if err != nil {
+		return err
+	}
+	if state.Version > 0 && (state.Status == "POSTPONED" || state.Status == "CANCELLED") {
+		input.StartsAt = &existing.Time
+	}
 	before, err := eventAuditSnapshot(ctx, tx, id)
 	if err != nil {
 		return fmt.Errorf("read event audit snapshot: %w", err)
 	}
 	if existing.Valid != (input.StartsAt != nil) || (existing.Valid && !existing.Time.Equal(*input.StartsAt)) {
+		if state.Version > 0 {
+			return ErrScheduleLocked
+		}
 		var hasReservations bool
 		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM reservations WHERE event_id = ?)`, id).Scan(&hasReservations)
 		if err != nil {
@@ -387,9 +398,18 @@ func (r *Repository) buildEvent(ctx context.Context, record eventRecord) (Event,
 	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM reservations WHERE event_id = ?)`, record.id).Scan(&scheduleLocked); err != nil {
 		return Event{}, fmt.Errorf("check event schedule lock: %w", err)
 	}
+	state, err := eventstate.Read(ctx, r.db, record.id, false)
+	if err != nil {
+		return Event{}, err
+	}
+	effectiveStart := ""
+	if state.StartsAt != nil {
+		effectiveStart = *state.StartsAt
+	}
 	return Event{
-		ID: record.id, Artist: record.artist, City: record.city, Venue: record.venue, Address: record.address,
-		StartsAt: formatStartsAt(record.startsAt), Genre: record.genre, Status: displayStatus(record.status), PublicationStatus: record.publicationStatus,
+		CurrentEvent: state,
+		ID:           record.id, Artist: record.artist, City: record.city, Venue: record.venue, Address: record.address,
+		StartsAt: effectiveStart, Genre: record.genre, Status: displayStatus(record.status), PublicationStatus: record.publicationStatus,
 		Image: record.imageURL, Description: record.description, Lineup: lineup, Price: price, Zones: zones, TicketTiers: tiers, ScheduleLocked: scheduleLocked,
 	}, nil
 }

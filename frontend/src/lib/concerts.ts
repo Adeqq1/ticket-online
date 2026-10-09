@@ -1,8 +1,9 @@
+export type EventState = { id: string; status: "SCHEDULED" | "POSTPONED" | "RESCHEDULED" | "CANCELLED"; version: number; salesPaused: boolean; startsAt: string | null; announcement: string; refundDeadline: string | null };
 export type Genre = "Rock" | "Pop" | "Indie";
 export type TicketStatus = "Early Bird" | "Presale" | "Sold Out";
 export type StageZone = { id: string; name: string; description: string };
 export type TicketTier = { id: string; name: string; zoneId: string; price: number; stock: number; maxPerOrder: number; benefit: string; gate: string; seating: "assigned" | "free-standing" };
-export type Concert = { id: string; artist: string; city: string; venue: string; address: string; date: string; startsAt: string; genre: Genre; price: number; status: TicketStatus; image: string; description: string; lineup: string[]; zones: StageZone[]; ticketTiers: TicketTier[] };
+export type Concert = { currentEvent?: EventState; id: string; artist: string; city: string; venue: string; address: string; date: string; startsAt: string; genre: Genre; price: number; status: TicketStatus; image: string; description: string; lineup: string[]; zones: StageZone[]; ticketTiers: TicketTier[] };
 
 const zones: StageZone[] = [
   { id: "vip-a", name: "VIP A", description: "Area depan panggung" },
@@ -22,7 +23,7 @@ function tiers(status: TicketStatus): TicketTier[] {
 }
 
 export const formatEventDate = new Intl.DateTimeFormat("id-ID", { dateStyle: "full", timeStyle: "short", timeZone: "Asia/Jakarta" });
-export function eventDate(startsAt: string) { return `${formatEventDate.format(new Date(startsAt))} WIB`; }
+export function eventDate(startsAt: string | null | undefined) { if (!startsAt || !Number.isFinite(Date.parse(startsAt))) return "Jadwal belum diumumkan"; return `${formatEventDate.format(new Date(startsAt))} WIB`; }
 
 function concert(id: string, artist: string, city: string, venue: string, startsAt: string, genre: Genre, price: number, status: TicketStatus): Concert {
   return { id, artist, city, venue, address: `Jl. Musik Raya, ${city}`, date: eventDate(startsAt), startsAt, genre, price, status, image: `https://picsum.photos/seed/${id}/900/1100`, description: `${artist} hadir dalam konser contoh dengan pilihan tiket untuk area panggung dan penonton.`, lineup: [artist, "Pembuka Sore", "Tamu Spesial"], zones, ticketTiers: tiers(status).map((tier) => tier.name === "Festival" ? { ...tier, price } : tier) };

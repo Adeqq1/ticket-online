@@ -1,10 +1,13 @@
 <script lang="ts">
+  import EventChangePanel from "../../components/admin/EventChangePanel.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, createAdminEvent, createAdminTier, createAdminZone, getAdminEvents, updateAdminEvent, updateAdminTier, updateAdminZone, type AdminEventInput, type AdminApiEvent, type AdminTierInput, type PublicationStatus } from "../../lib/api.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let events = $state<AdminApiEvent[]>([]);
   let selectedId = $state("");
+  const selectedEvent = $derived(events.find((event) => event.id === selectedId));
+  const scheduleLocked = $derived(Boolean(selectedEvent?.scheduleLocked || (selectedEvent?.currentEvent?.version ?? 0) > 0));
   let query = $state("");
   let publicationFilter = $state<PublicationStatus | "">("");
   let draft = $state<AdminEventInput>(emptyEvent());
@@ -28,7 +31,7 @@
     return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
   }
   function payload() {
-    const lockedStartsAt = events.find((item) => item.id === selectedId)?.scheduleLocked ? events.find((item) => item.id === selectedId)?.startsAt : undefined;
+    const lockedStartsAt = scheduleLocked ? selectedEvent?.startsAt : undefined;
     return { ...draft, startsAt: lockedStartsAt ?? (draft.startsAt ? `${draft.startsAt}:00+07:00` : ""), lineup: lineupText.split("\n").map((name) => name.trim()).filter(Boolean) };
   }
   const visible = $derived(events.filter((event) => (!publicationFilter || event.publicationStatus === publicationFilter) && `${event.artist} ${event.city} ${event.venue}`.toLowerCase().includes(query.trim().toLowerCase())));
@@ -106,8 +109,8 @@
           <label>Nama konser / artis<input bind:value={draft.artist} minlength="2" maxlength="160" required disabled={saving} /></label>
           <div class="event-form-row"><label>Genre<select bind:value={draft.genre} disabled={saving}><option>Rock</option><option>Pop</option><option>Indie</option></select></label><label>Label penjualan<select bind:value={draft.status} disabled={saving}><option>Early Bird</option><option>Presale</option><option>Sold Out</option></select></label></div>
           <label>Status publikasi<select bind:value={draft.publicationStatus} disabled={saving || !selectedId}><option value="DRAFT">Draft — belum tampil di katalog</option><option value="PUBLISHED">Published — tampil di katalog</option><option value="ARCHIVED">Archived — disembunyikan dari katalog</option></select></label>
-          <label>Jadwal (WIB)<input type="datetime-local" bind:value={draft.startsAt} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || Boolean(selectedId && events.find((item) => item.id === selectedId)?.scheduleLocked)} /></label>
-          {#if selectedId && events.find((item) => item.id === selectedId)?.scheduleLocked}<small class="event-lock-note">Jadwal terkunci sejak reservasi pertama. Akses pesanan dan snapshot tiket bergantung pada tanggal ini.</small>{/if}
+          <label>Jadwal (WIB)<input type="datetime-local" bind:value={draft.startsAt} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || scheduleLocked} /></label>
+          {#if selectedId && scheduleLocked}<small class="event-lock-note">Ubah jadwal melalui panel perubahan acara agar hak pembeli dan riwayat keputusan tetap terjaga.</small>{/if}
           <div class="event-form-row"><label>Kota<input bind:value={draft.city} maxlength="100" required={draft.publicationStatus === "PUBLISHED"} disabled={saving || Boolean(selectedId && events.find((item) => item.id === selectedId)?.locationLocked)} /></label><label>Venue<input bind:value={draft.venue} maxlength="160" required={draft.publicationStatus === "PUBLISHED"} disabled={saving || Boolean(selectedId && events.find((item) => item.id === selectedId)?.locationLocked)} /></label></div>
           <label>Alamat<input bind:value={draft.address} maxlength="255" required={draft.publicationStatus === "PUBLISHED"} disabled={saving || Boolean(selectedId && events.find((item) => item.id === selectedId)?.locationLocked)} /></label>
           {#if selectedId && events.find((item) => item.id === selectedId)?.locationLocked}<small class="event-lock-note">Lokasi konser dikunci setelah reservasi pertama.</small>{/if}
@@ -119,6 +122,7 @@
         </form>
         {#if selectedId}
           {@const currentEvent = events.find((item) => item.id === selectedId)}
+      {#if selectedEvent}{#key selectedId}<EventChangePanel event={selectedEvent} {accessToken} onSaved={load} {onUnauthorized} />{/key}{/if}
           <section class="event-inventory-editor" aria-labelledby="event-inventory-title">
             <div class="staff-panel-heading"><div><span class="panel-index">03</span><h2 id="event-inventory-title">Zona dan kategori tiket</h2></div></div>
             <div class="event-form-row"><label>Zona<select value={zoneSelected} onchange={(event) => selectZone(event.currentTarget.value)} disabled={saving}><option value="">Tambah zona</option>{#each currentEvent?.zones ?? [] as zone}<option value={zone.id}>{zone.name}</option>{/each}</select></label></div>

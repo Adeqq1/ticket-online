@@ -364,6 +364,16 @@ func TestSalesReportUsesPaymentAndRefundTimestampsWithoutMultiplyingRows(t *test
 	if !strings.Contains(attendanceCSVResponse.Body.String(), expectedHour) || strings.Contains(attendanceCSVResponse.Body.String(), "Private Attendee") {
 		t.Fatalf("attendance CSV omitted hourly data or contains private attendee data: %s", attendanceCSVResponse.Body.String())
 	}
+	// A decision may refund tickets that were already used. Historical check-ins
+	// stay visible, while the percentage counts only currently eligible tickets.
+	if _, err := db.ExecContext(ctx, "UPDATE orders SET status='REFUNDED' WHERE id=(SELECT order_id FROM etickets WHERE id=?)", paidTicketIDs[0]); err != nil {
+		t.Fatal(err)
+	}
+	addTickets("PAID", map[int64]int{tierIDs[baseEventID+"one"]: 1})
+	afterRefund, err := service.Attendance(request, adminToken, AttendanceFilter{EventID: baseEventID})
+	if err != nil || afterRefund.Summary.CheckedIn != 1 || afterRefund.Summary.Eligible != 1 || afterRefund.Summary.AttendanceRate == nil || *afterRefund.Summary.AttendanceRate != 0 {
+		t.Fatalf("refunded historical check-in inflated current rate: %+v, %v", afterRefund.Summary, err)
+	}
 }
 
 func readReportCSV(t *testing.T, body string) [][]string {

@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import { ApiError, getAdminOrder, getAdminOrders, requestAdminRefund, type AdminOrder, type AdminOrderDetail, type AdminOrderFilter, type AdminOrderPage, type OrderStatus } from "../../lib/api.ts";
+  import { wibDateTime } from "../../lib/event-changes.ts";
+  import { onDestroy, onMount, tick } from "svelte";
+  import { ApiError, getAdminOrder, getAdminOrders, completeManualRefund, requestAdminRefund, type AdminOrder, type AdminOrderDetail, type AdminOrderFilter, type AdminOrderPage, type OrderStatus } from "../../lib/api.ts";
   import { applyIfCurrent } from "../../lib/admin-order-requests.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
@@ -23,6 +24,30 @@
   let refundReason = $state("");
   let refundBusy = $state(false);
   let refundMessage = $state("");
+  let manualReference = $state("");
+  let manualPaidAt = $state("");
+  let manualNote = $state("");
+  let manualConfirmed = $state(false);
+  let manualResult = $state<HTMLParagraphElement>();
+
+  async function finishManual() {
+    if (!selected || refundBusy || !manualConfirmed) return;
+    const id = selected.id;
+    refundBusy = true; refundMessage = "";
+    const input = { reference: manualReference.trim(), paidAt: wibDateTime(manualPaidAt), note: manualNote.trim() };
+    try {
+      await completeManualRefund(accessToken, id, input);
+      if (selectedId === id) {
+        refundMessage = "Refund manual tercatat dan tiket tetap dinonaktifkan.";
+        manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false;
+        await openDetail(id);
+      }
+      await load(applied);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
+      else if (selectedId === id) refundMessage = cause instanceof Error ? cause.message : "Hasil belum pasti. Muat ulang detail pesanan.";
+    } finally { refundBusy = false; await tick(); if (selectedId === id) manualResult?.focus(); }
+  }
   let request: AbortController | undefined;
   let detailRequest: AbortController | undefined;
   let generation = 0;
@@ -59,7 +84,7 @@
     detailRequest?.abort();
     const controller = new AbortController(); detailRequest = controller;
     const current = ++detailGeneration;
-    if (selectedId !== id) { refundReason = ""; refundMessage = ""; }
+    if (selectedId !== id) { refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; }
     selectedId = id; selected = null; detailLoading = true; detailError = "";
     try {
       await applyIfCurrent(() => current === detailGeneration, () => getAdminOrder(accessToken, id, controller.signal), (result) => { selected = result; });
@@ -134,6 +159,22 @@
         <div><h3>Rincian biaya</h3><dl><dt>Subtotal</dt><dd>{money(selected.subtotal)}</dd><dt>Biaya admin</dt><dd>{money(selected.adminFee)}</dd><dt>Diskon</dt><dd>−{money(selected.discount)}</dd><dt>Total</dt><dd><strong>{money(selected.total)}</strong></dd></dl><h3>Pembayaran</h3>{#if selected.payment}<dl><dt>Metode</dt><dd>{selected.payment.method}</dd><dt>Jumlah</dt><dd>{money(selected.payment.amount)}</dd><dt>Status</dt><dd>{selected.payment.status}</dd><dt>Dibayar</dt><dd>{selected.payment.paidAt ? localTime(selected.payment.paidAt) : "Belum dibayar"}</dd></dl>{:else}<p class="staff-muted">Belum ada pembayaran.</p>{/if}</div>
         <div><h3>Kategori tiket</h3><ul class="order-detail-list">{#each selected.items as item (`${item.tierId}-${item.name}`)}<li><strong>{item.name}</strong><span>{item.quantity} × {money(item.unitPrice)} = {money(item.lineTotal)}</span></li>{/each}</ul><h3>E-ticket dan check-in</h3>{#if selected.tickets.length}<ul class="order-detail-list">{#each selected.tickets as ticket (ticket.id)}<li><strong>{ticket.attendeeName} · {ticket.tierName}</strong><code>{ticket.code}</code><span>{ticket.gate} · {ticket.status === "CHECKED_IN" ? `Check-in ${ticket.checkedInAt ? localTime(ticket.checkedInAt) : "berhasil"}${ticket.checkedInBy ? ` · ${ticket.checkedInBy}` : ""}` : "Belum check-in"}</span></li>{/each}</ul>{:else}<p class="staff-muted">E-ticket belum diterbitkan.</p>{/if}</div>
       </div>
+      {#if selected.refund}
+       <section class="staff-form"><h3>Status refund: {selected.refund.status}</h3><p>{money(selected.refund.amount)} · {selected.refund.reason}</p>
+        {#if selected.refund.manualReference}<p>Referensi transfer: {selected.refund.manualReference} · {selected.refund.manualPaidAt ? localTime(selected.refund.manualPaidAt) : ""}</p>{/if}
+        {#if selected.refund.status === "MANUAL_REQUIRED"}
+         <form class="staff-form" onsubmit={(e)=>{e.preventDefault();void finishManual()}}>
+          <p>Catat hanya transfer penuh yang sudah berhasil. Form ini mencatat bukti dan tidak mengirim uang.</p>
+          <label>Referensi transfer<input bind:value={manualReference} minlength="3" maxlength="160" required disabled={refundBusy}/></label>
+          <label>Waktu transfer (WIB)<input type="datetime-local" step="1" bind:value={manualPaidAt} required disabled={refundBusy}/></label>
+          <label>Catatan bukti<textarea bind:value={manualNote} minlength="3" maxlength="500" required disabled={refundBusy}></textarea></label>
+          <label><input type="checkbox" bind:checked={manualConfirmed} required disabled={refundBusy}/> Transfer {money(selected.refund.amount)} sudah berhasil dan bukti sudah diperiksa.</label>
+          <button class="staff-secondary-button" type="submit" disabled={refundBusy || !manualConfirmed}>Catat refund manual selesai</button>
+         </form>
+        {/if}
+        <p role="status" aria-live="polite" tabindex="-1" bind:this={manualResult}>{refundMessage}</p>
+       </section>
+      {/if}
       {#if selected.status === "PAID" || selected.status === "CANCELLED" || selected.status === "EXPIRED"}
         <form class="recovery-panel" onsubmit={(event) => { event.preventDefault(); void submitRefund(); }}>
           <h3>Ajukan refund penuh</h3><p>Nominal dihitung server: <strong>{money(selected.total)}</strong>. Tiket akan ditahan sampai Midtrans mengonfirmasi hasil.</p>

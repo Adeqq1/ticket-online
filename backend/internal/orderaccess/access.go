@@ -8,9 +8,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 )
 
 func Bearer(header string) (string, bool) {
@@ -61,47 +62,40 @@ func (a *Access) Digest(purpose string, values ...string) string {
 }
 
 func (a *Access) Issue(ctx context.Context, orderID string) (string, time.Time, error) {
-	var startsAt time.Time
-	if err := a.db.QueryRowContext(ctx, `SELECT e.starts_at FROM orders o
-		JOIN reservations r ON r.id = o.reservation_id JOIN events e ON e.id = r.event_id
-		WHERE o.id = ?`, orderID).Scan(&startsAt); errors.Is(err, sql.ErrNoRows) {
+	deadline, err := eventstate.Deadline(ctx, a.db, orderID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", time.Time{}, ErrNotFound
-	} else if err != nil {
-		return "", time.Time{}, fmt.Errorf("find order expiry: %w", err)
 	}
-	return a.Token(orderID), Expiry(startsAt), nil
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return a.Token(orderID), deadline, nil
 }
-
 func (a *Access) AuthorizeOrder(ctx context.Context, orderID, token string) (time.Time, error) {
-	var startsAt time.Time
-	err := a.db.QueryRowContext(ctx, `SELECT e.starts_at FROM orders o
-		JOIN reservations r ON r.id = o.reservation_id JOIN events e ON e.id = r.event_id
-		WHERE o.id = ?`, orderID).Scan(&startsAt)
+	if !hmac.Equal([]byte(a.Token(orderID)), []byte(token)) {
+		return time.Time{}, ErrUnauthorized
+	}
+	deadline, err := eventstate.Deadline(ctx, a.db, orderID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, ErrNotFound
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("find order access: %w", err)
+		return time.Time{}, err
 	}
-	return a.authorize(orderID, startsAt, token)
+	if !deadline.IsZero() && !time.Now().Before(deadline) {
+		return deadline, ErrExpired
+	}
+	return deadline, nil
 }
-
 func (a *Access) AuthorizeTicket(ctx context.Context, ticketID, token string) (string, error) {
-	var orderID string
-	var startsAt time.Time
-	err := a.db.QueryRowContext(ctx, `SELECT et.order_id, e.starts_at FROM etickets et
-		JOIN orders o ON o.id = et.order_id JOIN reservations r ON r.id = o.reservation_id
-		JOIN events e ON e.id = r.event_id WHERE et.id = ?`, ticketID).Scan(&orderID, &startsAt)
-	if errors.Is(err, sql.ErrNoRows) {
+	var id string
+	if err := a.db.QueryRowContext(ctx, "SELECT order_id FROM etickets WHERE id=?", ticketID).Scan(&id); errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
-	}
-	if err != nil {
-		return "", fmt.Errorf("find ticket access: %w", err)
-	}
-	if _, err := a.authorize(orderID, startsAt, token); err != nil {
+	} else if err != nil {
 		return "", err
 	}
-	return orderID, nil
+	_, err := a.AuthorizeOrder(ctx, id, token)
+	return id, err
 }
 
 func (a *Access) authorize(orderID string, startsAt time.Time, token string) (time.Time, error) {

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
@@ -57,6 +58,7 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 }
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/admin/orders/{orderID}/refund", h.submit)
+	mux.HandleFunc("POST /api/v1/admin/orders/{orderID}/refund/manual", h.manual)
 }
 func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
@@ -97,22 +99,63 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Result, error) {
+	return s.submit(ctx, token, orderID, reason, false)
+}
+func (s *Service) SubmitEvent(ctx context.Context, orderID string) (Result, error) {
+	return s.submit(ctx, "", orderID, "", true)
+}
+func (s *Service) Supports(method string, paidAt, now time.Time) bool {
+	return s.key != "" && s.methods[method] && withinRefundWindow(method, paidAt, now)
+}
+func (s *Service) submit(ctx context.Context, token, orderID, reason string, event bool) (Result, error) {
 	var result Result
 	reason = strings.TrimSpace(reason)
-	if _, decodeErr := hex.DecodeString(orderID); len(orderID) != 32 || decodeErr != nil || len(reason) < 3 || len(reason) > 500 {
+	if _, decodeErr := hex.DecodeString(orderID); len(orderID) != 32 || decodeErr != nil || (!event && (len(reason) < 3 || len(reason) > 500)) {
 		return result, ErrInvalid
+	}
+	if !event {
+		p, err := s.staff.Authenticate(ctx, token)
+		if err != nil {
+			return result, err
+		}
+		if p.Role != "ADMIN" {
+			return result, staffauth.ErrForbidden
+		}
+	}
+	// Prefetch the provider's settlement before locking the event/order. Validate identity again below.
+	var verified providerStatus
+	var verifyErr error
+	var preGateway, preMethod string
+	var prePaid sql.NullTime
+	preErr := s.db.QueryRowContext(ctx, "SELECT COALESCE(gateway_order_id,''),method,paid_at FROM payments WHERE order_id=?", orderID).Scan(&preGateway, &preMethod, &prePaid)
+	if preErr == nil && prePaid.Valid && preGateway != "" && s.Supports(preMethod, prePaid.Time, time.Now()) {
+		verified, verifyErr = s.readStatus(ctx, preGateway)
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return result, err
 	}
 	defer tx.Rollback()
-	principal, err := s.staff.AuthenticateTx(ctx, tx, token)
-	if err != nil {
-		return result, err
+	var principal staffauth.Principal
+	if event {
+		err = tx.QueryRowContext(ctx, `SELECT c.staff_id,c.reason FROM event_refund_rights rr JOIN event_changes c ON c.id=rr.change_id WHERE rr.order_id=? AND rr.requested=TRUE`, orderID).Scan(&principal.ID, &reason)
+		if errors.Is(err, sql.ErrNoRows) {
+			return result, ErrUnavailable
+		}
+		if err != nil {
+			return result, err
+		}
+	} else {
+		principal, err = s.staff.AuthenticateTx(ctx, tx, token)
+		if err != nil {
+			return result, err
+		}
+		if principal.Role != "ADMIN" {
+			return result, staffauth.ErrForbidden
+		}
 	}
-	if principal.Role != "ADMIN" {
-		return result, staffauth.ErrForbidden
+	if _, err := eventstate.ForOrder(ctx, tx, orderID, true); err != nil {
+		return result, err
 	}
 	var status, method, gatewayID, paymentStatus string
 	var amount, orderTotal uint64
@@ -128,10 +171,19 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 	var existing Result
 	err = tx.QueryRowContext(ctx, "SELECT status,amount,reason FROM order_refunds WHERE order_id=?", orderID).Scan(&existing.Status, &existing.Amount, &existing.Reason)
 	if err == nil {
-		if e := tx.Commit(); e != nil {
-			return result, e
+		if event && existing.Status == "FAILED" {
+			if _, err := tx.ExecContext(ctx, "UPDATE order_refunds SET status='MANUAL_REQUIRED',completed_at=NULL,updated_at=UTC_TIMESTAMP(6) WHERE order_id=? AND status='FAILED'", orderID); err != nil {
+				return result, err
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE orders SET status='REFUND_PENDING',updated_at=UTC_TIMESTAMP(6) WHERE id=?", orderID); err != nil {
+				return result, err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO order_refund_audit(refund_id,staff_id,action,reason,created_at) SELECT id,?,'MANUAL_REQUIRED',?,UTC_TIMESTAMP(6) FROM order_refunds WHERE order_id=?", principal.ID, reason, orderID); err != nil {
+				return result, err
+			}
+			existing.Status = "MANUAL_REQUIRED"
 		}
-		return existing, nil
+		return existing, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return result, err
@@ -149,26 +201,51 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 			return result, ErrUnavailable
 		}
 	}
-	if method != "QRIS" && method != "GOPAY" || !s.methods[method] || paymentStatus != "SUCCEEDED" || !paidAt.Valid || !withinRefundWindow(method, paidAt.Time, time.Now()) {
+	if paymentStatus != "SUCCEEDED" || !paidAt.Valid || amount == 0 || amount != orderTotal {
 		return result, ErrUnavailable
 	}
-	var checkins int
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM etickets t JOIN ticket_checkins c ON c.ticket_id=t.id WHERE t.order_id=?", orderID).Scan(&checkins); err != nil {
-		return result, err
+	automatic := s.Supports(method, paidAt.Time, time.Now()) && gatewayID != ""
+	if automatic {
+		if verifyErr != nil {
+			return result, fmt.Errorf("verify refund settlement: %w", verifyErr)
+		}
+		if verified.OrderID != gatewayID || verified.TransactionID == "" || verified.GrossAmount != fmt.Sprintf("%d.00", amount) || verified.TransactionStatus != "settlement" || verified.PaymentType != strings.ToLower(method) {
+			return result, ErrUnavailable
+		}
+		settledAt, err := time.ParseInLocation("2006-01-02 15:04:05", verified.SettlementTime, time.FixedZone("WIB", 7*60*60))
+		if err != nil || settledAt.After(time.Now().Add(time.Minute)) {
+			return result, ErrUnavailable
+		}
+		automatic = withinRefundWindow(method, settledAt, time.Now())
 	}
-	if checkins > 0 {
+	if event && !automatic {
+		key, err := newID()
+		if err != nil {
+			return result, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO order_refunds(id,order_id,status,original_order_status,amount,reason,requested_by_staff_id,refund_key,gateway_order_id,requested_at,updated_at)
+  VALUES (?,?,'MANUAL_REQUIRED',?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, key, orderID, status, amount, reason, principal.ID, key, gatewayID); err != nil {
+			return result, err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE orders SET status='REFUND_PENDING',updated_at=UTC_TIMESTAMP(6) WHERE id=?", orderID); err != nil {
+			return result, err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO order_refund_audit(refund_id,staff_id,action,reason,created_at) VALUES (?,?,'MANUAL_REQUIRED',?,UTC_TIMESTAMP(6))", key, principal.ID, reason); err != nil {
+			return result, err
+		}
+		return Result{Status: "MANUAL_REQUIRED", Amount: amount, Reason: reason}, tx.Commit()
+	}
+	if !automatic {
 		return result, ErrUnavailable
 	}
-	if gatewayID == "" || amount == 0 || amount != orderTotal {
-		return result, ErrUnavailable
-	}
-	providerStatus, err := s.readStatus(ctx, gatewayID)
-	if err != nil || providerStatus.OrderID != gatewayID || providerStatus.TransactionID == "" || providerStatus.GrossAmount != fmt.Sprintf("%d.00", amount) || providerStatus.TransactionStatus != "settlement" || providerStatus.PaymentType != strings.ToLower(method) {
-		return result, ErrUnavailable
-	}
-	settledAt, err := time.ParseInLocation("2006-01-02 15:04:05", providerStatus.SettlementTime, time.FixedZone("WIB", 7*60*60))
-	if err != nil || time.Since(settledAt) > refundWindow(method) || settledAt.After(time.Now().Add(time.Minute)) {
-		return result, ErrUnavailable
+	if !event {
+		var checkins int
+		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM etickets t JOIN ticket_checkins c ON c.ticket_id=t.id WHERE t.order_id=?", orderID).Scan(&checkins); err != nil {
+			return result, err
+		}
+		if checkins > 0 {
+			return result, ErrUnavailable
+		}
 	}
 	key, err := newID()
 	if err != nil {
@@ -176,7 +253,7 @@ func (s *Service) Submit(ctx context.Context, token, orderID, reason string) (Re
 	}
 	now := time.Now().UTC()
 	if _, err = tx.ExecContext(ctx, `INSERT INTO order_refunds (id,order_id,status,original_order_status,amount,reason,requested_by_staff_id,refund_key,gateway_order_id,provider_transaction_id,attempts,last_error,requested_at,updated_at,next_attempt_at,retry_deadline)
-		VALUES (?,?,'REQUESTED',?,?,?,?,?,?,?,0,'',?,?,?,DATE_ADD(?, INTERVAL 7 DAY))`, key, orderID, status, amount, reason, principal.ID, key, gatewayID, providerStatus.TransactionID, now, now, now, now); err != nil {
+		VALUES (?,?,'REQUESTED',?,?,?,?,?,?,?,0,'',?,?,?,DATE_ADD(?, INTERVAL 7 DAY))`, key, orderID, status, amount, reason, principal.ID, key, gatewayID, verified.TransactionID, now, now, now, now); err != nil {
 		return result, err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO order_refund_audit (refund_id,staff_id,action,reason,created_at) VALUES (?,?,'REQUESTED',?,?)", key, principal.ID, reason, now); err != nil {
@@ -313,6 +390,20 @@ func (s *Service) finish(ctx context.Context, orderID string, success bool, mess
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := eventstate.ForOrder(ctx, tx, orderID, true); err != nil {
+		return err
+	}
+	var locked string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM orders WHERE id=? FOR UPDATE", orderID).Scan(&locked); err != nil {
+		return err
+	}
+	if err := s.finishTx(ctx, tx, orderID, success, message); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Service) finishTx(ctx context.Context, tx *sql.Tx, orderID string, success bool, message string) error {
+	var err error
 	var original, status, refundReason, staffID string
 	var amount uint64
 	err = tx.QueryRowContext(ctx, "SELECT original_order_status,status,amount,reason,requested_by_staff_id FROM order_refunds WHERE order_id=? FOR UPDATE", orderID).Scan(&original, &status, &amount, &refundReason, &staffID)
@@ -320,7 +411,7 @@ func (s *Service) finish(ctx context.Context, orderID string, success bool, mess
 		return err
 	}
 	if status == "SUCCEEDED" || status == "FAILED" {
-		return tx.Commit()
+		return nil
 	}
 	if success {
 		if original == "PAID" {
@@ -356,6 +447,9 @@ func (s *Service) finish(ctx context.Context, orderID string, success bool, mess
 		if err == nil {
 			_, err = tx.ExecContext(ctx, "UPDATE payment_reconciliation_cases SET status='RESOLVED',updated_at=UTC_TIMESTAMP(6) WHERE order_id=? AND status='OPEN'", orderID)
 		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE orders SET access_deadline=GREATEST(COALESCE(access_deadline,UTC_TIMESTAMP(6)),UTC_TIMESTAMP(6)+INTERVAL 90 DAY) WHERE id=? AND EXISTS(SELECT 1 FROM event_refund_rights WHERE order_id=?)`, orderID, orderID)
+		}
 	} else {
 		_, err = tx.ExecContext(ctx, "UPDATE order_refunds SET status='FAILED',last_error=?,completed_at=UTC_TIMESTAMP(6),updated_at=UTC_TIMESTAMP(6) WHERE order_id=?", clip(message), orderID)
 		if err == nil {
@@ -381,13 +475,13 @@ func (s *Service) finish(ctx context.Context, orderID string, success bool, mess
 		return e
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT IGNORE INTO email_queue (id,kind,dedupe_key,order_id,recipient,status,attempts,next_attempt_at,refund_snapshot,last_error,created_at,updated_at)
-	VALUES (?,'REFUND',?,?,?,'PENDING',0,UTC_TIMESTAMP(6),?,'',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, jobID, "refund:"+orderID, orderID, recipient, snapshot); err != nil {
+	VALUES (?,'REFUND',?,?,?,'PENDING',0,UTC_TIMESTAMP(6),?,'',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, jobID, "refund:"+orderID+":"+finalStatus, orderID, recipient, snapshot); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO order_refund_audit (refund_id,staff_id,action,reason,created_at) SELECT id,?,?,?,UTC_TIMESTAMP(6) FROM order_refunds WHERE order_id=?", staffID, finalStatus, refundReason, orderID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Service) Run(ctx context.Context, interval time.Duration) {
