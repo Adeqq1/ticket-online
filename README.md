@@ -174,10 +174,16 @@ go build ./cmd/api ./cmd/migrate ./cmd/staff
 Tes integrasi checkout, pembayaran, expiry, sesi petugas, check-in/riwayat, serta email dan pemulihan tiket (SMTP gagal sampai batas tiga percobaan, webhook Midtrans berulang, token kedaluwarsa/dipakai ulang, dan pemulihan dari perangkat tanpa akses tersimpan; SMTP disimulasikan server lokal di dalam tes) memakai database MySQL sementara melalui `MYSQL_TEST_DSN`; tanpa variabel tersebut, tes integrasi dilewati. Gunakan database tes yang dapat dibuang, lalu jalankan dari `backend/`:
 
 ```bash
-MYSQL_TEST_DSN="$MYSQL_DSN" go test -v ./...
+MYSQL_TEST_DSN="$MYSQL_DSN" go test -p 1 -v ./...
 ```
 
-Tes interupsi migration 014 memakai `MYSQL_MIGRATION_TEST_DSN` terpisah dengan izin membuat database sementara. Tes membuat dan menghapus database miliknya sendiri pada setiap batas DDL, serta memeriksa job lama, schema akhir, dan checksum; CI menjalankannya otomatis.
+Tes interupsi migration dan integrasi perubahan acara memakai `MYSQL_MIGRATION_TEST_DSN` terpisah dengan izin membuat/menghapus database sementara. Fixture perubahan acara membuat database miliknya sendiri; akun aplikasi pada `MYSQL_TEST_DSN` tetap memakai izin terbatas. Jalankan kedua kelompok tanpa melewati tes:
+
+```sh
+MYSQL_TEST_DSN="$MYSQL_DSN" MYSQL_MIGRATION_TEST_DSN="$TEST_DATABASE_ADMIN_DSN" go test -p 1 -v ./...
+```
+
+Paket integrasi berbagi schema MySQL dan fixture provider, sehingga `-p 1` menjalankan paket secara berurutan. Jangan menjalankan dua suite integrasi bersamaan pada server MySQL yang sama; lock migration juga berlaku pada seluruh server. Tes migration membuat dan menghapus database miliknya sendiri pada setiap batas DDL, serta memeriksa job lama, schema akhir, dan checksum; CI menjalankannya otomatis.
 
 CI menjalankan perintah yang sama terhadap service MySQL job, dengan secret order sementara yang dibuat per job.
 

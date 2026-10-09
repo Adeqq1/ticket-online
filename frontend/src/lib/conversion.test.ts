@@ -34,3 +34,33 @@ test("conversion journey is tab scoped and records only approved anonymous field
     else Reflect.deleteProperty(globalThis, "sessionStorage");
   }
 });
+
+for (const failure of ["read", "write"]) {
+  test(`conversion keeps a stable in-memory journey when storage ${failure} fails`, () => {
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+    const originalNow = Date.now;
+    let now = originalNow();
+    Date.now = () => now;
+    // An expired stored record must not replace a newer in-memory ID after a failed write.
+    const old = JSON.stringify({ id: "a".repeat(32), lastActivityAt: now - 31 * 60 * 1_000 });
+    Object.defineProperty(globalThis, "sessionStorage", failure === "read"
+      ? { configurable: true, get() { throw new DOMException("Blocked", "SecurityError"); } }
+      : { configurable: true, value: { getItem: () => old, setItem() { throw new DOMException("Full", "QuotaExceededError"); } } });
+    try {
+      const event = `storage-${failure}`;
+      const first = journeyId(event);
+      expect(first).toMatch(/^[a-f0-9]{32}$/);
+      expect(first).not.toBe("a".repeat(32));
+      expect(journeyId(event)).toBe(first);
+      expect(journeyId(`${event}-other`)).not.toBe(first);
+      now += 29 * 60 * 1_000;
+      expect(journeyId(event)).toBe(first);
+      now += 30 * 60 * 1_000;
+      expect(journeyId(event)).not.toBe(first);
+    } finally {
+      Date.now = originalNow;
+      if (originalStorage) Object.defineProperty(globalThis, "sessionStorage", originalStorage);
+      else Reflect.deleteProperty(globalThis, "sessionStorage");
+    }
+  });
+}

@@ -19,8 +19,8 @@ func TestLoadMigrationsInVersionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 26 {
-		t.Fatalf("migration count = %d, want 26", len(items))
+	if len(items) != 27 {
+		t.Fatalf("migration count = %d, want 27", len(items))
 	}
 	for index, item := range items {
 		if item.version != index+1 {
@@ -91,7 +91,7 @@ func TestMySQLNonAtomicMigrationsResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, version := range []int{18, 20, 21, 22, 23, 24, 25, 26} {
+	for _, version := range []int{18, 20, 21, 22, 23, 24, 25, 26, 27} {
 		item := items[version-1]
 		steps := statements(string(item.data))
 		for interruptedAfter := 0; interruptedAfter < len(steps); interruptedAfter++ {

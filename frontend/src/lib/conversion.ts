@@ -1,20 +1,22 @@
 const storageKey = "ticket-online:conversion:";
 const idPattern = /^[a-f0-9]{32}$/;
+const fallback = new Map<string, { id: string; lastActivityAt: number }>();
 
 export type ConversionKind = "DETAIL_VIEWED" | "CHECKOUT_STARTED" | "VALIDATION_FAILED" | "SERVICE_FAILURE";
 export type ConversionReason = "BUYER_DATA" | "ATTENDEE_DATA" | "RESERVATION" | "PAYMENT_PROVIDER" | "SERVICE";
 
 export function journeyId(eventId: string): string {
+  const now = Date.now();
+  let stored = fallback.get(eventId);
   try {
     const key = `${storageKey}${encodeURIComponent(eventId)}`;
-    const now = Date.now();
-    const stored = JSON.parse(sessionStorage.getItem(key) ?? "null") as { id?: unknown; lastActivityAt?: unknown } | null;
-    const current = stored?.id;
-    const active = typeof current === "string" && idPattern.test(current) && typeof stored?.lastActivityAt === "number" && now - stored.lastActivityAt < 30 * 60 * 1_000;
-    const id = active ? current : crypto.randomUUID().replaceAll("-", "");
-    sessionStorage.setItem(key, JSON.stringify({ id, lastActivityAt: now }));
-    return id;
-  } catch { return crypto.randomUUID().replaceAll("-", ""); }
+    const saved = JSON.parse(sessionStorage.getItem(key) ?? "null") as { id?: unknown; lastActivityAt?: unknown } | null;
+    if (typeof saved?.id === "string" && idPattern.test(saved.id) && typeof saved.lastActivityAt === "number" && Number.isFinite(saved.lastActivityAt) && (!stored || saved.lastActivityAt > stored.lastActivityAt)) stored = { id: saved.id, lastActivityAt: saved.lastActivityAt };
+  } catch { /* use document-scoped memory when storage is unavailable */ }
+  const current = { id: stored && now >= stored.lastActivityAt && now - stored.lastActivityAt < 30 * 60 * 1_000 ? stored.id : crypto.randomUUID().replaceAll("-", ""), lastActivityAt: now };
+  fallback.set(eventId, current);
+  try { sessionStorage.setItem(`${storageKey}${encodeURIComponent(eventId)}`, JSON.stringify(current)); } catch { /* memory retains the selected ID */ }
+  return current.id;
 }
 
 export function trackConversionActivity(eventId: string): () => void {

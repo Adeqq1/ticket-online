@@ -58,7 +58,8 @@ func (s *Service) Process(ctx context.Context) error {
 			failures = append(failures, err)
 		}
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT change_id,order_id,stop_pending FROM event_change_orders WHERE processed=FALSE ORDER BY change_id,order_id LIMIT 100`)
+	rows, err = s.db.QueryContext(ctx, `SELECT change_id,order_id,stop_pending FROM event_change_orders
+ WHERE processed=FALSE AND next_attempt_at<=UTC_TIMESTAMP(6) ORDER BY next_attempt_at,change_id,order_id LIMIT 100`)
 	if err != nil {
 		return err
 	}
@@ -93,14 +94,14 @@ func (s *Service) Process(ctx context.Context) error {
 			if len(message) > 512 {
 				message = message[:512]
 			}
-			if _, saveErr := s.db.ExecContext(ctx, "UPDATE event_change_orders SET last_error=? WHERE change_id=? AND order_id=? AND processed=FALSE", message, v.change, v.id); saveErr != nil {
+			if _, saveErr := s.db.ExecContext(ctx, "UPDATE event_change_orders SET last_error=?,next_attempt_at=UTC_TIMESTAMP(6)+INTERVAL 30 SECOND WHERE change_id=? AND order_id=? AND processed=FALSE", message, v.change, v.id); saveErr != nil {
 				failures = append(failures, saveErr)
 			}
 		}
 		err = nil
 	}
 	rows, err = s.db.QueryContext(ctx, `SELECT rr.order_id FROM event_refund_rights rr LEFT JOIN order_refunds f ON f.order_id=rr.order_id
- WHERE rr.requested=TRUE AND (f.status IS NULL OR f.status='FAILED') ORDER BY rr.order_id LIMIT 100`)
+ WHERE rr.requested=TRUE AND rr.next_attempt_at<=UTC_TIMESTAMP(6) AND (f.status IS NULL OR f.status='FAILED') ORDER BY rr.next_attempt_at,rr.order_id LIMIT 100`)
 	if err != nil {
 		return err
 	}
@@ -126,6 +127,9 @@ func (s *Service) Process(ctx context.Context) error {
 			message = submitErr.Error()
 			if len(message) > 512 {
 				message = message[:512]
+			}
+			if _, err := s.db.ExecContext(ctx, "UPDATE event_refund_rights SET next_attempt_at=UTC_TIMESTAMP(6)+INTERVAL 30 SECOND WHERE order_id=? AND requested=TRUE", id); err != nil {
+				failures = append(failures, err)
 			}
 		}
 		if _, err := s.db.ExecContext(ctx, `UPDATE event_change_orders w JOIN event_refund_rights rr

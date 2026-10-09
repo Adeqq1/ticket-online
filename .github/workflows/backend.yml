@@ -50,7 +50,8 @@ jobs:
         run: go run ./cmd/migrate
 
       - name: Run tests
-        run: MYSQL_TEST_DSN="$MYSQL_DSN" MYSQL_MIGRATION_TEST_DSN="root:ci-root-password@tcp(127.0.0.1:3306)/?parseTime=true&loc=UTC" go test -v ./...
+        # Integration packages share a MySQL schema and provider fixtures.
+        run: MYSQL_TEST_DSN="$MYSQL_DSN" MYSQL_MIGRATION_TEST_DSN="root:ci-root-password@tcp(127.0.0.1:3306)/?parseTime=true&loc=UTC" go test -p 1 -v ./...
 
       - name: Run vet
         run: go vet ./...

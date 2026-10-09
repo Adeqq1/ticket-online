@@ -204,6 +204,23 @@ func apply(ctx context.Context, db *sql.Conn, item migration) error {
 		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version,name,checksum,applied_at) VALUES (?,?,?,UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
 		return err
 	}
+	if item.version == 27 {
+		// Each ALTER is atomic in MySQL 8.4, but the sequence can be interrupted.
+		for _, statement := range statements(string(item.data)) {
+			fields := strings.Fields(statement)
+			var exists bool
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?)`, fields[2], fields[5]).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := db.ExecContext(ctx, statement); err != nil {
+					return fmt.Errorf("apply migration %s: %w", item.name, err)
+				}
+			}
+		}
+		_, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (version,name,checksum,applied_at) VALUES (?,?,?,UTC_TIMESTAMP(6))", item.version, item.name, checksumText)
+		return err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration %s: %w", item.name, err)

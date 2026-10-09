@@ -79,7 +79,8 @@ func (s *Service) record(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := s.db.ExecContext(r.Context(), `INSERT INTO conversion_journeys (id,event_id,device,started_at,detail_viewed_at)
 		SELECT ?,id,?,UTC_TIMESTAMP(6),IF(?,UTC_TIMESTAMP(6),NULL) FROM events WHERE id=? AND publication_status='PUBLISHED'
-		ON DUPLICATE KEY UPDATE id=VALUES(id)`, input.JourneyID, input.Device, input.Kind == "DETAIL_VIEWED", input.EventID); err != nil {
+		ON DUPLICATE KEY UPDATE device=IF(event_id=VALUES(event_id) AND telemetry_received=FALSE,VALUES(device),device),
+        telemetry_received=IF(event_id=VALUES(event_id),TRUE,telemetry_received)`, input.JourneyID, input.Device, input.Kind == "DETAIL_VIEWED", input.EventID); err != nil {
 		writeJSON(w, 503, `{"error":{"code":"SERVICE_UNAVAILABLE","message":"Pencatatan belum tersedia"}}`)
 		return
 	}
@@ -108,6 +109,8 @@ func LinkReservation(ctx context.Context, db *sql.DB, journeyID, eventID, reserv
 	if !validID(journeyID) || !validID(reservationID) {
 		return
 	}
+	_, _ = db.ExecContext(ctx, `INSERT IGNORE INTO conversion_journeys (id,event_id,device,started_at,detail_viewed_at,telemetry_received)
+        SELECT ?,event_id,'unknown',created_at,NULL,FALSE FROM reservations WHERE id=? AND event_id=?`, journeyID, reservationID, eventID)
 	_, _ = db.ExecContext(ctx, `INSERT IGNORE INTO conversion_reservations (reservation_id,journey_id,created_at)
 		SELECT ?,j.id,UTC_TIMESTAMP(6) FROM conversion_journeys j JOIN reservations r ON r.id=? AND r.event_id=j.event_id WHERE j.id=? AND j.event_id=?`, reservationID, reservationID, journeyID, eventID)
 }
@@ -362,11 +365,11 @@ func (s *Service) report(logger *slog.Logger) http.HandlerFunc {
 		out.DataUpdatedAt = out.DataUpdatedAt.UTC()
 		if q.Device == "" {
 			var reservations, payments int64
-			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM reservations r LEFT JOIN conversion_reservations cr ON cr.reservation_id=r.id WHERE r.created_at>=? AND r.created_at<? AND cr.reservation_id IS NULL AND (?='' OR r.event_id=?)`, start, end, q.EventID, q.EventID).Scan(&reservations); err != nil {
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM reservations r LEFT JOIN conversion_reservations cr ON cr.reservation_id=r.id LEFT JOIN conversion_journeys j ON j.id=cr.journey_id WHERE r.created_at>=? AND r.created_at<? AND (cr.reservation_id IS NULL OR j.detail_viewed_at IS NULL) AND (?='' OR r.event_id=?)`, start, end, q.EventID, q.EventID).Scan(&reservations); err != nil {
 				writeJSON(w, 500, `{"error":{"code":"INTERNAL_ERROR","message":"Laporan tidak tersedia"}}`)
 				return
 			}
-			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM payments p JOIN orders o ON o.id=p.order_id JOIN reservations r ON r.id=o.reservation_id LEFT JOIN conversion_reservations cr ON cr.reservation_id=r.id WHERE p.created_at>=? AND p.created_at<? AND cr.reservation_id IS NULL AND (?='' OR r.event_id=?)`, start, end, q.EventID, q.EventID).Scan(&payments); err != nil {
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM payments p JOIN orders o ON o.id=p.order_id JOIN reservations r ON r.id=o.reservation_id LEFT JOIN conversion_reservations cr ON cr.reservation_id=r.id LEFT JOIN conversion_journeys j ON j.id=cr.journey_id WHERE p.created_at>=? AND p.created_at<? AND (cr.reservation_id IS NULL OR j.detail_viewed_at IS NULL) AND (?='' OR r.event_id=?)`, start, end, q.EventID, q.EventID).Scan(&payments); err != nil {
 				writeJSON(w, 500, `{"error":{"code":"INTERNAL_ERROR","message":"Laporan tidak tersedia"}}`)
 				return
 			}

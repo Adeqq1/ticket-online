@@ -147,7 +147,7 @@ func (s *Service) preview(ctx context.Context, tx *sql.Tx, eventID string, in In
 	}
 	if in.Action == "RESCHEDULED" {
 		var deadline sql.NullTime
-		if err := tx.QueryRowContext(ctx, `SELECT MAX(rr.deadline) FROM event_refund_rights rr JOIN orders o ON o.id=rr.order_id JOIN reservations r ON r.id=o.reservation_id WHERE r.event_id=?`, eventID).Scan(&deadline); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT MAX(refund_deadline) FROM event_changes WHERE event_id=?`, eventID).Scan(&deadline); err != nil {
 			return result, err
 		}
 		next, _ := time.Parse(time.RFC3339Nano, *in.RefundDeadline)

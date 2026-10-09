@@ -39,9 +39,9 @@ type fixture struct {
 
 func newFixture(t *testing.T) fixture {
 	t.Helper()
-	dsn := os.Getenv("MYSQL_TEST_DSN")
+	dsn := os.Getenv("MYSQL_MIGRATION_TEST_DSN")
 	if dsn == "" {
-		t.Skip("set MYSQL_TEST_DSN to a disposable MySQL account with CREATE DATABASE")
+		t.Skip("set MYSQL_MIGRATION_TEST_DSN to a disposable MySQL account with CREATE DATABASE")
 	}
 	cfg, err := mysql.ParseDSN(dsn)
 	if err != nil {
@@ -210,6 +210,9 @@ func TestCancellationPreservesCheckInAndRefundsFullOrderOnce(t *testing.T) {
 	if _, err := f.db.Exec("UPDATE payments SET status='SUCCEEDED' WHERE order_id=?", o.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.db.Exec("UPDATE event_refund_rights SET next_attempt_at=UTC_TIMESTAMP(6) WHERE order_id=?", o.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.s.Process(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -338,6 +341,138 @@ func TestChangedPreviewAndStaffCannotCommitDecision(t *testing.T) {
 	}
 	if count(t, f.db, "SELECT change_version FROM events WHERE id='nusa-malam'") != 0 {
 		t.Fatal("failed decision mutated event")
+	}
+}
+
+func TestRefundDeadlineSurvivesPostponement(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	order := f.order(t, true)
+	first := f.decide(t, "RESCHEDULED", 0)
+	if err := f.s.Process(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.decide(t, "POSTPONED", 1)
+	if err := f.s.Process(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, f.db, "SELECT COUNT(*) FROM event_refund_rights WHERE order_id=? AND deadline IS NULL AND requested=FALSE", order.ID) != 1 {
+		t.Fatal("postponement must allow refunds without a deadline")
+	}
+	request := f.call(t, "POST", "/api/v1/orders/"+order.ID+"/refund-request", f.s.access.Token(order.ID), "", nil)
+	if request.Code != 200 {
+		t.Fatalf("refund during postponement: %d %s", request.Code, request.Body.String())
+	}
+	in, w := f.prepare(t, "RESCHEDULED", 2)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	shorter := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	in.RefundDeadline = &shorter
+	for _, path := range []string{"/api/v1/admin/events/nusa-malam/changes/preview", "/api/v1/admin/events/nusa-malam/changes"} {
+		w := f.call(t, "POST", path, f.admin, "shorter-deadline", in)
+		if w.Code != 422 {
+			t.Fatalf("historical deadline shortened: %d %s", w.Code, w.Body.String())
+		}
+	}
+	in.RefundDeadline = first.RefundDeadline
+	w = f.call(t, "POST", "/api/v1/admin/events/nusa-malam/changes/preview", f.admin, "", in)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var preview Preview
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	in.Snapshot = preview.Snapshot
+	for i := 0; i < 2; i++ {
+		w = f.call(t, "POST", "/api/v1/admin/events/nusa-malam/changes", f.admin, "preserved-deadline", in)
+		if w.Code != 200 {
+			t.Fatalf("valid deadline/replay: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if count(t, f.db, "SELECT COUNT(*) FROM event_changes") != 3 || count(t, f.db, "SELECT COUNT(*) FROM event_refund_rights WHERE order_id=? AND requested=TRUE AND deadline=?", order.ID, mustTime(t, *first.RefundDeadline)) != 1 {
+		t.Fatal("decision replay changed refund request or deadline")
+	}
+}
+
+func mustTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+func TestFailedQueueItemsDoNotStarveLaterOrders(t *testing.T) {
+	for _, queue := range []string{"work", "refund"} {
+		t.Run(queue, func(t *testing.T) {
+			f := newFixture(t)
+			ctx := context.Background()
+			exec := func(query string, args ...any) {
+				t.Helper()
+				if _, err := f.db.Exec(query, args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 1; i <= 101; i++ {
+				id := fmt.Sprintf("%032x", i)
+				orderStatus, paymentStatus := "PENDING", "PENDING"
+				var gateway any
+				if i <= 100 {
+					gateway = "gateway-" + id
+				}
+				if queue == "refund" {
+					orderStatus, paymentStatus = "PAID", "FAILED"
+					if i == 101 {
+						paymentStatus = "SUCCEEDED"
+					}
+				}
+				exec(`INSERT INTO reservations(id,event_id,status,idempotency_key,request_hash,expires_at,created_at,updated_at)
+ VALUES (?,'nusa-malam','CONVERTED',?,REPEAT('a',64),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, id, id)
+				exec(`INSERT INTO orders(id,reference,reservation_id,status,subtotal,expires_at,created_at,updated_at)
+ VALUES (?,?,?,?,1000,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, id, id, id, orderStatus)
+				exec(`INSERT INTO payments(id,order_id,method,amount,status,gateway_order_id,paid_at,created_at,updated_at)
+ VALUES (?,?,'VIRTUAL_ACCOUNT',1000,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`, id, id, paymentStatus, gateway)
+			}
+			f.decide(t, "CANCELLED", 0)
+			exec("UPDATE event_change_orders SET next_attempt_at='2000-01-01'")
+			exec("UPDATE event_refund_rights SET next_attempt_at='2000-01-01'")
+			if err := f.s.Process(ctx); err == nil {
+				t.Fatal("expected first 100 provider-dependent items to fail")
+			}
+			if queue == "work" && count(t, f.db, "SELECT COUNT(*) FROM orders WHERE status='PENDING'") != 101 {
+				t.Fatal("uncertain payments were released")
+			}
+			if err := f.s.Process(ctx); err != nil {
+				t.Fatal(err)
+			}
+			last := fmt.Sprintf("%032x", 101)
+			if count(t, f.db, "SELECT COUNT(*) FROM event_change_orders WHERE order_id=? AND processed=TRUE", last) != 1 {
+				t.Fatal("healthy work item was starved")
+			}
+			if queue == "refund" && count(t, f.db, "SELECT COUNT(*) FROM order_refunds WHERE order_id=? AND status='MANUAL_REQUIRED'", last) != 1 {
+				t.Fatal("healthy refund submission was starved")
+			}
+			if queue == "work" {
+				exec("UPDATE payments SET status='FAILED'")
+			} else {
+				exec("UPDATE payments SET status='SUCCEEDED'")
+			}
+			// Make the retry due without a wall-clock sleep after provider recovery.
+			exec("UPDATE event_change_orders SET next_attempt_at=UTC_TIMESTAMP(6)")
+			exec("UPDATE event_refund_rights SET next_attempt_at=UTC_TIMESTAMP(6)")
+			if err := f.s.Process(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if count(t, f.db, "SELECT COUNT(*) FROM event_change_orders WHERE processed=TRUE AND last_error=''") != 101 {
+				t.Fatal("old failed work was not retried successfully")
+			}
+			if queue == "refund" && count(t, f.db, "SELECT COUNT(*) FROM order_refunds WHERE status='MANUAL_REQUIRED'") != 101 {
+				t.Fatal("old failed refund submissions were not retried")
+			}
+		})
 	}
 }
 
