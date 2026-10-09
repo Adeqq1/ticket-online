@@ -111,7 +111,16 @@ def reply(path, scenario, page_state="standard"):
             events = [sold_out, no_tickets, changed, broken_poster]
         return 200, {"events": [] if scenario == "empty" else events}
     if endpoint.startswith("/api/v1/events/"):
-        return 200, event("POSTPONED" if state == "changed" else "SCHEDULED")
+        result = event("POSTPONED" if state == "changed" else "SCHEDULED")
+        if scenario in ("phase22-rescheduled", "phase22-postponed", "phase22-cancelled"):
+            event_state = {"phase22-rescheduled": "RESCHEDULED", "phase22-postponed": "POSTPONED", "phase22-cancelled": "CANCELLED"}[scenario]
+            result = event(event_state)
+        if scenario == "phase22-sold-out":
+            result["status"] = "Sold Out"
+            result["ticketTiers"] = [{**tier, "availableQuantity": 0} for tier in result["ticketTiers"]]
+        if scenario == "phase22-no-tiers":
+            result["ticketTiers"] = []
+        return 200, result
     if endpoint.endswith("/event") and "/reservations/" in endpoint:
         return 200, event()
     if endpoint == "/api/v1/reservations":
@@ -217,6 +226,12 @@ async def main():
                 await page.wait_for_timeout(350)
                 if route_name == "catalog" and viewport_name == "desktop":
                     assert await page.locator(".filters").evaluate("element => element.open"), "Catalog filters should start open on desktop."
+                if route_name == "detail":
+                    if viewport_name == "desktop":
+                        assert await page.locator(".zone-details").evaluate("element => element.open"), "The zone map should start open on desktop."
+                    else:
+                        assert await page.locator(".mobile-cart").is_visible(), "The mobile summary bar should appear before a ticket is selected."
+                        assert await page.get_by_role("button", name="Lanjut checkout").is_disabled(), "Checkout should remain disabled with an empty selection."
                 captures.append(await capture(page, f"{viewport_name}-{label}", f"{viewport_name}, {label}, standard"))
             for page_name, url, label in (("home", "/?scenario=loading", "beranda"), ("catalog", "/konser?scenario=empty", "katalog-kosong"), ("catalog", "/konser?scenario=error", "katalog-error"), ("detail", "/konser/nusa-malam?scenario=error", "detail-error")):
                 await page.goto(BASE_URL + url, wait_until="domcontentloaded")
@@ -247,6 +262,43 @@ async def main():
                 await page.wait_for_timeout(150)
                 captures.append(await capture(page, f"{viewport_name}-checkout-{label}", f"{viewport_name}, checkout langkah {step}"))
             if viewport_name == "mobile":
+                await page.set_viewport_size({"width": 390, "height": 844})
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase22-normal", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Nusa Malam").wait_for()
+                assert not await page.locator(".zone-details").evaluate("element => element.open"), "The zone map should start collapsed on mobile."
+                await page.get_by_role("button", name="Tambah tiket VIP A").click()
+                assert "1 tiket" in await page.locator(".mobile-cart").inner_text(), "The summary should update when a ticket is selected."
+                subtotal_text = await page.locator(".mobile-cart").inner_text()
+                assert "650.000" in subtotal_text, f"The mobile bar should show the selected subtotal; got {subtotal_text!r}."
+                await page.locator(".ticket-tier:nth-child(3) .tier-controls button:last-child").evaluate("element => element.focus()")
+                await page.keyboard.press("Tab")
+                await page.evaluate("new Promise(resolve => requestAnimationFrame(resolve))")
+                focus_layout = await page.evaluate("""() => ({focused: document.activeElement === document.querySelector('.ticket-tier:last-child .tier-controls button:last-child'), buttonBottom: document.querySelector('.ticket-tier:last-child .tier-controls button:last-child').getBoundingClientRect().bottom, barTop: document.querySelector('.mobile-cart').getBoundingClientRect().top})""")
+                assert focus_layout["focused"] and focus_layout["buttonBottom"] <= focus_layout["barTop"], f"Focused controls should remain above the mobile summary bar; got {focus_layout}."
+                await page.get_by_role("button", name="Lanjut checkout").click()
+                await page.wait_for_url("**/checkout/nusa-malam?vip-a=1")
+
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase22-rescheduled", wait_until="domcontentloaded")
+                await page.locator(".detail-status").get_by_text("Jadwal diperbarui", exact=True).wait_for()
+                assert "September" in await page.locator(".detail-heading .detail-summary").first.inner_text(), "The detail heading should use the updated event date."
+                assert "30 Agustus" in await page.locator(".refund-note").inner_text(), "The current refund deadline should be visible."
+                captures.append(await capture(page, "mobile-jadwal-diperbarui", "mobile, konser dengan jadwal diperbarui"))
+
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase22-cancelled", wait_until="domcontentloaded")
+                await page.locator(".detail-status").get_by_text("Acara dibatalkan", exact=True).wait_for()
+                assert "refund penuh" in await page.locator(".refund-note").inner_text(), "Cancellation refund rights should remain visible."
+                assert await page.locator(".mobile-cart .button").is_disabled(), "A cancelled event should disable checkout."
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase22-sold-out", wait_until="domcontentloaded")
+                await page.locator(".detail-status").get_by_text("Tiket habis", exact=True).wait_for()
+                assert await page.locator(".ticket-tier .tier-controls button:last-child").first.is_disabled(), "Sold-out tiers should disable quantity controls."
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase22-no-tiers", wait_until="domcontentloaded")
+                await page.get_by_text("Tiket dan harga belum diumumkan.").wait_for()
+                assert await page.locator(".mobile-cart .button").is_disabled(), "Checkout should remain disabled when ticket tiers are missing."
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=error", wait_until="domcontentloaded")
+                await page.get_by_role("alert").wait_for()
+                await page.get_by_role("button", name="Coba lagi").click()
+                await page.get_by_role("alert").wait_for()
+
                 await page.set_viewport_size({"width": 360, "height": 800})
                 await page.goto(BASE_URL + "/?scenario=phase21-search", wait_until="domcontentloaded")
                 await page.locator(".concert-card").first.wait_for()
