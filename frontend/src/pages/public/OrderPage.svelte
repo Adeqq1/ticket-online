@@ -36,7 +36,7 @@
         access = { orderId: id, accessToken: emailToken, reference: result.reference, reservationId: result.reservationId, expiresAt: result.expiresAt, accessExpiresAt: result.accessExpiresAt, ticketIds: [] };
         saveOrderAccess(access); emailToken = null;
       }
-      if (!access) { error = "Akses pesanan tidak tersimpan. Pulihkan akses dengan email dan reference pesanan."; return; }
+      if (!access) { error = "Akses pesanan tidak tersimpan. Pulihkan akses dengan email pembeli dan kode pesanan (reference)."; return; }
       const result = await loadBuyerOrderTickets(access, controller.signal);
       if (controller.signal.aborted) return;
       if (result.detail) detail = result.detail;

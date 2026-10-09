@@ -410,7 +410,7 @@
            <p class="checkout-kicker">Pesanan berhasil</p>
            <h2 id="success-title" tabindex="-1">E-ticket sudah dibuat.</h2>
            <p>Pembayaran dikonfirmasi untuk {buyer.email}.</p>
-           <div class="booking-code"><span>Reference pesanan</span><strong>{reference}</strong></div>
+           <div class="booking-code"><span>Kode pesanan (reference)</span><strong>{reference}</strong></div>
            {#if storageFailed}
              <p class="success-note">Akses tiket hanya tersedia selama halaman checkout ini terbuka. Simpan atau cetak kode setiap peserta sebelum meninggalkan halaman.</p>
              {#each issuedTickets as ticket}

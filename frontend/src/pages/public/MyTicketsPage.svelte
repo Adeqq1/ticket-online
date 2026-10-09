@@ -65,7 +65,7 @@
     <p class="ticket-kicker">Dompet tiket</p>
     <h1>Tiket saya.</h1>
     <p>Order dan tiket yang tersimpan dapat dibuka di sini. Tautan pada email konfirmasi juga dapat membuka e-ticket di perangkat lain.</p>
-    <p><a class="text-button" href="/pulihkan-tiket">Pulihkan tiket di browser ini</a></p>
+    <p><a class="text-button" href="/pulihkan-tiket">Sudah membeli, tetapi tiket tidak muncul?</a></p>
   </header>
 
   {#if demoDataPresent}<p class="legacy-ticket-note" role="status">Snapshot demo lama tersimpan di browser, tetapi bukan tiket backend dan tidak ditampilkan sebagai tiket masuk.</p>{/if}
@@ -85,7 +85,7 @@
               <div class="my-ticket-card-body">
                 <div class="my-ticket-card-topline">
                   <span class:past={!upcoming(ticket)} class="my-ticket-status">{eventStatus(ticket.currentEvent) || (ticket.usable === false ? "Tidak aktif" : upcoming(ticket) ? "Mendatang" : "Selesai")}</span>
-                  {#if access}<a class="my-ticket-reference" href={`/pesanan/${encodeURIComponent(access.orderId)}`}>{ticket.orderReference}</a>{:else}<span class="my-ticket-reference">{ticket.orderReference}</span>{/if}
+                  {#if access}<a class="my-ticket-reference" href={`/pesanan/${encodeURIComponent(access.orderId)}`}>Kode pesanan (reference): {ticket.orderReference}</a>{:else}<span class="my-ticket-reference">Kode pesanan (reference): {ticket.orderReference}</span>{/if}
                 </div>
                 <h2>{ticket.eventArtist}</h2>
                 <p class="my-ticket-date">{eventDate(currentStart(ticket))}</p>
@@ -108,7 +108,7 @@
           <li>
             <article class="my-order-card">
               <div>
-                <b>Order {order.access.reference}</b>
+                <b>Kode pesanan (reference): {order.access.reference}</b>
                 {#if order.detail}
                   <p>Status: {buyerOrderStatusLabel(order.detail.status)}{#if order.detail.refund} · {refundStatusLabel(order.detail.refund.status)}{/if}</p>
                   {#if order.error}<p>{order.error.message}</p>{/if}
@@ -134,7 +134,7 @@
         <li>
           <article class="my-order-card">
             <div>
-              <b>Order {order.access.reference}</b>
+              <b>Kode pesanan (reference): {order.access.reference}</b>
               {#if order.detail}
                 <p>Status: {buyerOrderStatusLabel(order.detail.status)}{#if order.detail.refund} · {refundStatusLabel(order.detail.refund.status)}{/if}</p>
                 {#if order.error}<p>{order.error.message}</p>{/if}
@@ -154,6 +154,6 @@
       {/each}
     </ul>
   {:else}
-    <section class="my-tickets-empty" aria-labelledby="empty-title"><div class="ticket-illustration" aria-hidden="true"><span></span><span></span><i></i><b></b></div><div><p class="ticket-kicker">Belum ada tiket</p><h2 id="empty-title">Dompetmu masih kosong.</h2><p>Setelah pembayaran dikonfirmasi server, e-ticket setiap peserta muncul di sini.</p><a class="button" href="/konser">Jelajahi Konser</a></div></section>
+    <section class="my-tickets-empty" aria-labelledby="empty-title"><div class="ticket-illustration" aria-hidden="true"><span></span><span></span><i></i><b></b></div><div><p class="ticket-kicker">Belum ada tiket</p><h2 id="empty-title">Dompetmu masih kosong.</h2><p>Akses pesanan mungkin belum tersimpan di browser ini. Pulihkan tiket memakai email pembeli dan kode pesanan dari email konfirmasi.</p><a class="button" href="/pulihkan-tiket">Pulihkan tiket</a><p><a class="text-button" href="/konser">Cari konser</a></p></div></section>
   {/if}
 </section>
