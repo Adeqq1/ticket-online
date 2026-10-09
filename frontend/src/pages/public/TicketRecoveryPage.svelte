@@ -24,7 +24,7 @@
   function validate() {
     errors = {
       email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? "" : "Masukkan email pembeli yang valid.",
-      reference: /^TO-[0-9a-f]{20}$/i.test(reference.trim()) ? "" : "Masukkan reference pesanan, misalnya TO- diikuti 20 karakter.",
+      reference: /^TO-[0-9a-f]{20}$/i.test(reference.trim()) ? "" : "Masukkan kode pesanan (reference), misalnya TO- diikuti 20 karakter.",
     };
     return !errors.email && !errors.reference;
   }
@@ -83,7 +83,7 @@
 
 <svelte:head>
   <title>Pulihkan tiket | Tiket Online</title>
-  <meta name="description" content="Pulihkan akses e-ticket di browser baru menggunakan email dan reference pesanan." />
+  <meta name="description" content="Pulihkan akses e-ticket di browser baru menggunakan email pembeli dan kode pesanan." />
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -97,13 +97,13 @@
   {#if unsaved}
     <div class="recovery-panel" id="recovery-unsaved" tabindex="-1" role="alert">
       <h2>Akses belum tersimpan di browser ini.</h2>
-      <p>Penyimpanan browser diblokir, jadi pesanan hanya terlihat selama halaman ini terbuka. Catat kode tiket di bawah atau aktifkan penyimpanan lalu minta tautan baru.</p>
-      <p><b>Pesanan {unsaved.reference}</b>{#if unsaved.detail} · {unsaved.detail.items.reduce((count, item) => count + item.quantity, 0)} tiket{/if}</p>
+      <p>Penyimpanan browser diblokir, jadi akses pesanan hanya tersedia selama halaman ini terbuka. Aktifkan penyimpanan browser lalu minta tautan baru.</p>
+      <p><b>Kode pesanan (reference): {unsaved.reference}</b>{#if unsaved.detail} · {unsaved.detail.items.reduce((count, item) => count + item.quantity, 0)} tiket{/if}</p>
       {#if unsaved.tickets.length}
         <ul class="recovery-codes" aria-label="Kode e-ticket">
           {#each unsaved.tickets as ticket (ticket.id)}<li><span>{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</span><code>{ticket.code}</code></li>{/each}
         </ul>
-      {:else}<p>Kode tiket belum dapat dimuat.</p>{/if}
+      {:else}<p>Kode tiket belum dapat dimuat. Kode pesanan <code>TO-…</code> berbeda dari kode tiket <code>ET-…</code>.</p>{/if}
     </div>
   {:else if token}
     <div class="recovery-panel">
@@ -117,19 +117,28 @@
       <div class="recovery-panel" id="recovery-requested" tabindex="-1" role="status">
         <h2>Periksa email pembeli.</h2>
         <p>{requested}</p>
-        <p>Tautan berlaku 15 menit. Belum menerima email? Periksa folder spam, lalu kirim permintaan lagi setelah satu menit.</p>
+        <ol>
+          <li>Periksa inbox dan folder spam email pembeli untuk tautan pemulihan.</li>
+          <li>Buka tautan sebelum kedaluwarsa; tautan berlaku 15 menit.</li>
+          <li>Tekan “Pulihkan tiket” untuk menyimpan akses di browser ini.</li>
+        </ol>
+        <p>Jika email belum ditemukan, periksa kembali alamat email checkout. Permintaan baru dibatasi satu kali setiap menit.</p>
         <button class="button button-secondary" type="button" onclick={() => { requested = ""; }}>Kirim permintaan lain</button>
       </div>
     {:else}
+      <div class="recovery-panel">
+        <h2>Siapkan data pemulihan</h2>
+        <p>Cari email berjudul “E-ticket pesanan” dan salin kode pesanan yang diawali <code>TO-</code>. Kode pesanan berbeda dari kode tiket yang diawali <code>ET-</code>. Gunakan email pembeli yang dipakai saat checkout.</p>
+      </div>
       <form class="recovery-panel field-grid" novalidate onsubmit={submitRequest} aria-describedby="recovery-form-error">
-        {#if linkSpent}<p class="recovery-wide">Minta tautan baru dengan email dan reference pesanan.</p>{/if}
+        {#if linkSpent}<p class="recovery-wide">Minta tautan baru dengan email pembeli dan kode pesanan (reference).</p>{/if}
         <label for="recovery-email">Email pembeli
           <input id="recovery-email" type="email" autocomplete="email" maxlength="254" bind:value={email} required aria-invalid={Boolean(errors.email)} aria-describedby="recovery-email-error" class:is-invalid={Boolean(errors.email)} />
           <small id="recovery-email-error" aria-live="polite">{errors.email}</small>
         </label>
-        <label for="recovery-reference">Reference pesanan
+        <label for="recovery-reference">Kode pesanan (reference)
           <input id="recovery-reference" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="23" placeholder="TO-…" bind:value={reference} required aria-invalid={Boolean(errors.reference)} aria-describedby="recovery-reference-hint recovery-reference-error" class:is-invalid={Boolean(errors.reference)} />
-          <span id="recovery-reference-hint" class="recovery-hint">Tertera pada email e-ticket dan halaman checkout.</span>
+          <span id="recovery-reference-hint" class="recovery-hint">Kode ini diawali TO-. Kode tiket yang diawali ET- berbeda dan tidak digunakan di sini.</span>
           <small id="recovery-reference-error" aria-live="polite">{errors.reference}</small>
         </label>
         <p id="recovery-form-error" class="form-error recovery-wide" aria-live="polite">{formError}</p>

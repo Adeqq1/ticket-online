@@ -37,6 +37,10 @@ export function saveOrderAccess(record: OrderAccess) {
   } catch { return false; }
 }
 
+export function saveOrderTicketAccess(record: OrderAccess, accessExpiresAt: string | null, ticketIds: string[]) {
+  return saveOrderAccess({ ...record, accessExpiresAt, ticketIds: [...new Set([...record.ticketIds, ...ticketIds])] });
+}
+
 export function removeOrderAccess(orderId: string) {
   memory.delete(orderId);
   try { storage()?.removeItem(key(orderId)); } catch { /* storage may be unavailable */ }

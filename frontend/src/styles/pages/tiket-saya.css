@@ -34,6 +34,7 @@
 .legacy-ticket-note, .my-order-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; background: var(--surface); color: var(--muted); line-height: 1.5; }
 .my-order-list { display: grid; gap: 12px; margin: 20px 0 0; padding: 0; list-style: none; }
 .my-order-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.my-order-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .my-order-card p { margin: 6px 0 0; }
 .my-ticket-action { margin-bottom: 0; }
 @media (max-width: 1023px) { .my-ticket-card-link { grid-template-columns: 130px minmax(0, 1fr); } }
