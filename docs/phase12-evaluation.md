@@ -2,6 +2,10 @@
 
 Status: **bukti belum cukup; fitur belum dipilih**. Lingkungan evaluasi saat ini lokal/staging. Persiapan pengukuran tidak berarti sesi pengguna sudah dijalankan atau hasil produksi sudah tersedia.
 
+Contoh latihan tersedia pada [laporan simulasi Phase 12-15](phase12-15-simulation.md). Seluruh datanya sintetis dan tidak memenuhi checkpoint bukti nyata di dokumen ini.
+
+Pelaksanaan lima sesi berikutnya memakai [checkpoint Phase 13](phase13-user-test.md), dengan catatan per tugas dan rekap frekuensi/dampak hambatan. Hasil sesi belum tersedia; ringkas bukti yang sudah tercatat di sana ke lembar evaluasi ini setelah pelaksanaan.
+
 ## Pengumpulan bukti
 
 1. Tentukan lingkungan, event yang diamati, dan periode. Bawaan: 30 hari penuh terakhir dalam WIB, awal inklusif dan akhir eksklusif. Pisahkan sandbox dan produksi; pembayaran simulasi bukan bukti pembelian berulang sungguhan.
@@ -64,11 +68,14 @@ Lima sesi memberi bukti awal tentang hambatan dan kebutuhan akses/bantuan. Sesi 
 
 ## Pemilihan satu fitur
 
+Keputusan dilanjutkan pada [Phase 15](phase15-development-decision.md) setelah putaran uji, perbaikan, dan uji ulang Phase 13-14 selesai. Jika hasilnya baik dan tidak ada kebutuhan baru yang kuat, cakupan saat ini dapat ditutup dengan alasan berbasis bukti.
+
 | Kandidat | Bukti yang diperlukan | Kriteria hasil fitur berikutnya |
 |---|---|---|
 | Akun pembeli, checkout tamu tetap tersedia | Pembelian berulang pada data nyata dan kesulitan mengakses tiket/riwayat saat kembali | Pembeli lama lebih mudah memperoleh tiket/riwayat; checkout tamu tetap dapat diselesaikan |
-| Voucher terkelola dan pelacakan kampanye | Konversi produksi memenuhi sasaran yang telah ditetapkan, sementara jangkauan dari sumber yang disebutkan tertinggal | Kampanye dapat diukur dan voucher dikelola tanpa mengedit database |
+| Voucher terkelola | Promosi menjadi kebutuhan rutin dan perubahan kode promo dalam kode aplikasi menghambat operasi | Pengelola mengatur promo tanpa perubahan kode, dengan waktu pengerjaan dan kesalahan aturan yang berkurang |
 | Pusat bantuan terkait pesanan | Kategori pertanyaan pesanan yang berulang pada rekap dukungan; observasi pengguna mendukung kebutuhan tersebut | Pembeli menemukan jawaban yang sesuai status pesanannya dan kebutuhan bantuan berkurang |
+| Pemilihan kursi | Penyelenggara mengonfirmasi kebutuhan tiket bernomor kursi pada acara nyata beserta denah dan aturan alokasinya | Pembeli memilih kursi sesuai denah, petugas mengenali penempatan, dan tidak ada alokasi ganda |
 
 Jika beberapa kandidat didukung, bandingkan jumlah pengguna/kasus terdampak, masalah yang berulang, kualitas bukti, dan usaha implementasinya. Hindari menjumlahkan ukuran yang berbeda (perjalanan, kelompok email, dan kasus dukungan). Pilih satu dengan alasan tertulis; jika belum ada pembeda yang kuat, tetap **bukti belum cukup**. Hambatan checkout yang belum terselesaikan perlu ditangani sebelum menganggap masalah utama adalah jangkauan.
 

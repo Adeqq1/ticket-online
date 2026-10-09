@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
+import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, requestEventRefund, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -8,6 +8,34 @@ const apiEvent: ApiEvent = {
   zones: [{ id: "festival", name: "Festival", description: "Area umum" }],
   ticketTiers: [{ id: "festival", name: "Festival", zoneId: "festival", price: 225000, availableQuantity: 42, maxPerOrder: 6, benefit: "Area berdiri", gate: "Gate B", seating: "free-standing" }],
 };
+
+test("refund request reports an interrupted response without retrying", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => { calls += 1; throw new TypeError("connection closed"); }) as unknown as typeof fetch;
+  try {
+    await expect(requestEventRefund("order-id", "order-token")).rejects.toMatchObject({ code: "NETWORK_ERROR", status: 0 });
+    expect(calls).toBe(1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("refund request sends one authenticated POST and returns the backend status", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  let request: { url: string; init?: RequestInit } | undefined;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls += 1;
+    request = { url: String(input), init };
+    return Response.json({ status: "REQUESTED" });
+  }) as typeof fetch;
+  try {
+    expect(await requestEventRefund("order-id", "order-token")).toEqual({ status: "REQUESTED" });
+    expect(calls).toBe(1);
+    expect(request?.url).toBe("/api/v1/orders/order-id/refund-request");
+    expect(request?.init?.method).toBe("POST");
+    expect(new Headers(request?.init?.headers).get("Authorization")).toBe("Bearer order-token");
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("admin operations API sends the staff session to the protected endpoint", async () => {
   const originalFetch = globalThis.fetch;

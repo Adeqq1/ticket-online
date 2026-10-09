@@ -3,6 +3,7 @@
   import { emailAccessToken } from "../../lib/ticket-email-access.ts";
   import { onMount, tick } from "svelte";
   import { ApiError, getOrder, requestEventRefund, resendOrderEmail, type ApiTicket, type OrderDetail } from "../../lib/api.ts";
+  import { refundStatusLabel } from "../../lib/buyer-refund.ts";
   import { loadBuyerOrderTickets } from "../../lib/buyer-tickets.ts";
   import { eventDate, formatRupiah } from "../../lib/concerts.ts";
   import { getOrderAccess, saveOrderAccess } from "../../lib/order-access.ts";
@@ -18,6 +19,7 @@
   let refundBusy = $state(false);
   let refundMessage = $state("");
   let refundConfirmed = $state(false);
+  let refundNeedsReview = $state(false);
   let refundResult = $state<HTMLParagraphElement>();
   let pageController: AbortController | undefined;
   let emailToken: string | null = null;
@@ -37,23 +39,62 @@
       if (!access) { error = "Akses pesanan tidak tersimpan. Pulihkan akses dengan email dan reference pesanan."; return; }
       const result = await loadBuyerOrderTickets(access, controller.signal);
       if (controller.signal.aborted) return;
-      detail = result.detail; tickets = result.tickets;
+      if (result.detail) detail = result.detail;
+      tickets = result.tickets;
       if (result.detail) saveOrderAccess({ ...access, accessExpiresAt: result.detail.accessExpiresAt, ticketIds: [...new Set([...access.ticketIds, ...result.tickets.map((ticket) => ticket.id)])] });
       if (result.error) error = result.error.message;
+      return Boolean(result.detail);
     } catch (cause) {
       if (!controller.signal.aborted) error = cause instanceof Error ? cause.message : "Pesanan belum dapat dimuat.";
+      return false;
     } finally { if (!controller.signal.aborted) loading = false; }
+  }
+
+  async function checkRefundStatus() {
+    if (refundBusy) return;
+    refundBusy = true;
+    refundMessage = "";
+    try {
+      if (!await load()) {
+        refundMessage = "Status belum dapat diperiksa. Coba periksa status lagi.";
+        return;
+      }
+      if (detail?.refundRight?.requested || detail?.refund) {
+        refundNeedsReview = false;
+        refundMessage = "Status pengajuan diperbarui.";
+      } else {
+        refundNeedsReview = false;
+        refundConfirmed = false;
+        refundMessage = "Belum ada pengajuan tercatat. Periksa kembali hak dan batas pengajuan sebelum mengajukan.";
+      }
+    } finally {
+      refundBusy = false;
+      await tick();
+      refundResult?.focus();
+    }
   }
 
   async function requestRefund() {
     const access = getOrderAccess(id);
-    if (!access || refundBusy || !refundConfirmed) return;
+    if (!access || refundBusy || refundNeedsReview || !refundConfirmed || !detail?.refundRight || detail.refundRight.requested || detail.refund) return;
+    if (detail.refundRight.deadline && Date.parse(detail.refundRight.deadline) <= Date.now()) {
+      refundMessage = "Tenggat pengajuan refund telah berakhir. Periksa status pesanan untuk memastikan tidak ada pengajuan yang sudah tercatat.";
+      return;
+    }
     refundBusy = true; refundMessage = "";
     try {
-      await requestEventRefund(id, access.accessToken);
-      refundMessage = "Permintaan refund penuh diterima. Periksa halaman ini untuk progresnya.";
+      const result = await requestEventRefund(id, access.accessToken);
+      if (result.status !== "REQUESTED") throw new ApiError("Hasil pengajuan belum dapat dipastikan.", 0, "UNKNOWN_OUTCOME");
+      refundNeedsReview = true;
+      refundMessage = "Pengajuan diterima. Dana belum dinyatakan kembali; periksa status pengembalian pada halaman ini.";
       await load();
-    } catch (cause) { refundMessage = cause instanceof Error ? cause.message : "Hasil permintaan belum pasti. Muat ulang pesanan sebelum mencoba lagi."; }
+      if (detail?.refundRight?.requested || detail?.refund) refundNeedsReview = false;
+    } catch (cause) {
+      refundNeedsReview = true;
+      refundMessage = cause instanceof ApiError && cause.code === "UNKNOWN_OUTCOME"
+        ? "Hasil pengajuan belum dapat dipastikan. Periksa status pesanan sebelum mencoba lagi."
+        : cause instanceof Error ? cause.message : "Hasil pengajuan belum dapat dipastikan. Periksa status pesanan sebelum mencoba lagi.";
+    }
     finally { refundBusy = false; await tick(); refundResult?.focus(); }
   }
 
@@ -88,7 +129,7 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Detail pesanan</p>
     <h1>{detail ? detail.reference : "Pesanan"}</h1>
-    {#if detail}<p>{detail.status === "PAID" ? "Pembayaran dikonfirmasi." : detail.status === "REFUND_PENDING" ? "Refund sedang diproses. Tiket tidak dapat digunakan selama pemeriksaan." : detail.status === "REFUNDED" ? "Refund berhasil. Tiket pesanan ini sudah tidak berlaku." : "Pesanan belum lunas."} {detail.accessExpiresAt ? `Akses berlaku sampai ${eventDate(detail.accessExpiresAt)}.` : "Akses tetap tersedia selama perubahan acara atau refund belum selesai."}</p>{/if}
+    {#if detail}<p>{detail.status === "PAID" ? "Pembayaran dikonfirmasi." : detail.status === "REFUND_PENDING" ? "Pengembalian belum dikonfirmasi. Tiket tidak dapat digunakan selama pemeriksaan." : detail.status === "REFUNDED" ? "Pengembalian dana dikonfirmasi. Tiket pesanan ini sudah tidak berlaku." : detail.status === "CANCELLED" ? "Pesanan dibatalkan." : "Pesanan menunggu pembayaran."} {detail.accessExpiresAt ? `Akses berlaku sampai ${eventDate(detail.accessExpiresAt)}.` : "Akses tetap tersedia selama perubahan acara atau pengembalian belum selesai."}</p>{/if}
   </header>
 
   {#if loading}
@@ -113,20 +154,41 @@
         {/each}
       </ul>
     {/if}
-    {#if detail.status === "REFUND_PENDING" || detail.status === "REFUNDED"}
-      <div class="recovery-panel" role="status"><h2>{detail.status === "REFUNDED" ? "Refund selesai" : "Refund sedang diproses"}</h2><p>{detail.status === "REFUNDED" ? "E-ticket tidak lagi dapat digunakan." : "Pengembalian sedang ditangani. Periksa kembali halaman ini untuk pembaruan."}</p></div>
-    {/if}
-    {#if detail.refundRight}
-     <section class="recovery-panel" aria-label="Hak refund perubahan acara">
-      <h2>Refund penuh perubahan acara</h2>
-      <p>Nominal: {formatRupiah.format(detail.total)}, termasuk biaya admin.</p>
-      {#if detail.refundRight.requested}<p>Permintaan sudah tercatat. {detail.refund?.status === "MANUAL_REQUIRED" ? "Tim sedang menangani pengembalian melalui kanal manual." : detail.refund?.status === "SUCCEEDED" ? "Pengembalian berhasil." : "Pengembalian sedang diproses."}</p>
-      {:else if !detail.refundRight.deadline || Date.parse(detail.refundRight.deadline)>Date.now()}
-       <p>{detail.refundRight.deadline ? `Ajukan sebelum ${eventDate(detail.refundRight.deadline)}.` : "Permintaan tersedia selama jadwal pengganti belum ditetapkan."}</p>
-       <label><input type="checkbox" bind:checked={refundConfirmed} disabled={refundBusy} /> Saya memilih refund seluruh order; tiket akan dinonaktifkan.</label>
-       <button class="button" type="button" disabled={refundBusy || !refundConfirmed} onclick={requestRefund}>{refundBusy ? "Mengajukan…" : "Ajukan refund penuh"}</button>
-      {:else}<p>Tenggat permintaan refund telah berakhir.</p>{/if}
-     </section>
+    <section class="recovery-panel" aria-labelledby="refund-right-title">
+      <h2 id="refund-right-title">Hak refund</h2>
+      {#if detail.refundRight}<p>Anda berhak meminta refund penuh untuk seluruh order: {formatRupiah.format(detail.total)}, termasuk biaya admin sebesar {formatRupiah.format(detail.adminFee)}.</p>
+      {:else if detail.refund}<p>Refund untuk order ini sudah ditangani backend dengan nominal {formatRupiah.format(detail.refund.amount)}.</p>
+      {:else}<p>Hak refund perubahan acara belum tersedia untuk order ini.</p>{/if}
+      <p>Setelah pengajuan tercatat, tiket seluruh order tidak dapat digunakan. Pengajuan belum berarti dana sudah kembali.</p>
+      {#if detail.refundRight && !detail.refundRight.requested && !detail.refund && !refundNeedsReview}
+        <label><input type="checkbox" bind:checked={refundConfirmed} disabled={refundBusy} /> Saya memahami refund mencakup seluruh order dan semua tiket akan dinonaktifkan.</label>
+        <button class="button" type="button" disabled={refundBusy || !refundConfirmed || Boolean(detail.refundRight.deadline && Date.parse(detail.refundRight.deadline) <= Date.now())} onclick={requestRefund}>{refundBusy ? "Mengajukan…" : "Ajukan refund penuh"}</button>
+      {/if}
+    </section>
+    <section class="recovery-panel" aria-labelledby="refund-deadline-title">
+      <h2 id="refund-deadline-title">Batas pengajuan</h2>
+      {#if refundNeedsReview}<p>Hasil pengajuan sedang diperiksa; jangan mengajukan lagi sebelum status dipastikan.</p>
+      {:else if detail.refundRight?.requested || detail.refund}<p>Pengajuan sudah tercatat; tenggat pengajuan tidak lagi berlaku.</p>
+      {:else if detail.refundRight && !detail.refundRight.deadline}<p>Tanpa tenggat selama penundaan acara.</p>
+      {:else if detail.refundRight?.deadline && Date.parse(detail.refundRight.deadline) > Date.now()}<p>Ajukan sebelum {eventDate(detail.refundRight.deadline)}.</p>
+      {:else if detail.refundRight?.deadline}<p>Tenggat berakhir pada {eventDate(detail.refundRight.deadline)}.</p>
+      {:else}<p>Tidak ada tenggat refund untuk order ini.</p>{/if}
+    </section>
+    {#if detail.refundRight || detail.refund || detail.status === "REFUND_PENDING" || detail.status === "REFUNDED"}
+      <section class="recovery-panel" aria-labelledby="refund-status-title">
+        <h2 id="refund-status-title">Status pengembalian dana</h2>
+        {#if refundNeedsReview}
+          <p>Hasil pengajuan belum dipastikan. Periksa status dari backend sebelum mencoba mengajukan lagi.</p>
+          <button class="button button-secondary" type="button" disabled={refundBusy} onclick={checkRefundStatus}>{refundBusy ? "Memeriksa…" : "Periksa status"}</button>
+        {:else if detail.refund || detail.refundRight?.requested || detail.status === "REFUND_PENDING" || detail.status === "REFUNDED"}
+          <p>{refundStatusLabel(detail.refund?.status ?? (detail.status === "REFUNDED" ? "SUCCEEDED" : detail.status === "REFUND_PENDING" ? "PROCESSING" : undefined), detail.refundRight?.requested)}</p>
+          <p>Nominal pengembalian: {formatRupiah.format(detail.refund?.amount ?? detail.total)}.</p>
+          {#if detail.refund?.status === "MANUAL_REQUIRED" || detail.refund?.status === "FAILED"}<p>Tunggu penanganan tim untuk pembaruan berikutnya.</p>{/if}
+          {#if detail.refund?.status !== "SUCCEEDED" && detail.status !== "REFUNDED"}
+            <button class="button button-secondary" type="button" disabled={refundBusy} onclick={checkRefundStatus}>{refundBusy ? "Memeriksa…" : "Periksa status"}</button>
+          {/if}
+        {:else}<p>Pengajuan refund belum tercatat.</p>{/if}
+      </section>
     {/if}
     <p role="status" aria-live="polite" tabindex="-1" bind:this={refundResult}>{refundMessage}</p>
     {#if detail.status === "PAID" && detail.currentEvent?.startsAt !== null && !detail.refundRight?.requested}

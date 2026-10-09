@@ -2,6 +2,7 @@
   import { currentStart, eventStatus } from "../../lib/event-changes.ts";
   import { onMount } from "svelte";
   import { eventDate } from "../../lib/concerts.ts";
+  import { buyerOrderStatusLabel, refundStatusLabel } from "../../lib/buyer-refund.ts";
   import { ApiError, type ApiTicket } from "../../lib/api.ts";
   import { loadBuyerOrderTickets, uniqueBuyerTickets, type BuyerOrderTickets } from "../../lib/buyer-tickets.ts";
   import { hasPersistentTicketAccess, listOrderAccess, saveOrderAccess } from "../../lib/order-access.ts";
@@ -109,7 +110,7 @@
               <div>
                 <b>Order {order.access.reference}</b>
                 {#if order.detail}
-                  <p>Status: {order.detail.status === "PAID" ? "Dibayar" : order.detail.status === "PENDING" ? "Menunggu pembayaran" : order.detail.status === "EXPIRED" ? "Kedaluwarsa" : "Dibatalkan"}</p>
+                  <p>Status: {buyerOrderStatusLabel(order.detail.status)}{#if order.detail.refund} · {refundStatusLabel(order.detail.refund.status)}{/if}</p>
                   {#if order.error}<p>{order.error.message}</p>{/if}
                 {:else if order.error instanceof ApiError && order.error.code === "ACCESS_TOKEN_EXPIRED"}
                   <p>Akses order di browser ini sudah kedaluwarsa.</p>
@@ -135,7 +136,7 @@
             <div>
               <b>Order {order.access.reference}</b>
               {#if order.detail}
-                <p>Status: {order.detail.status === "PAID" ? "Dibayar" : order.detail.status === "PENDING" ? "Menunggu pembayaran" : order.detail.status === "EXPIRED" ? "Kedaluwarsa" : "Dibatalkan"}</p>
+                <p>Status: {buyerOrderStatusLabel(order.detail.status)}{#if order.detail.refund} · {refundStatusLabel(order.detail.refund.status)}{/if}</p>
                 {#if order.error}<p>{order.error.message}</p>{/if}
               {:else if order.error instanceof ApiError && order.error.code === "ACCESS_TOKEN_EXPIRED"}
                 <p>Akses order di browser ini sudah kedaluwarsa.</p>
