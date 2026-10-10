@@ -47,7 +47,8 @@ BREAKDOWN = {"total": STAGE, "matured": STAGE, "pendingObservation": 0,
 KNOWN_API = {
     ("GET", path) for path in ("/staff/me", "/events", "/admin/events", "/admin/staff", "/admin/orders",
         "/admin/payment-cases", "/admin/email-jobs", "/admin/operations", "/admin/reports/sales",
-        "/admin/reports/conversion", "/admin/reports/attendance", "/admin/check-ins", "/staff/ticket-status")
+        "/admin/reports/sales.csv", "/admin/reports/conversion", "/admin/reports/attendance",
+        "/admin/reports/attendance.csv", "/admin/check-ins", "/staff/ticket-status")
 } | {("POST", "/staff/login"), ("POST", "/staff/check-ins"), ("POST", "/staff/logout")}
 
 
@@ -119,9 +120,11 @@ def body(path, mode, role):
             "history": [{"action": "RETRY", "actorName": "Admin Event", "createdAt": "2026-10-10T02:00:00Z", "data": {"retryJobId": "f" * 32, "kind": "TICKETS"}}]}
     if endpoint == f"/admin/email-jobs/{'e' * 32}/retry": return 200, {"jobId": "e" * 32, "retryJobId": "f" * 32, "status": "PENDING"}
     if endpoint == "/admin/operations":
-        return 200, {"collectedAt": "2026-10-10T03:00:00Z", "api5xxLast5m": 0, "failedEmailJobs": 0,
-            "oldestPendingEmailSeconds": 0, "openPaymentCases": 0, "openRefunds": 0, "heldTickets": 0,
-            "pendingPayments": 0, "workers": [], "alerts": []}
+        return 200, {"collectedAt": "2026-10-10T03:00:00Z", "api5xxLast5m": 0 if empty else 2, "failedEmailJobs": 0 if empty else 1,
+            "oldestPendingEmailSeconds": 0 if empty else 420, "openPaymentCases": 0 if empty else 1, "openRefunds": 0 if empty else 1,
+            "heldTickets": 0 if empty else 3, "pendingPayments": 0 if empty else 2,
+            "workers": [] if empty else [{"name": "payment-reconcile", "running": False, "lastFinishedAt": "2026-10-10T02:58:00Z", "lastSuccessAt": "2026-10-10T02:55:00Z", "consecutiveFailures": 1}],
+            "alerts": [] if empty else ["Pembayaran tertunda perlu diperiksa."]}
     if endpoint == "/admin/reports/sales":
         amount = ZERO if empty else {"successfulTransactions": 2, "paymentAmount": 560000, "refundAmount": 280000,
             "netAmount": 280000, "unfinishedRefunds": 1, "openReconciliationCases": 1}
@@ -131,14 +134,15 @@ def body(path, mode, role):
             "filterOptions": {"events": [{"id": EVENT["id"], "name": EVENT["artist"]}]}, "dataUpdatedAt": "2026-10-10T03:00:00Z"}
     if endpoint == "/admin/reports/conversion":
         stages = STAGE if empty else {"detail": 47, "reservation": 19, "order": 15, "paymentStarted": 11, "paymentSucceeded": 8}
-        breakdown = {"total": stages, "matured": stages, "pendingObservation": 3,
-            "lost": {"detailToReservation": 28, "reservationToOrder": 4, "orderToPayment": 4, "paymentToSuccess": 3}}
+        pending = 0 if empty else 3
+        breakdown = {"total": stages, "matured": stages, "pendingObservation": pending,
+            "lost": {"detailToReservation": 28 if not empty else 0, "reservationToOrder": 4 if not empty else 0, "orderToPayment": 4 if not empty else 0, "paymentToSuccess": 3 if not empty else 0}}
         return 200, {"period": {"eventId": "", "device": "", "dateFrom": "2026-09-11", "dateTo": "2026-10-10",
             "timeZone": "Asia/Jakarta", "observationHours": 24}, "summary": breakdown,
             "byEvent": [] if empty else [{**breakdown, "eventId": EVENT["id"], "eventName": EVENT["artist"]}],
             "byDevice": [] if empty else [{**breakdown, "device": "mobile"}, {**breakdown, "device": "desktop"}],
             "blockers": [] if empty else [{"kind": "PAYMENT_FAILURE", "reason": "provider_timeout", "count": 2}],
-            "unattributedReservations": 4, "unattributedPayments": 2, "dataUpdatedAt": "2026-10-10T03:00:00Z"}
+            "unattributedReservations": None if mode == "missing-data" else 4, "unattributedPayments": None if mode == "missing-data" else 2, "dataUpdatedAt": "2026-10-10T03:00:00Z"}
     if endpoint == "/admin/reports/attendance":
         amounts = {"capacity": 0, "available": 0, "issued": 0, "eligible": 0, "heldForRefund": 0, "checkedIn": 0, "attendanceRate": None}
         counts = amounts if empty else {"capacity": 100, "available": 42, "issued": 58, "eligible": 55, "heldForRefund": 3, "checkedIn": 21, "attendanceRate": 38.2}
@@ -174,7 +178,7 @@ async def main():
     for previous in output.glob("*.png"):
         previous.unlink()
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True).stdout.strip()
-    captures, unexpected, observed_api, unhandled_api = [], [], set(), []
+    captures, unexpected, observed_api, observed_csv_queries, unhandled_api = [], [], set(), [], []
     routes = [
         ("login", "/admin/login", "PUBLIC"), ("events", "/admin/events", "ADMIN"),
         ("staff", "/admin/staff", "ADMIN"), ("orders", "/admin/orders", "ADMIN"),
@@ -192,6 +196,8 @@ async def main():
         for viewport, size in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
             for name, route, role in routes:
                 modes = ("standard", "loading", "empty", "error") + (("rejected", "unknown-checkedin", "camera-exit") if name == "scanner" else ())
+                if name == "conversion": modes += ("missing-data",)
+                if name == "operations": modes += ("stale",)
                 for mode in modes:
                     context = await browser.new_context(viewport=size, timezone_id="Asia/Jakarta", color_scheme="dark")
                     if role != "PUBLIC":
@@ -200,6 +206,7 @@ async def main():
                         await context.add_init_script("""if(!sessionStorage.getItem('cameraStops'))sessionStorage.setItem('cameraStops','0'); window.__cameraTrackStops=Number(sessionStorage.getItem('cameraStops')); const stream=new MediaStream(); stream.getTracks=()=>[{stop(){window.__cameraTrackStops+=1;sessionStorage.setItem('cameraStops',String(window.__cameraTrackStops))}}]; Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>stream}}); HTMLMediaElement.prototype.play=async function(){return};""")
                     page = await context.new_page()
                     page_errors = []
+                    fixture_calls = {}
                     page.on("pageerror", lambda error: page_errors.append(str(error)))
 
                     async def fixture(request):
@@ -213,8 +220,20 @@ async def main():
                             unhandled_api.append(f"{signature[0]} {signature[1]}")
                             await request.fulfill(status=501, json={"error": {"code": "UNHANDLED_FIXTURE", "message": "API fixture belum dipetakan."}})
                             return
+                        if endpoint in ("/admin/reports/sales.csv", "/admin/reports/attendance.csv"):
+                            observed_csv_queries.append({"endpoint": endpoint, "query": parsed.query})
+                            await request.fulfill(status=200, body="laporan,fixture\n", headers={
+                                "Content-Type": "text/csv; charset=utf-8",
+                                "Content-Disposition": 'attachment; filename="laporan-fixture.csv"',
+                            })
+                            return
                         if mode == "loading" and parsed.path != "/api/v1/staff/me":
                             await asyncio.sleep(1.2)
+                        if name == "operations" and mode == "stale" and endpoint == "/admin/operations":
+                            fixture_calls[endpoint] = fixture_calls.get(endpoint, 0) + 1
+                            if fixture_calls[endpoint] > 1:
+                                await request.fulfill(status=503, json={"error": {"code": "SERVICE_UNAVAILABLE", "message": "Snapshot operasional belum tersedia."}})
+                                return
                         status, data = body(parsed.path + ("?" + parsed.query if parsed.query else ""), mode, role)
                         if status == 204: await request.fulfill(status=status)
                         else: await request.fulfill(status=status, json=data)
@@ -231,6 +250,15 @@ async def main():
                         await page.locator(".history-filter-form select").first.select_option(EVENT["id"])
                         await page.get_by_role("button", name="Terapkan", exact=True).click()
                         await page.wait_for_timeout(400)
+                    if name == "operations" and mode == "stale":
+                        await page.get_by_role("heading", name="Penanganan yang tersedia").wait_for()
+                        await page.get_by_role("button", name="Muat ulang", exact=True).click()
+                        await page.get_by_role("alert").wait_for()
+                        await page.get_by_text("Snapshot terakhir yang berhasil dimuat.", exact=False).wait_for()
+                    if name == "operations" and mode == "standard":
+                        for href in ("/admin/issues", "/admin/orders"):
+                            if not await page.locator(f".ops-action-list a[href='{href}']").count():
+                                raise AssertionError(f"operations page is missing the existing follow-up link {href}")
                     if name == "issues" and mode == "standard":
                         await page.get_by_role("button", name="Detail", exact=True).first.click()
                         await page.get_by_role("heading", name="Kasus TO-0123456789abcdef0123").wait_for()
@@ -333,7 +361,8 @@ async def main():
                                 await page.keyboard.press("Enter")
                                 dialog = page.locator("#admin-mobile-menu")
                                 if not await dialog.evaluate("dialog => dialog.open"):
-                                    raise AssertionError(f"mobile admin menu did not open on {route}")
+                                    details = await dialog.evaluate("dialog => ({open:dialog.open,html:dialog.outerHTML,button:document.querySelector('.admin-menu-trigger')?.outerHTML})")
+                                    raise AssertionError(f"mobile admin menu did not open on {route}: {details}")
                                 close_button = dialog.get_by_role("button", name="Tutup", exact=True)
                                 if not await close_button.evaluate("button => button === document.activeElement"):
                                     raise AssertionError(f"mobile menu focus did not move to close button on {route}")
@@ -364,6 +393,18 @@ async def main():
                             narrow_path = f"{name}-320px.png"
                             await page.screenshot(path=str(output / narrow_path), full_page=False, animations="disabled")
                             capture["files"].append(narrow_path)
+                    if name in ("sales", "attendance") and mode == "standard":
+                        async with page.expect_download() as download_info:
+                            await page.get_by_role("button", name="Ekspor CSV", exact=True).click()
+                        download = await download_info.value
+                        if not download.suggested_filename.endswith(".csv"):
+                            raise AssertionError(f"CSV export returned an unexpected filename: {download.suggested_filename}")
+                        exported = observed_csv_queries[-1]
+                        query = dict(part.split("=", 1) for part in exported["query"].split("&") if "=" in part)
+                        if name == "sales" and query != {"dateFrom": "2026-09-11", "dateTo": "2026-10-10"}:
+                            raise AssertionError(f"sales CSV did not use the displayed snapshot filters: {query}")
+                        if name == "attendance" and query != {"eventId": "nusa-malam"}:
+                            raise AssertionError(f"attendance CSV did not use the displayed snapshot filters: {query}")
                     if page_errors:
                         capture["pageErrors"] = page_errors
                     captures.append(capture)
@@ -398,7 +439,7 @@ async def main():
     manifest = {"phase": args.phase, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit,
         "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844"},
         "theme": "dark", "timezone": "Asia/Jakarta", "api": "All API requests are intercepted; responses use local fixtures and unmapped requests fail the capture.",
-        "apiRequests": sorted(observed_api), "unhandledApiRequests": unhandled_api,
+        "apiRequests": sorted(observed_api), "csvQueries": observed_csv_queries, "unhandledApiRequests": unhandled_api,
         "pageErrors": [{"route": c["route"], "scenario": c["scenario"], "viewport": c["viewport"], "errors": c["pageErrors"]} for c in captures if c.get("pageErrors")],
         "captures": captures, "unexpectedRedirects": unexpected}
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
