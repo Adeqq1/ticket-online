@@ -11,6 +11,9 @@
 .results-topline { display: flex; justify-content: space-between; gap: 20px; align-items: baseline; margin-top: 10px; }
 .sample-note, .results-count { margin: 0; color: var(--muted); font-size: 13px; }
 .results-count { color: var(--ink); font-weight: 700; }
+.active-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-chip { min-height: 44px; padding: 0 12px; border: 1px solid var(--control-line); border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.filter-chip span { margin-left: 6px; color: var(--accent); font-size: 17px; }
 .filter-tools { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 8px; }
 .filters { min-width: 0; flex: 1; }
 .filters summary { min-height: 48px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; cursor: pointer; list-style: none; }
@@ -20,7 +23,10 @@
 .filters summary strong { font-size: 15px; }
 .filters summary span { color: var(--muted); font-size: 13px; }
 .filters summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-.filter-fields { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, .8fr) minmax(220px, 1fr); gap: 20px; padding: 12px 0 18px 40px; border-bottom: 1px solid var(--line); }
+.filter-fields { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(180px, 1fr) minmax(180px, .8fr) minmax(220px, 1fr); gap: 20px; padding: 12px 0 18px 40px; border-bottom: 1px solid var(--line); }
+.filter-sort select, .filter-price input[type="text"] { width: 100%; min-height: 48px; border: 1px solid var(--control-line); border-radius: var(--radius); padding: 0 12px; background: transparent; color: var(--ink); }
+.price-toggle { display: flex !important; min-height: 44px; align-items: center; gap: 10px; }
+.price-toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
 .genre-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .genre-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .genre-chips label { margin: 0; }
@@ -31,7 +37,8 @@
 .filter-city, .filter-price { min-width: 0; }
 .filter-price > div { display: grid; gap: 8px; }
 .filter-price output { color: var(--accent); font-size: 14px; font-weight: 700; }
-.filter-price input { width: 100%; accent-color: var(--accent); }
+.filter-price output { display: block; margin-top: 8px; }
+.field-error { margin: 8px 0 0; color: var(--danger, #b42318); font-size: 13px; }
 .reset-filters { min-height: 44px; padding: 0 4px; font-size: 14px; }
 .concert-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .concert-card { position: relative; min-width: 0; overflow: hidden; border-radius: var(--radius); background: var(--surface); transition: transform 180ms ease; }

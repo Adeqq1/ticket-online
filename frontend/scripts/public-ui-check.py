@@ -103,7 +103,15 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
         return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Layanan sedang tidak tersedia."}}
     events = [event("POSTPONED" if state == "changed" else "SCHEDULED")]
     if endpoint == "/api/v1/events":
-        if scenario == "phase21-search":
+        if scenario == "phase26-search":
+            base = events[0]
+            events = [
+                base,
+                {**base, "id": "jazz-mahal", "artist": "Jazz Mahal", "city": "Makassar", "genre": "Jazz", "startsAt": "2027-08-10T19:30:00+07:00", "price": 2500000},
+                {**base, "id": "melodi-medan", "artist": "Melodi Medan", "city": "Medan", "genre": "Dangdut", "startsAt": "2027-09-01T19:30:00+07:00", "price": 100000},
+                *[{**base, "id": f"tambahan-{index}", "artist": f"Konser Tambahan {index}", "startsAt": f"2027-10-{index:02d}T19:30:00+07:00"} for index in range(1, 7)],
+            ]
+        elif scenario == "phase21-search":
             events = [{**events[0], "id": f"fixture-{index}", "artist": f"Konser Contoh {index}", "venue": f"Venue {index}"} for index in range(1, 5)]
             events.append({**events[0], "id": "fixture-fifth", "artist": "Panggung Terakhir", "venue": "Gedung Musik", "image": "https://picsum.photos/seed/nusa-malam/900/1100"})
         elif scenario == "phase21-card-states":
@@ -577,12 +585,47 @@ async def main():
                 await page.locator(".poster-unavailable").wait_for(state="attached")
                 assert await page.locator(".poster-unavailable").count() == 1, "A failed event poster should leave the neutral poster fallback."
 
+                await page.set_viewport_size({"width": 390, "height": 844})
+                await page.evaluate("sessionStorage.removeItem('ticket-online:catalog:v1')")
+                await page.goto(BASE_URL + "/konser?scenario=phase26-search", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Jazz Mahal").wait_for()
+                assert await page.locator(".concert-card").count() == 9, "Every catalog event should be visible before the user applies filters."
+                assert await page.locator("#concert-city option").all_text_contents() == ["Semua kota", "Jakarta", "Makassar", "Medan"], "City filters should follow unique API catalog values."
+                assert await page.locator(".genre-chips span").all_text_contents() == ["Dangdut", "Indie", "Jazz"], "Genre filters should follow unique API catalog values."
+                assert (await page.locator(".concert-card h3").all_text_contents())[0] == "Jazz Mahal", "The default catalog order should use the nearest event date."
+                await page.locator(".filters summary").click()
+                await page.locator("#concert-sort").select_option("price")
+                assert (await page.locator(".concert-card h3").all_text_contents())[0] == "Melodi Medan", "Price ordering should use the loaded ticket prices."
+                await page.get_by_label("Batasi harga").check()
+                assert await page.locator("#concert-price").input_value() == "2500000", "Price controls should initialize from the catalog maximum."
+                await page.locator("#concert-price").fill("200000")
+                assert await page.locator(".concert-card h3").all_text_contents() == ["Melodi Medan"], "An active maximum price should include all matching catalog events."
+                await page.locator("#concert-city").select_option(label="Medan")
+                await page.locator("#concert-query").fill("Melodi")
+                assert await page.locator(".filter-chip").count() == 3, "Each active catalog filter should have its own removable chip."
+                await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+                await page.wait_for_timeout(100)
+                saved_metrics = await page.evaluate("({y:window.scrollY,height:document.documentElement.scrollHeight,cards:document.querySelectorAll('.concert-card').length,session:sessionStorage.getItem('ticket-online:catalog:v1')})")
+                await page.locator(".concert-card-link").first.click()
+                await page.wait_for_url("**/konser/melodi-medan")
+                await page.go_back(wait_until="domcontentloaded")
+                await page.wait_for_function("target => Math.abs(window.scrollY - target) < 100", arg=saved_metrics["y"])
+                assert await page.locator("#concert-query").input_value() == "Melodi", "Catalog search should survive returning from detail."
+                restored_metrics = await page.evaluate("({y:window.scrollY,height:document.documentElement.scrollHeight,cards:document.querySelectorAll('.concert-card').length,session:sessionStorage.getItem('ticket-online:catalog:v1')})")
+                assert abs(restored_metrics["y"] - saved_metrics["y"]) < 100, f"Catalog scroll position should be restored after returning from detail: saved {saved_metrics}, restored {restored_metrics}."
+                assert await page.locator(".filter-chip").count() == 3, "Catalog filters should survive returning from detail."
+                await page.locator(".filter-chip").filter(has_text="Kota: Medan").click()
+                assert await page.locator(".filter-chip").count() == 2, "A filter chip should remove only its own filter."
+
+                await page.evaluate("sessionStorage.removeItem('ticket-online:catalog:v1')")
                 await page.goto(BASE_URL + "/konser", wait_until="domcontentloaded")
                 await page.locator("#concert-query").fill("Nusa")
                 await page.locator("#concert-query").press("Enter")
-                await page.locator(".filters summary").click()
+                if not await page.locator(".filters").evaluate("element => element.open"):
+                    await page.locator(".filters summary").click()
                 await page.locator("#concert-city").select_option(label="Jakarta")
-                await page.locator(".filters summary").click()
+                if await page.locator(".filters").evaluate("element => element.open"):
+                    await page.locator(".filters summary").click()
                 assert "Jakarta" in await page.locator(".filters summary").inner_text(), "The closed filter summary should show the active city."
                 await page.locator(".reset-filters").click()
                 assert await page.locator("#concert-city").input_value() == "", "Reset should clear the city filter."

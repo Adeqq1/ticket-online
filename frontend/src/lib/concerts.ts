@@ -1,5 +1,5 @@
 export type EventState = { id: string; status: "SCHEDULED" | "POSTPONED" | "RESCHEDULED" | "CANCELLED"; version: number; salesPaused: boolean; startsAt: string | null; announcement: string; refundDeadline: string | null };
-export type Genre = "Rock" | "Pop" | "Indie";
+export type Genre = string;
 export type TicketStatus = "Early Bird" | "Presale" | "Sold Out";
 export type StageZone = { id: string; name: string; description: string };
 export type TicketTier = { id: string; name: string; zoneId: string; price: number; stock: number; maxPerOrder: number; benefit: string; gate: string; seating: "assigned" | "free-standing" };
