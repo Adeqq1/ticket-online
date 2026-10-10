@@ -2,14 +2,16 @@
   import { onDestroy, onMount } from "svelte";
   import { parseCameraScanCode } from "../../lib/scanner.ts";
 
-  let { enabled, busy, locked, resumeCamera, canContinue, onNext, onCode }: {
-    enabled: boolean; busy: boolean; locked: boolean; resumeCamera: boolean; canContinue: boolean;
-    onNext: () => boolean; onCode: (code: string) => void;
+  let { enabled, busy, locked, resumeCamera, onCode }: {
+    enabled: boolean; busy: boolean; locked: boolean; resumeCamera: boolean;
+    onCode: (code: string) => void;
   } = $props();
   let video: HTMLVideoElement | undefined;
+  let cameraHeading: HTMLHeadingElement | undefined;
   let stream: MediaStream | undefined;
   let generation = 0;
   let frameTimer: number | undefined;
+  let resumeRequested = false;
   let starting = $state(false);
   let active = $state(false);
   let status = $state("Kamera belum aktif. Masukkan kode secara manual bila kamera tidak tersedia.");
@@ -93,12 +95,15 @@
     }
   }
 
-  function scanNext() {
-    if (!canContinue || !onNext()) return;
-    void startCamera(true);
-  }
-
-  $effect(() => { if (!enabled || busy) stopCamera(); });
+  $effect(() => {
+    if (!resumeCamera) resumeRequested = false;
+    if (!enabled || busy || locked) stopCamera();
+    else if (resumeCamera && !resumeRequested) {
+      resumeRequested = true;
+      void startCamera();
+      cameraHeading?.focus();
+    }
+  });
 
   function stopForPageExit() { stopCamera("Kamera dihentikan. Tekan tombol untuk memulai pemindaian lagi."); }
 
@@ -116,11 +121,10 @@
 </script>
 
 <section class="camera-scanner" aria-labelledby="camera-title">
-  <div class="camera-scanner-heading"><h3 id="camera-title">Scan dengan kamera</h3><span>QR diproses di perangkat ini</span></div>
+  <div class="camera-scanner-heading"><h3 id="camera-title" bind:this={cameraHeading} tabindex="-1">Scan dengan kamera</h3><span>QR diproses di perangkat ini</span></div>
   <video bind:this={video} muted playsinline aria-label="Pratinjau kamera untuk memindai QR e-ticket" class:camera-active={active}></video>
   <div class="camera-scanner-controls">
-    {#if locked && resumeCamera}<button class="scan-submit camera-start" type="button" disabled={!canContinue} onclick={scanNext}>Scan berikutnya</button>
-    {:else if active || starting}<button class="staff-text-button" type="button" onclick={() => stopCamera("Kamera dihentikan.")}>Hentikan kamera</button>
+    {#if active || starting}<button class="staff-text-button" type="button" onclick={() => stopCamera("Kamera dihentikan.")}>Hentikan kamera</button>
     {:else}<button class="scan-submit camera-start" type="button" disabled={!enabled || busy || locked} onclick={() => startCamera()}>{busy ? "Memverifikasi…" : "Aktifkan kamera"}</button>{/if}
     <p role="status" aria-live="polite">{status}</p>
   </div>

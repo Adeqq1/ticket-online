@@ -36,3 +36,97 @@
 @media (max-width: 820px) { .scan-topbar { min-height: 64px; flex-wrap: wrap; gap: 8px; padding: 10px 0; }.scan-live { flex-wrap: wrap; justify-content: flex-end; gap: 8px 12px; }.scan-staff-name { order: 1; }.scan-assignment-name { order: 2; }.scan-live .staff-text-button { order: 3; } }
 @media (max-width: 540px) { .scan-topbar { align-items: flex-start; }.scan-live { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; width: 100%; max-width: none; font-size: 12px; }.scan-live .scan-live-state { display: inline; grid-column: 2; grid-row: 1; }.scan-live .scan-staff-name { grid-column: 3; grid-row: 1; min-width: 0; text-align: right; }.scan-live .scan-assignment-name { grid-column: 2; grid-row: 2; width: auto !important; height: auto !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; text-align: left; overflow-wrap: anywhere; }.scan-live .staff-text-button { grid-column: 3; grid-row: 2; }.scan-brand { min-height: 44px; } }
 .ticket-detail-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }.ticket-detail-card > div, .ticket-detail-card strong { min-width: 0; overflow-wrap: anywhere; }
+
+/* Phase 33: keep the scanner workspace ahead of the decorative header. */
+.scan-content { padding-top: 34px; }
+.scan-brand { min-height: 44px; }
+.scan-heading { align-items: center; gap: 24px; margin-bottom: 24px; }
+.scan-heading h1 { font-size: clamp(38px, 4.2vw, 58px); line-height: .98; letter-spacing: -.065em; }
+.scan-kicker { margin-bottom: 10px; font-size: 14px; letter-spacing: .1em; }
+.scan-intro { margin-top: 12px; font-size: 16px; }
+.scan-event-meta { min-width: 260px; padding-left: 16px; font-size: 16px; }
+.scan-event-meta select { min-height: 48px; font-size: 16px; }
+.meta-label, .panel-index, .keyboard-hint, .result-label, .result-status, .ticket-detail-card span,
+.result-footer, .strip-label, .scan-footer, .camera-scanner-heading span { font-size: 14px; }
+.scanner-grid { align-items: stretch; }
+.scanner-panel, .result-panel { padding: clamp(20px, 2.5vw, 30px); }
+.scan-form { margin-top: 24px; }
+.scan-form label, .input-note, .camera-scanner-controls p, .scan-status-check p,
+.result-detail, .result-placeholder { font-size: 14px; }
+.scan-form label { margin-bottom: 8px; }
+.scan-input-wrap, .scan-submit { min-height: 48px; }
+.scan-input-wrap input { min-height: 44px; }
+.scan-input-wrap { flex-wrap: wrap; }
+.scan-submit { cursor: pointer; }
+.camera-scanner { margin-top: 18px; }
+.camera-scanner-heading h3 { font-size: 16px; }
+.camera-scanner video { max-height: 270px; }
+.camera-scanner .camera-start { min-height: 48px; }
+.result-panel { min-height: 0; }
+.result-main { margin: 0; padding: 28px 0 24px; }
+.result-icon { width: 52px; height: 52px; margin-bottom: 16px; }
+.result-main h2 { font-size: clamp(28px, 3.1vw, 42px); line-height: 1.02; letter-spacing: -.05em; }
+.result-status { font-weight: 700; }
+.result-denied .result-icon { color: var(--scan-red); border-color: var(--scan-red); }
+.result-denied .result-signal, .result-denied .footer-dot { background: var(--scan-red); }
+.result-denied .result-status { color: var(--scan-red); }
+.result-uncertain { border-color: #d9a84f; background: #211e17; }
+.result-uncertain .result-icon { color: #f0c36c; border-color: #f0c36c; }
+.result-uncertain .result-status { color: #f0c36c; }
+.result-uncertain .result-signal, .result-uncertain .footer-dot { background: #f0c36c; }
+.result-pending { border-color: #73817a; }
+.result-pending .result-icon { color: #b3c0b9; border-color: #73817a; }
+.ticket-detail-card { gap: 14px; padding: 16px 0; }
+.ticket-detail-card span { font-family: "Courier New", monospace; }
+.ticket-detail-card strong { font-size: 16px; }
+.result-placeholder { min-height: 56px; }
+.result-placeholder span { color: var(--scan-muted); }
+.result-footer { padding-top: 14px; letter-spacing: .02em; }
+.footer-dot { background: var(--scan-muted); }
+.scan-status-check { border-color: #d9a84f; background: #211e17; }
+.scan-status-check h3 { font-size: 16px; }
+.scan-status-check .staff-secondary-button, .scan-status-check .staff-text-button,
+.next-scan { min-height: 48px; }
+.next-scan { width: 100%; margin-top: 14px; }
+.result-panel :focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 4px; }
+#scan-result-title:focus { outline: none; }
+
+@media (max-width: 820px) {
+  .scan-content { padding-top: 22px; }
+  .scan-heading { gap: 16px; margin-bottom: 16px; }
+  .scan-heading h1 { font-size: clamp(34px, 8vw, 48px); }
+  .scan-intro { margin-top: 8px; }
+  .scan-event-meta { min-width: 0; padding: 0; border: 0; }
+  .scanner-grid { gap: 12px; }
+  .scanner-grid.scan-has-result .result-panel { order: -1; }
+  .scanner-panel, .result-panel { padding: 20px; }
+  .result-main { padding: 20px 0; }
+  .result-main h2 { font-size: clamp(27px, 7vw, 36px); }
+}
+
+@media (max-width: 540px) {
+  .scan-content { padding-top: 16px; }
+  .scan-heading { gap: 12px; margin-bottom: 12px; }
+  .scan-heading h1 { font-size: clamp(32px, 9vw, 40px); line-height: 1; }
+  .scan-kicker { margin-bottom: 6px; font-size: 14px; }
+  .scan-intro { font-size: 16px; }
+  .scan-event-meta { gap: 4px; }
+  .scanner-panel, .result-panel { padding: 18px 16px; }
+  .panel-topline h2 { font-size: 17px; }
+  .scan-input-wrap { gap: 8px; padding: 8px 10px; }
+  .scan-input-wrap input { width: calc(100% - 34px); }
+  .scan-input-wrap .scan-submit { flex: 1 0 100%; width: 100%; }
+  .input-note { margin-top: 8px; }
+  .camera-scanner-heading span { font-size: 14px; }
+  .camera-scanner video { max-height: 240px; }
+  .result-main { padding: 16px 0; }
+  .result-icon { width: 46px; height: 46px; margin-bottom: 12px; font-size: 24px; }
+  .result-status { margin-bottom: 8px; }
+  .ticket-detail-card { gap: 12px 8px; }
+  .ticket-detail-card span { font-size: 14px; }
+  .ticket-detail-card strong { font-size: 16px; }
+  .scan-status-check { padding: 14px; }
+  .session-strip { grid-template-columns: 1fr 1fr; }
+  .session-strip strong { font-size: 16px; }
+  .strip-label, .scan-footer { font-size: 14px; }
+}

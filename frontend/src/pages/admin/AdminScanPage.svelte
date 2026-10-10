@@ -3,6 +3,7 @@
   import { getEvents } from "../../lib/api.ts";
   import type { Staff } from "../../lib/api.ts";
   import { checkTicketStatus, continueToNextScan, submitScan, type ScannerState } from "../../lib/scanner.ts";
+  import { orderStatusLabel } from "../../lib/admin-operations.ts";
   import CameraScanner from "../../components/admin/CameraScanner.svelte";
 
   let { accessToken, staff, sessionReady, onUnauthorized, onProfile, onLogout, loggingOut }: {
@@ -18,6 +19,7 @@
   let eventNames = $state<Record<string, string>>({});
   let code = $state("");
   let codeInput: HTMLInputElement | undefined;
+  let resultHeading: HTMLHeadingElement | undefined;
   let scan = $state<ScannerState>({ busy: false, status: "idle", resultTicket: null, expectedGate: "", checkedInAt: "", resultDetail: "", scanCount: 0, lastScan: "Belum ada scan", locked: false, lastAttempt: null, statusChecking: false, ticketStatus: null, statusCheckError: "" });
   let scanSource = $state<"camera" | "manual" | null>(null);
   let unknownAcknowledged = $state(false);
@@ -48,11 +50,9 @@
     unknownAcknowledged = false;
     code = value;
     await submitScan(scan, accessToken, assignment, value, onProfile, onUnauthorized);
-    if (scan.status !== "unknown") {
-      code = "";
-      await tick();
-      codeInput?.focus();
-    }
+    if (scan.status !== "unknown") code = "";
+    await tick();
+    resultHeading?.focus();
   }
 
   async function handleScan(event: SubmitEvent) {
@@ -63,9 +63,12 @@
   function handleNextScan() {
     if (!continueToNextScan(scan, unknownAcknowledged)) return false;
     unknownAcknowledged = false;
-    scanSource = null;
     code = "";
-    void tick().then(() => codeInput?.focus());
+    void tick().then(() => {
+      if (scanSource === "camera") return;
+      scanSource = null;
+      codeInput?.focus();
+    });
     return true;
   }
 
@@ -97,7 +100,7 @@
       </div>
     </section>
 
-    <section class="scanner-grid" aria-label="Area scanner gate">
+    <section class:scan-has-result={scan.locked || scan.busy} class="scanner-grid" aria-label="Area scanner gate">
       <div class="scanner-column">
         <div class="scanner-panel">
           <div class="panel-topline"><span class="panel-index">01</span><h2>Masukkan kode tiket</h2><span class="keyboard-hint">Enter ↵</span></div>
@@ -106,25 +109,38 @@
             <div class="scan-input-wrap"><span aria-hidden="true">⌁</span><input id="ticket-code" bind:this={codeInput} bind:value={code} placeholder="Contoh: ET-…" autocomplete="off" spellcheck="false" required disabled={scan.busy || scan.locked || !assignment} aria-describedby="ticket-code-note" /><button class="scan-submit" type="submit" disabled={scan.busy || scan.locked || !assignment}>{scan.busy ? "Memeriksa…" : "Verifikasi"} <span aria-hidden="true">↗</span></button></div>
             <p id="ticket-code-note" class="input-note">Masukkan kode ET- dari e-ticket. Scanner keyboard dapat langsung mengetik kode di sini.</p>
           </form>
-          <CameraScanner enabled={Boolean(assignment) && sessionReady} busy={scan.busy || scan.statusChecking || loggingOut} locked={scan.locked} resumeCamera={scanSource === "camera"} canContinue={!scan.busy && !scan.statusChecking && (scan.status !== "unknown" || scan.ticketStatus?.status === "CHECKED_IN" || unknownAcknowledged)} onNext={handleNextScan} onCode={(value) => scanCode(value, "camera")} />
-          {#if scan.locked && scanSource === "manual"}<button class="scan-submit next-scan" type="button" disabled={scan.busy || scan.statusChecking || (scan.status === "unknown" && scan.ticketStatus?.status !== "CHECKED_IN" && !unknownAcknowledged)} onclick={handleNextScan}>Scan berikutnya</button>{/if}
-          {#if scan.status === "unknown"}<section class="scan-status-check" aria-labelledby="status-check-title"><h3 id="status-check-title">Hasil check-in belum diketahui</h3><p>Gate tetap ditahan sampai status tiket diperiksa.</p><button class="staff-secondary-button" type="button" disabled={scan.statusChecking || scan.busy} onclick={handleStatusCheck}>{scan.statusChecking ? "Memeriksa status…" : "Periksa status"}</button>{#if scan.ticketStatus}<p role="status">{scan.ticketStatus.status === "CHECKED_IN" ? "Check-in tiket sudah tercatat." : `Belum tercatat saat diperiksa. Status order: ${scan.ticketStatus.orderStatus}. Ini belum memastikan permintaan sebelumnya gagal.`}</p>{#if scan.ticketStatus.status === "CHECKED_IN" && scan.ticketStatus.checkedInAt}<p>Waktu check-in: <time datetime={scan.ticketStatus.checkedInAt}>{new Date(scan.ticketStatus.checkedInAt).toLocaleString("id-ID")}</time></p>{/if}<p>Kode tiket: <strong>{scan.ticketStatus.ticket.code}</strong></p>{/if}{#if scan.statusCheckError}<p role="alert">{scan.statusCheckError} Gate tetap ditahan.</p>{/if}{#if scan.ticketStatus?.status !== "CHECKED_IN"}<button class="staff-text-button" type="button" disabled={scan.statusChecking || unknownAcknowledged} onclick={() => unknownAcknowledged = true}>{unknownAcknowledged ? "Penanganan dikonfirmasi" : "Konfirmasi penanganan"}</button>{/if}</section>{/if}
+          <CameraScanner enabled={Boolean(assignment) && sessionReady} busy={scan.busy || scan.statusChecking || loggingOut} locked={scan.locked} resumeCamera={scanSource === "camera" && !scan.locked} onCode={(value) => scanCode(value, "camera")} />
           {#if !staff.assignments.length}<p class="staff-muted" role="status">Check-in dinonaktifkan karena akun ini belum memiliki penugasan event dan gate.</p>{/if}
         </div>
         <div class="session-strip"><div><span class="strip-label">Aktivitas check-in sesi ini</span><strong>{String(scan.scanCount).padStart(2, "0")}</strong></div><div><span class="strip-label">Aktivitas terakhir</span><strong>{scan.lastScan}</strong></div></div>
       </div>
 
-      <section class:result-valid={scan.status === "valid"} class:result-denied={scan.status === "used" || scan.status === "not-found" || scan.status === "wrong-gate" || scan.status === "unpaid" || scan.status === "denied"} class="result-panel" aria-live="polite" aria-atomic="true">
+      <section class:result-valid={scan.status === "valid"} class:result-denied={scan.status === "used" || scan.status === "not-found" || scan.status === "wrong-gate" || scan.status === "unpaid" || scan.status === "denied"} class:result-uncertain={scan.status === "unknown" || scan.status === "unavailable" || scan.status === "error"} class:result-pending={scan.busy || scan.statusChecking} class="result-panel" aria-live="polite" aria-atomic="true">
         <span class="visually-hidden">Percobaan check-in {scan.scanCount}</span>
         <div class="result-topline"><span class="panel-index">02</span><span class="result-label">HASIL CHECK-IN</span><span class="result-signal" aria-hidden="true"></span></div>
         <div class="result-main">
-          {#if scan.status === "idle"}<div class="result-icon idle-icon" aria-hidden="true">⌁</div>{:else if scan.status === "valid"}<div class="result-icon" aria-hidden="true">✓</div>{:else}<div class="result-icon" aria-hidden="true">×</div>{/if}
-          <p class="result-status">{copy[scan.status].label}</p><h2>{copy[scan.status].title}</h2><p class="result-detail">{scan.status === "unknown" ? copy.unknown.detail : scan.resultDetail || copy[scan.status].detail}</p>
+          {#if scan.busy || scan.statusChecking}<div class="result-icon idle-icon" aria-hidden="true">…</div>{:else if scan.status === "idle"}<div class="result-icon idle-icon" aria-hidden="true">⌁</div>{:else if scan.status === "valid"}<div class="result-icon" aria-hidden="true">✓</div>{:else if scan.status === "unknown" || scan.status === "unavailable" || scan.status === "error"}<div class="result-icon uncertain-icon" aria-hidden="true">?</div>{:else}<div class="result-icon" aria-hidden="true">×</div>{/if}
+          <p class="result-status">{scan.busy ? "Sedang memeriksa" : scan.statusChecking ? "Memeriksa status" : copy[scan.status].label}</p><h2 id="scan-result-title" bind:this={resultHeading} tabindex="-1">{scan.busy ? "Memverifikasi tiket" : scan.statusChecking ? "Memeriksa status tiket" : copy[scan.status].title}</h2><p class="result-detail">{scan.status === "unknown" ? copy.unknown.detail : scan.resultDetail || copy[scan.status].detail}</p>
           {#if scan.status === "unknown" && scan.resultDetail}<p class="result-detail">{scan.resultDetail}</p>{/if}
+          {#if scan.lastAttempt}<p class="result-detail">Penugasan scan: <strong>{eventNames[scan.lastAttempt.eventId] ?? scan.lastAttempt.eventId} · {scan.lastAttempt.gate}</strong></p>{/if}
           {#if scan.expectedGate}<p class="result-detail">Gate tiket: <strong>{scan.expectedGate}</strong></p>{/if}
           {#if scan.checkedInAt}<p class="result-detail">Waktu tercatat: <time datetime={scan.checkedInAt}>{new Date(scan.checkedInAt).toLocaleString("id-ID")}</time></p>{/if}
         </div>
-        {#if scan.resultTicket}<div class="ticket-detail-card"><div><span>Pengunjung</span><strong>{scan.resultTicket.attendeeName}</strong></div><div><span>Kategori</span><strong>{scan.resultTicket.tierName}</strong></div><div><span>Gate tiket</span><strong>{scan.resultTicket.gate}</strong></div><div><span>Kode</span><strong>{scan.resultTicket.code}</strong></div></div>{:else}<div class="result-placeholder"><span aria-hidden="true">↳</span><p>Detail tiket akan muncul<br />setelah server memverifikasi kode.</p></div>{/if}
+        {#if scan.resultTicket}<div class="ticket-detail-card"><div><span>Pengunjung</span><strong>{scan.resultTicket.attendeeName}</strong></div><div><span>Kategori</span><strong>{scan.resultTicket.tierName}</strong></div><div><span>Gate tiket</span><strong>{scan.resultTicket.gate}</strong></div><div><span>Kode</span><strong>{scan.resultTicket.code}</strong></div></div>{:else if scan.ticketStatus}<div class="ticket-detail-card"><div><span>Pengunjung</span><strong>{scan.ticketStatus.ticket.attendeeName}</strong></div><div><span>Kategori</span><strong>{scan.ticketStatus.ticket.tierName}</strong></div><div><span>Gate tiket</span><strong>{scan.ticketStatus.ticket.gate}</strong></div><div><span>Kode</span><strong>{scan.ticketStatus.ticket.code}</strong></div></div>{:else}<div class="result-placeholder"><span aria-hidden="true">↳</span><p>Detail tiket akan muncul setelah server memverifikasi kode.</p></div>{/if}
+        {#if scan.status === "unknown"}
+          <section class="scan-status-check" aria-labelledby="status-check-title">
+            <h3 id="status-check-title">Hasil check-in belum diketahui</h3>
+            <p>Gate tetap ditahan sampai status tiket diperiksa.</p>
+            <button class="staff-secondary-button" type="button" disabled={scan.statusChecking || scan.busy} onclick={handleStatusCheck}>{scan.statusChecking ? "Memeriksa status…" : "Periksa status"}</button>
+            {#if scan.ticketStatus}
+              <p role="status">{scan.ticketStatus.status === "CHECKED_IN" ? "Check-in tiket sudah tercatat." : `Belum tercatat saat diperiksa. Status pesanan: ${orderStatusLabel(scan.ticketStatus.orderStatus)}. Ini belum memastikan permintaan sebelumnya gagal.`}</p>
+              {#if scan.ticketStatus.status === "CHECKED_IN" && scan.ticketStatus.checkedInAt}<p>Waktu check-in: <time datetime={scan.ticketStatus.checkedInAt}>{new Date(scan.ticketStatus.checkedInAt).toLocaleString("id-ID")}</time></p>{/if}
+            {/if}
+            {#if scan.statusCheckError}<p role="alert">{scan.statusCheckError} Gate tetap ditahan.</p>{/if}
+            {#if scan.ticketStatus?.status !== "CHECKED_IN"}<button class="staff-text-button" type="button" disabled={scan.statusChecking || unknownAcknowledged} onclick={() => unknownAcknowledged = true}>{unknownAcknowledged ? "Penanganan dikonfirmasi" : "Konfirmasi penanganan"}</button>{/if}
+          </section>
+        {/if}
+        {#if scan.locked}<button class="scan-submit next-scan" type="button" disabled={scan.busy || scan.statusChecking || (scan.status === "unknown" && scan.ticketStatus?.status !== "CHECKED_IN" && !unknownAcknowledged)} onclick={handleNextScan}>Scan berikutnya</button>{/if}
         <div class="result-footer"><span><i class="footer-dot"></i> Status server</span><span>{scan.status === "valid" ? "Akses diberikan" : scan.status === "idle" ? "Menunggu input" : "Akses ditahan"}</span></div>
       </section>
     </section>

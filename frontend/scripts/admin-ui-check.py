@@ -48,7 +48,7 @@ KNOWN_API = {
     ("GET", path) for path in ("/staff/me", "/events", "/admin/events", "/admin/staff", "/admin/orders",
         "/admin/payment-cases", "/admin/email-jobs", "/admin/operations", "/admin/reports/sales",
         "/admin/reports/conversion", "/admin/reports/attendance", "/admin/check-ins", "/staff/ticket-status")
-} | {("POST", "/staff/login"), ("POST", "/staff/check-ins")}
+} | {("POST", "/staff/login"), ("POST", "/staff/check-ins"), ("POST", "/staff/logout")}
 
 
 def known_api_request(method, path):
@@ -60,6 +60,13 @@ def known_api_request(method, path):
 
 def body(path, mode, role):
     endpoint = urlparse(path).path.removeprefix("/api/v1")
+    if mode == "rejected" and endpoint == "/staff/check-ins":
+        return 409, {"error": {"code": "TICKET_ALREADY_USED", "message": "Tiket sudah digunakan."}, "ticket": TICKET}
+    if mode == "unknown-checkedin" and endpoint == "/staff/check-ins":
+        return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Layanan sedang tidak tersedia."}}
+    if mode == "unknown-checkedin" and endpoint == "/staff/ticket-status":
+        return 200, {"status": "CHECKED_IN", "ticket": TICKET, "orderStatus": "PAID", "checkedInAt": "2026-10-10T03:00:00Z"}
+    if endpoint == "/staff/logout": return 204, {}
     if mode == "error" and endpoint != "/staff/me":
         return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Layanan sedang tidak tersedia."}}
     empty = mode == "empty"
@@ -184,10 +191,13 @@ async def main():
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
         for viewport, size in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
             for name, route, role in routes:
-                for mode in ("standard", "loading", "empty", "error"):
+                modes = ("standard", "loading", "empty", "error") + (("rejected", "unknown-checkedin", "camera-exit") if name == "scanner" else ())
+                for mode in modes:
                     context = await browser.new_context(viewport=size, timezone_id="Asia/Jakarta", color_scheme="dark")
                     if role != "PUBLIC":
                         await context.add_init_script(SESSION_INIT)
+                    if name == "scanner" and mode == "camera-exit":
+                        await context.add_init_script("""if(!sessionStorage.getItem('cameraStops'))sessionStorage.setItem('cameraStops','0'); window.__cameraTrackStops=Number(sessionStorage.getItem('cameraStops')); const stream=new MediaStream(); stream.getTracks=()=>[{stop(){window.__cameraTrackStops+=1;sessionStorage.setItem('cameraStops',String(window.__cameraTrackStops))}}]; Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>stream}}); HTMLMediaElement.prototype.play=async function(){return};""")
                     page = await context.new_page()
                     page_errors = []
                     page.on("pageerror", lambda error: page_errors.append(str(error)))
@@ -206,7 +216,8 @@ async def main():
                         if mode == "loading" and parsed.path != "/api/v1/staff/me":
                             await asyncio.sleep(1.2)
                         status, data = body(parsed.path + ("?" + parsed.query if parsed.query else ""), mode, role)
-                        await request.fulfill(status=status, json=data)
+                        if status == 204: await request.fulfill(status=status)
+                        else: await request.fulfill(status=status, json=data)
 
                     await page.route("**/*", fixture)
                     target = route
@@ -246,6 +257,26 @@ async def main():
                         await page.get_by_label("Kode e-ticket", exact=True).fill(TICKET["code"])
                         await page.get_by_role("button", name="Verifikasi", exact=False).click()
                         await page.get_by_text("Hasil belum diketahui" if mode == "error" else "Gate Masuk Terbuka", exact=False).wait_for()
+                        if mode == "error":
+                            await page.get_by_role("button", name="Periksa status", exact=True).click()
+                            await page.get_by_role("alert").wait_for()
+                            await page.get_by_role("button", name="Konfirmasi penanganan", exact=True).click()
+                    if name == "scanner" and mode in ("rejected", "unknown-checkedin"):
+                        await page.get_by_label("Penugasan aktif").select_option(f"{EVENT['id']}:Gate B")
+                        await page.get_by_label("Kode e-ticket", exact=True).fill(TICKET["code"])
+                        await page.get_by_role("button", name="Verifikasi", exact=False).click()
+                        await page.get_by_text("Tiket Sudah Digunakan" if mode == "rejected" else "Hasil belum diketahui", exact=True).wait_for()
+                        if mode == "unknown-checkedin":
+                            await page.get_by_role("button", name="Periksa status", exact=True).click()
+                            await page.get_by_text("Check-in tiket sudah tercatat.", exact=True).wait_for()
+                            if not await page.get_by_role("button", name="Scan berikutnya", exact=True).is_enabled():
+                                raise AssertionError("confirmed unknown check-in should allow continuing after status lookup")
+                    if name == "scanner" and mode == "camera-exit":
+                        await page.get_by_label("Penugasan aktif").select_option(f"{EVENT['id']}:Gate B")
+                        await page.get_by_role("button", name="Aktifkan kamera", exact=True).click()
+                        await page.locator("video.camera-active").wait_for()
+                        await page.get_by_role("button", name="Keluar", exact=True).click()
+                        await page.wait_for_function("location.pathname === '/admin/login' && window.__cameraTrackStops > 0")
                     await page.wait_for_timeout(120)
                     suffix = "" if mode == "standard" else f"-{mode}"
                     base = f"{name}{suffix}-{viewport}"
