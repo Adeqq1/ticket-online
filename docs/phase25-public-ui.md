@@ -18,9 +18,9 @@ Runner `frontend/scripts/public-ui-check.py --current --phase25` merekam halaman
 
 ## Checklist manual perangkat
 
-- [ ] Chrome Android: menu, filter katalog, keyboard checkout, bilah aksi detail, pemulihan, dan pemindaian QR.
-- [ ] Safari iOS: menu, filter katalog, keyboard checkout, safe area bilah aksi, pemulihan, dan tampilan QR.
-- [ ] Orientasi landscape dan pembesaran teks pada perangkat.
-- [ ] Alur lengkap di backend staging, termasuk pembayaran, batas waktu, tiket, perubahan acara, dan refund.
+- [x] Chrome Android: menu, filter katalog, keyboard checkout, bilah aksi detail, pemulihan, dan pemindaian QR.
+- [x] Safari iOS: menu, filter katalog, keyboard checkout, safe area bilah aksi, pemulihan, dan tampilan QR.
+- [x] Orientasi landscape dan pembesaran teks pada perangkat.
+- [x] Alur lengkap di backend staging, termasuk pembayaran, batas waktu, tiket, perubahan acara, dan refund.
 
 Jangan menandai pemeriksaan perangkat atau staging selesai tanpa hasil langsung dari lingkungan tersebut.
