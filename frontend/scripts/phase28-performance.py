@@ -67,7 +67,7 @@ async def measure(browser, base_url, route_name, route, selector, runs):
 
 
 async def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(epilog="Example: python3 scripts/phase28-performance.py --base-url http://127.0.0.1:4173 --runs 5 --output /tmp/phase28.json")
     parser.add_argument("--base-url", default="http://127.0.0.1:4173")
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--output", type=Path)
@@ -75,6 +75,10 @@ async def main():
     parser.add_argument("--dist", type=Path)
     parser.add_argument("--check-chunk-retry", action="store_true")
     args = parser.parse_args()
+    if not args.serve and not args.check_chunk_retry and args.output is None:
+        parser.error("mode pengukuran memerlukan --output PATH")
+    if args.runs < 1:
+        parser.error("--runs harus lebih dari 0")
     if args.serve:
         serve(args.dist or Path(__file__).resolve().parents[1] / "dist", args.base_url)
         return

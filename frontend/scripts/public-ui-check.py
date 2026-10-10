@@ -287,7 +287,7 @@ async def main():
         ("not-found", "/alamat-tidak-dikenal", "tidak-ditemukan"),
     ]
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        browser = await playwright.chromium.launch(channel="chrome", headless=True, ignore_default_args=["--disable-back-forward-cache"])
         if args.admin_before or args.admin_after:
             await capture_admin(browser, "before" if args.admin_before else "after")
             await browser.close()
@@ -358,6 +358,13 @@ async def main():
                 if route_name == "my-tickets":
                     assert await page.get_by_role("link", name="Sudah membeli, tetapi tiket tidak muncul?").is_visible(), "Ticket recovery should remain easy to find above the ticket list."
                     assert await page.locator(".my-ticket-card").count() == 1, "A saved order should render a concise ticket card."
+                    footer_visibility = await page.locator(".site-footer").evaluate("element => getComputedStyle(element).visibility")
+                    assert footer_visibility == "visible", f"The footer should remain visible with an empty live region; got {footer_visibility}."
+                    await page.locator(".site-footer a").first.focus()
+                    assert await page.evaluate("document.activeElement.closest('.site-footer') !== null"), "Footer links should remain focusable after My Tickets loads."
+                if route_name == "order":
+                    footer_visibility = await page.locator(".site-footer").evaluate("element => getComputedStyle(element).visibility")
+                    assert footer_visibility == "visible", f"The footer should remain visible with an order status live region; got {footer_visibility}."
                 if route_name == "ticket":
                     assert await page.locator(".pass-details").evaluate("element => !element.open"), "Secondary ticket details should start collapsed."
                     assert await page.locator(".qr-code").is_visible(), "The usable ticket should show its QR code."
@@ -378,6 +385,7 @@ async def main():
                     assert await page.locator("#recovery-email").get_attribute("aria-invalid") == "true", "Recovery validation should identify a missing buyer email."
                     assert await page.locator("#recovery-reference").get_attribute("aria-invalid") == "true", "Recovery validation should identify a missing order reference."
                 if route_name == "catalog" and viewport_name == "desktop":
+                    await page.wait_for_function("document.querySelector('.filters')?.open === true")
                     assert await page.locator(".filters").evaluate("element => element.open"), "Catalog filters should start open on desktop."
                 if route_name == "detail":
                     if viewport_name == "desktop":
@@ -655,12 +663,15 @@ async def main():
                 await page.locator("#concert-city").select_option(label="Medan")
                 await page.locator("#concert-query").fill("Melodi")
                 assert await page.locator(".filter-chip").count() == 3, "Each active catalog filter should have its own removable chip."
+                await page.evaluate("window.__catalogRestoredFromBFCache=false;addEventListener('pageshow',event=>window.__catalogRestoredFromBFCache=event.persisted)")
                 await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
                 await page.wait_for_timeout(100)
                 saved_metrics = await page.evaluate("({y:window.scrollY,height:document.documentElement.scrollHeight,cards:document.querySelectorAll('.concert-card').length,session:sessionStorage.getItem('ticket-online:catalog:v1')})")
+                await page.evaluate("addEventListener('unload',()=>{})")
                 await page.locator(".concert-card-link").first.click()
                 await page.wait_for_url("**/konser/melodi-medan")
-                await page.go_back(wait_until="domcontentloaded")
+                await page.go_back(wait_until="commit")
+                assert not await page.evaluate("window.__catalogRestoredFromBFCache"), "This return should use a fresh document to verify session restoration without BFCache."
                 await page.wait_for_function("target => Math.abs(window.scrollY - target) < 100", arg=saved_metrics["y"])
                 assert await page.locator("#concert-query").input_value() == "Melodi", "Catalog search should survive returning from detail."
                 restored_metrics = await page.evaluate("({y:window.scrollY,height:document.documentElement.scrollHeight,cards:document.querySelectorAll('.concert-card').length,session:sessionStorage.getItem('ticket-online:catalog:v1')})")
@@ -670,6 +681,24 @@ async def main():
                 assert await page.locator(".filter-chip").count() == 2, "A filter chip should remove only its own filter."
 
                 await page.evaluate("sessionStorage.removeItem('ticket-online:catalog:v1')")
+                bfcache_context = await browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=1)
+                bfcache_events = reply(urlparse("/api/v1/events?scenario=phase26-search"), "phase26-search")[1]["events"]
+                for fixture_event in bfcache_events:
+                    fixture_event["image"] = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 5'%3E%3Crect width='4' height='5' fill='%231358d8'/%3E%3C/svg%3E"
+                await bfcache_context.add_init_script(f"""const fixtureEvents={json.dumps(bfcache_events)};const nativeFetch=window.fetch.bind(window);window.fetch=(input,init)=>{{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.pathname==='/api/v1/events')return Promise.resolve(new Response(JSON.stringify({{events:fixtureEvents}}),{{status:200,headers:{{'Content-Type':'application/json'}}}}));if(url.pathname.startsWith('/api/v1/events/')){{const item=fixtureEvents.find(event=>event.id===decodeURIComponent(url.pathname.split('/').pop()));return Promise.resolve(new Response(JSON.stringify(item),{{status:item?200:404,headers:{{'Content-Type':'application/json'}}}}))}}return nativeFetch(input,init)}}""")
+                bfcache_page = await bfcache_context.new_page()
+                await bfcache_page.goto(BASE_URL + "/konser?scenario=phase26-search", wait_until="domcontentloaded")
+                await bfcache_page.locator(".concert-card").nth(8).wait_for(state="visible")
+                await bfcache_page.evaluate("window.scrollTo(0, 500)")
+                await bfcache_page.wait_for_function("window.scrollY > 100")
+                await bfcache_page.evaluate("window.__catalogPagehideY=null;window.__catalogPageshowPersisted=false;addEventListener('pagehide',()=>window.__catalogPagehideY=window.scrollY);addEventListener('pageshow',event=>{if(event.persisted)window.__catalogPageshowPersisted=true})")
+                await bfcache_page.locator(".concert-card-link").nth(4).click()
+                await bfcache_page.wait_for_url("**/konser/**")
+                await bfcache_page.go_back(wait_until="commit")
+                await bfcache_page.wait_for_function("window.__catalogPageshowPersisted === true")
+                bfcache_metrics = await bfcache_page.evaluate("({saved:window.__catalogPagehideY,restored:window.scrollY})")
+                assert bfcache_metrics["saved"] > 100 and abs(bfcache_metrics["restored"] - bfcache_metrics["saved"]) < 100, f"BFCache should restore a nonzero position without a preexisting catalog session: {bfcache_metrics}."
+                await bfcache_context.close()
                 await page.goto(BASE_URL + "/konser", wait_until="domcontentloaded")
                 await page.locator("#concert-query").fill("Nusa")
                 await page.locator("#concert-query").press("Enter")
@@ -684,6 +713,19 @@ async def main():
                 assert await page.locator("#concert-query").input_value() == "", "Reset should clear the catalog search."
                 assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "The catalog should not overflow at 360px."
                 captures.append(await capture(page, "mobile360-katalog", "mobile 360×800, katalog"))
+
+                for width in (768, 844, 900, 1024, 1440):
+                    await page.set_viewport_size({"width": width, "height": 390 if width == 844 else 900})
+                    if not await page.locator(".filters").evaluate("element => element.open"):
+                        await page.locator(".filters summary").click()
+                    await page.get_by_label("Batasi harga").check()
+                    filter_bounds = await page.evaluate("""() => ({viewport:innerWidth,document:document.documentElement.scrollWidth,body:document.body.scrollWidth,fields:document.querySelector('.filter-fields').getBoundingClientRect().toJSON(),reset:document.querySelector('.reset-filters').getBoundingClientRect().toJSON(),controls:[...document.querySelectorAll('.filter-fields select,.filter-fields input[type=text]')].filter(el=>el.getClientRects().length).map(el=>el.getBoundingClientRect().toJSON())})""")
+                    assert filter_bounds["document"] <= width, f"Open catalog filters should not create horizontal overflow at {width}px: {filter_bounds}."
+                    assert all(control["left"] >= 0 and control["right"] <= width for control in filter_bounds["controls"]), f"Filter controls should remain within the viewport at {width}px: {filter_bounds}."
+                    assert filter_bounds["reset"]["left"] >= filter_bounds["fields"]["right"] or filter_bounds["reset"]["right"] <= filter_bounds["fields"]["left"], f"Reset should not overlap the open filter panel at {width}px: {filter_bounds}."
+                    await page.get_by_label("Batasi harga").uncheck()
+                    await page.locator(".filters summary").click()
+                    layout_checks.append({"route": "catalog-open-filters", "width": width, **filter_bounds})
 
                 widths = (320, 360, 390, 768, 1024, 1440) if args.phase25 else (320,)
                 for width in widths:

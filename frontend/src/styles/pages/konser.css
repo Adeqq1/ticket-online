@@ -58,6 +58,7 @@
 .is-sold-out .concert-status { color: var(--muted); }
 .catalog-empty { max-width: 620px; padding: 30px 0; border-top: 1px solid var(--line); }
 .catalog-empty p { margin: 0 0 14px; color: var(--muted); }
+@media (min-width: 768px) and (max-width: 1100px) { .filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1023px) { .concert-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
   .catalog { padding-bottom: 56px; }

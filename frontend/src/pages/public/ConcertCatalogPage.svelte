@@ -71,13 +71,14 @@
     } else filtersOpen = desktop.matches;
     ready = true;
     const persistScroll = () => save();
+    const persistBeforeLeave = () => { restoreScrollY = window.scrollY; save(restoreScrollY); };
     const restoreFromCache = (event: PageTransitionEvent) => { if (event.persisted) requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, restoreScrollY))); };
-    window.addEventListener("pagehide", persistScroll);
+    window.addEventListener("pagehide", persistBeforeLeave);
     window.addEventListener("scroll", persistScroll, { passive: true });
     window.addEventListener("pageshow", restoreFromCache);
     desktop.addEventListener("change", syncFilters);
     void load(controller.signal, Boolean(saved));
-    return () => { controller.abort(); window.removeEventListener("pagehide", persistScroll); window.removeEventListener("scroll", persistScroll); window.removeEventListener("pageshow", restoreFromCache); desktop.removeEventListener("change", syncFilters); history.scrollRestoration = previousScrollRestoration; };
+    return () => { controller.abort(); window.removeEventListener("pagehide", persistBeforeLeave); window.removeEventListener("scroll", persistScroll); window.removeEventListener("pageshow", restoreFromCache); desktop.removeEventListener("change", syncFilters); history.scrollRestoration = previousScrollRestoration; };
   });
 </script>
 
