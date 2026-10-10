@@ -51,7 +51,7 @@
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => void load()}>Coba lagi</button></p>{/if}
     {#if loading && !report}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan…</p>{/if}
     {#if report}
-      <p class="sales-period">Cohort {report.period.dateFrom}–{report.period.dateTo} WIB · Jendela {report.period.observationHours} jam <span>Data diperbarui {new Date(report.dataUpdatedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" })} WIB</span></p>
+      <p class="sales-period">Cohort {report.period.dateFrom} sampai {report.period.dateTo} WIB · Jendela {report.period.observationHours} jam <span>Data diperbarui {new Date(report.dataUpdatedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" })} WIB</span></p>
       {#if draftChanged}<p class="report-refresh-note" role="status">Filter berubah. Tekan Terapkan untuk memperbarui laporan; ringkasan masih memakai cakupan di atas.</p>{/if}
       {#if loading}<p class="report-refresh-note" role="status" aria-live="polite">Memperbarui laporan. Angka pada layar masih memakai filter dan snapshot sebelumnya.</p>{:else if error}<p class="report-refresh-note" role="status">Pembaruan gagal. Snapshot terakhir tetap ditampilkan.</p>{/if}
       {#if zeroJourneys}<p class="report-empty-state" role="status">Belum ada perjalanan pada cakupan ini.</p>{/if}

@@ -200,7 +200,7 @@
           <label>Nama konser / artis<input bind:value={draft.artist} oninput={suggestEventId} minlength="2" maxlength="160" required disabled={saving} /></label>
           <label>Genre<select bind:value={draft.genre} disabled={saving}><option>Rock</option><option>Pop</option><option>Indie</option></select></label></fieldset>
           <fieldset class="event-group"><legend>Publikasi</legend><label>Label penjualan<select bind:value={draft.status} disabled={saving}><option>Early Bird</option><option>Presale</option><option>Sold Out</option></select></label>
-          <label>Status publikasi<select bind:value={draft.publicationStatus} disabled={saving || !selectedId}><option value="DRAFT">Draft — belum tampil di katalog</option><option value="PUBLISHED">Published — tampil di katalog</option><option value="ARCHIVED">Archived — disembunyikan dari katalog</option></select></label>
+          <label>Status publikasi<select bind:value={draft.publicationStatus} disabled={saving || !selectedId}><option value="DRAFT">Draft (belum tampil di katalog)</option><option value="PUBLISHED">Published (tampil di katalog)</option><option value="ARCHIVED">Archived (disembunyikan dari katalog)</option></select></label>
           </fieldset>
           <fieldset class="event-group"><legend>Jadwal dan lokasi</legend>
           <label>Jadwal (WIB)<input type="datetime-local" bind:value={draft.startsAt} aria-describedby={scheduleLocked ? "schedule-lock-note" : undefined} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || scheduleLocked} /></label>

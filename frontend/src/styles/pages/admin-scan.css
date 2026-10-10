@@ -126,7 +126,9 @@
   .ticket-detail-card span { font-size: 14px; }
   .ticket-detail-card strong { font-size: 16px; }
   .scan-status-check { padding: 14px; }
-  .session-strip { grid-template-columns: 1fr 1fr; }
+  .session-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .session-strip > div { min-width: 0; }
   .session-strip strong { font-size: 16px; }
   .strip-label, .scan-footer { font-size: 14px; }
+  .session-strip .strip-label { overflow-wrap: anywhere; }
 }

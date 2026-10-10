@@ -115,7 +115,7 @@
 .admin-layout .history-table td { font-size: 14px; }
 .admin-layout .history-table code { font-size: 14px; }
 .admin-layout .sales-period { font-size: 14px; line-height: 1.5; }
-.admin-layout .sales-metric h2 { font-size: 14px; line-height: 1.4; }
+.admin-layout .sales-metric h2 { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
 .admin-layout .sales-metric small { font-size: 14px; line-height: 1.45; }
 .admin-layout .sales-chart-labels, .admin-layout .sales-legend { font-size: 14px; line-height: 1.45; }
 .admin-layout .sales-report-filters { margin: 16px 0 22px; }
@@ -155,8 +155,7 @@
   .admin-layout .staff-admin-content .report-filter-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 540px) {
-  .admin-layout .sales-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .attendance-primary-metrics, .attendance-secondary-metrics, .conversion-primary-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-layout .sales-metrics, .attendance-primary-metrics, .attendance-secondary-metrics, .conversion-primary-metrics { grid-template-columns: minmax(0, 1fr); }
   .ops-action-list { grid-template-columns: 1fr; }
   .ops-alerts, .ops-actions { padding: 16px; }
   .report-export { align-items: stretch; flex-direction: column; }
@@ -258,6 +257,14 @@
 .issue-history pre { max-width: 100%; overflow: auto; padding: 12px; background: #111918; color: var(--scan-muted); font: 14px/1.5 "Courier New", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .order-detail-grid a { display: inline-flex; min-height: 44px; align-items: center; }
 .order-selected-panel textarea, .issue-detail-panel textarea { box-sizing: border-box; width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--scan-line); background: #111918; color: var(--scan-text); font: 16px/1.5 Arial, Helvetica, sans-serif; }
+.order-selected-panel .recovery-panel { grid-template-columns: minmax(0, 1fr); }
+.order-selected-panel .recovery-panel > * { min-width: 0; }
+.order-selected-panel .recovery-panel > p { overflow-wrap: anywhere; }
+.issue-detail-panel .staff-panel-heading { flex-wrap: wrap; }
+.issue-detail-panel .staff-panel-heading > div { min-width: 0; }
+.issue-detail-panel .staff-panel-heading h2, .issue-detail-panel .staff-panel-heading > a { overflow-wrap: anywhere; }
+.admin-layout .staff-admin-heading h1, .issue-detail-panel .scan-submit { overflow-wrap: anywhere; }
+.issue-detail-panel .scan-submit { white-space: normal; }
 .order-selected-panel .scan-submit, .issue-detail-panel .scan-submit { min-height: 44px; padding: 10px 16px; cursor: pointer; }
 @media (max-width: 1100px) {
   .order-workspace, .order-workspace.has-selected { grid-template-columns: minmax(0, 1fr); }

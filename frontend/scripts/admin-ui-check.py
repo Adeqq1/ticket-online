@@ -65,6 +65,8 @@ def body(path, mode, role):
         return 409, {"error": {"code": "TICKET_ALREADY_USED", "message": "Tiket sudah digunakan."}, "ticket": TICKET}
     if mode == "unknown-checkedin" and endpoint == "/staff/check-ins":
         return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Layanan sedang tidak tersedia."}}
+    if mode == "expired-camera" and endpoint == "/staff/check-ins":
+        return 401, {"error": {"code": "UNAUTHORIZED", "message": "Sesi petugas sudah berakhir."}}
     if mode == "unknown-checkedin" and endpoint == "/staff/ticket-status":
         return 200, {"status": "CHECKED_IN", "ticket": TICKET, "orderStatus": "PAID", "checkedInAt": "2026-10-10T03:00:00Z"}
     if endpoint == "/staff/logout": return 204, {}
@@ -172,6 +174,7 @@ async def main():
     parser.add_argument("--only", help="Capture a single route key for debugging, e.g. events")
     parser.add_argument("--output-dir", type=Path, help="Screenshot output directory; defaults to docs/phase29/screenshots")
     parser.add_argument("--phase", type=int, default=29, help="Phase number recorded in the manifest")
+    parser.add_argument("--phase35", action="store_true", help="Capture tablet, landscape, reduced-height keyboard, and enlarged-text layouts")
     args = parser.parse_args()
     output = args.output_dir if args.output_dir and args.output_dir.is_absolute() else ROOT / args.output_dir if args.output_dir else OUTPUT
     output.mkdir(parents=True, exist_ok=True)
@@ -196,13 +199,18 @@ async def main():
         for viewport, size in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
             for name, route, role in routes:
                 modes = ("standard", "loading", "empty", "error") + (("rejected", "unknown-checkedin", "camera-exit") if name == "scanner" else ())
+                if args.phase35 and name == "scanner": modes += ("expired-camera", "concurrent")
+                if args.phase35 and role != "PUBLIC": modes += ("expired-session",)
                 if name == "conversion": modes += ("missing-data",)
                 if name == "operations": modes += ("stale",)
                 for mode in modes:
                     context = await browser.new_context(viewport=size, timezone_id="Asia/Jakarta", color_scheme="dark")
                     if role != "PUBLIC":
-                        await context.add_init_script(SESSION_INIT)
-                    if name == "scanner" and mode == "camera-exit":
+                        if mode == "expired-session":
+                            await context.add_init_script(f"sessionStorage.setItem('ticket-online:staff-session', JSON.stringify({{accessToken:'{TOKEN}',expiresAt:'2000-01-01T00:00:00.000Z'}}))")
+                        else:
+                            await context.add_init_script(SESSION_INIT)
+                    if name == "scanner" and mode in ("camera-exit", "expired-camera"):
                         await context.add_init_script("""if(!sessionStorage.getItem('cameraStops'))sessionStorage.setItem('cameraStops','0'); window.__cameraTrackStops=Number(sessionStorage.getItem('cameraStops')); const stream=new MediaStream(); stream.getTracks=()=>[{stop(){window.__cameraTrackStops+=1;sessionStorage.setItem('cameraStops',String(window.__cameraTrackStops))}}]; Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>stream}}); HTMLMediaElement.prototype.play=async function(){return};""")
                     page = await context.new_page()
                     page_errors = []
@@ -220,6 +228,8 @@ async def main():
                             unhandled_api.append(f"{signature[0]} {signature[1]}")
                             await request.fulfill(status=501, json={"error": {"code": "UNHANDLED_FIXTURE", "message": "API fixture belum dipetakan."}})
                             return
+                        if signature == ("POST", "/staff/check-ins"):
+                            fixture_calls["POST /staff/check-ins"] = fixture_calls.get("POST /staff/check-ins", 0) + 1
                         if endpoint in ("/admin/reports/sales.csv", "/admin/reports/attendance.csv"):
                             observed_csv_queries.append({"endpoint": endpoint, "query": parsed.query})
                             await request.fulfill(status=200, body="laporan,fixture\n", headers={
@@ -234,6 +244,8 @@ async def main():
                             if fixture_calls[endpoint] > 1:
                                 await request.fulfill(status=503, json={"error": {"code": "SERVICE_UNAVAILABLE", "message": "Snapshot operasional belum tersedia."}})
                                 return
+                        if name == "scanner" and mode == "concurrent" and signature == ("POST", "/staff/check-ins"):
+                            await asyncio.sleep(0.7)
                         status, data = body(parsed.path + ("?" + parsed.query if parsed.query else ""), mode, role)
                         if status == 204: await request.fulfill(status=status)
                         else: await request.fulfill(status=status, json=data)
@@ -245,6 +257,10 @@ async def main():
                     await page.locator("#konten").wait_for()
                     await page.wait_for_function("document.title !== 'Tiket Online'", timeout=15000)
                     await page.wait_for_timeout(80 if mode == "loading" else 400)
+                    if mode == "expired-session":
+                        await page.wait_for_url("**/admin/login")
+                        await page.wait_for_load_state("domcontentloaded")
+                        await page.wait_for_timeout(100)
                     if name == "attendance" and mode == "standard":
                         await page.locator(".history-filter-form select").first.wait_for()
                         await page.locator(".history-filter-form select").first.select_option(EVENT["id"])
@@ -305,6 +321,28 @@ async def main():
                         await page.locator("video.camera-active").wait_for()
                         await page.get_by_role("button", name="Keluar", exact=True).click()
                         await page.wait_for_function("location.pathname === '/admin/login' && window.__cameraTrackStops > 0")
+                        await page.wait_for_url("**/admin/login")
+                        await page.wait_for_load_state("domcontentloaded")
+                        await page.wait_for_timeout(100)
+                    if name == "scanner" and mode == "expired-camera":
+                        await page.get_by_label("Penugasan aktif").select_option(f"{EVENT['id']}:Gate B")
+                        await page.get_by_role("button", name="Aktifkan kamera", exact=True).click()
+                        await page.locator("video.camera-active").wait_for()
+                        await page.get_by_label("Kode e-ticket", exact=True).fill(TICKET["code"])
+                        await page.get_by_role("button", name="Verifikasi", exact=False).click()
+                        await page.wait_for_function("location.pathname === '/admin/login' && window.__cameraTrackStops > 0")
+                        await page.wait_for_url("**/admin/login")
+                        await page.wait_for_load_state("domcontentloaded")
+                        await page.wait_for_timeout(100)
+                        if fixture_calls.get("POST /staff/check-ins") != 1:
+                            raise AssertionError("expired session should send at most one check-in request before revoking access")
+                    if name == "scanner" and mode == "concurrent":
+                        await page.get_by_label("Penugasan aktif").select_option(f"{EVENT['id']}:Gate B")
+                        await page.get_by_label("Kode e-ticket", exact=True).fill(TICKET["code"])
+                        await page.locator(".scan-form").evaluate("form => { form.requestSubmit(); form.requestSubmit(); }")
+                        await page.get_by_text("Gate Masuk Terbuka", exact=True).wait_for()
+                        if fixture_calls.get("POST /staff/check-ins") != 1:
+                            raise AssertionError(f"concurrent scanner submission sent {fixture_calls.get('POST /staff/check-ins', 0)} requests")
                     await page.wait_for_timeout(120)
                     suffix = "" if mode == "standard" else f"-{mode}"
                     base = f"{name}{suffix}-{viewport}"
@@ -338,9 +376,12 @@ async def main():
                             liveRegionCount: document.querySelectorAll('[role=status],[role=alert],[aria-live]').length,
                             overflowElements: [...document.querySelectorAll('body *')].filter(el=>{const r=el.getBoundingClientRect();return r.right>innerWidth+1||r.left < -1}).slice(0,12).map(el=>({tag:el.tagName,id:el.id,classes:typeof el.className==='string'?el.className:'',parents:[el.parentElement?.tagName,el.parentElement?.className,el.parentElement?.parentElement?.className],left:Math.round(el.getBoundingClientRect().left),right:Math.round(el.getBoundingClientRect().right)})),
                             viewportWidth: innerWidth,documentWidth: document.documentElement.scrollWidth,
+                            visibleEmDashCount: (document.body.innerText.match(/—/g) || []).length,
                             overflow: document.documentElement.scrollWidth>innerWidth
                           };
                         }""")
+                        if capture["audit"]["visibleEmDashCount"]:
+                            raise AssertionError(f"visible em-dash copy needs rewriting on {route}: {capture['audit']['visibleEmDashCount']}")
                         action = page.locator(".admin-page-heading .admin-heading-actions > button").first
                         if name not in ("login", "scanner"):
                             if not await action.count():
@@ -390,9 +431,65 @@ async def main():
                             await page.set_viewport_size({"width": 320, "height": 740})
                             await page.evaluate("window.scrollTo(0,0)")
                             capture["audit"]["narrow320"] = await page.evaluate("""() => ({viewportWidth:innerWidth,documentWidth:document.documentElement.scrollWidth,overflow:document.documentElement.scrollWidth>innerWidth})""")
+                            if capture["audit"]["narrow320"]["overflow"]:
+                                raise AssertionError(f"{route} overflows at 320px: {capture['audit']['narrow320']}")
                             narrow_path = f"{name}-320px.png"
                             await page.screenshot(path=str(output / narrow_path), full_page=False, animations="disabled")
                             capture["files"].append(narrow_path)
+                    if args.phase35 and mode == "standard" and viewport == "desktop":
+                        responsive_checks = {}
+                        variants = (
+                            ("tablet", {"width": 768, "height": 1024}, False),
+                            ("landscape", {"width": 844, "height": 390}, False),
+                            ("keyboard-height", {"width": 390, "height": 500}, False),
+                            ("text-200-percent", {"width": 390, "height": 844}, True),
+                        )
+                        for variant, variant_size, enlarge_text in variants:
+                            await page.set_viewport_size(variant_size)
+                            if enlarge_text:
+                                await page.evaluate("""() => {
+                                  window.__phase35FontOriginals = [...document.querySelectorAll('body *')]
+                                    .filter(el => {
+                                      if (el.closest('svg') || !el.getClientRects().length) return false;
+                                      for (let parent = el; parent && parent !== document.body; parent = parent.parentElement) {
+                                        const style = getComputedStyle(parent), rect = parent.getBoundingClientRect();
+                                        if (style.clip !== 'auto' || style.clipPath !== 'none' || (style.position === 'absolute' && rect.width <= 1 && rect.height <= 1)) return false;
+                                      }
+                                      return true;
+                                    })
+                                    .map(el => [el, el.style.getPropertyValue('font-size'), el.style.getPropertyPriority('font-size'), parseFloat(getComputedStyle(el).fontSize)]);
+                                  for (const [el, , , originalSize] of window.__phase35FontOriginals) {
+                                    el.style.setProperty('font-size', `${originalSize * 2}px`, 'important');
+                                  }
+                                }""")
+                            await page.evaluate("window.scrollTo(0, 0)")
+                            result = await page.evaluate("""() => ({viewportWidth:innerWidth,viewportHeight:innerHeight,
+                              documentWidth:document.documentElement.scrollWidth,overflow:document.documentElement.scrollWidth>innerWidth,
+                              overflowingBoxes:[...document.querySelectorAll('body *')].filter(el=>el.scrollWidth>el.clientWidth+1).sort((a,b)=>{const depth=el=>{let n=0;while(el.parentElement){n++;el=el.parentElement}return n};return depth(b)-depth(a)}).slice(0,20).map(el=>({tag:el.tagName,id:el.id,classes:typeof el.className==='string'?el.className:'',text:(el.innerText||'').trim().slice(0,45),scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,rect:el.getBoundingClientRect().toJSON()})),bodyWidth:document.body.scrollWidth,
+                              offenders:[...document.querySelectorAll('body *')].filter(el=>{const r=el.getBoundingClientRect();return r.right>innerWidth+1||r.left < -1}).slice(0,8).map(el=>({tag:el.tagName,id:el.id,classes:typeof el.className==='string'?el.className:'',text:(el.innerText||'').trim().slice(0,40),left:Math.round(el.getBoundingClientRect().left),right:Math.round(el.getBoundingClientRect().right),parents:[el.parentElement,el.parentElement?.parentElement,el.parentElement?.parentElement?.parentElement].map(p=>p&&({tag:p.tagName,id:p.id,classes:typeof p.className==='string'?p.className:'',left:Math.round(p.getBoundingClientRect().left),right:Math.round(p.getBoundingClientRect().right)}))})),
+                              focusableCount:[...document.querySelectorAll('a,button,input:not([type=hidden]),select,textarea,summary,[tabindex]')].filter(el=>!el.disabled&&el.tabIndex>=0).length,
+                              headingCount:document.querySelectorAll('h1').length})""")
+                            if result["overflow"]:
+                                raise AssertionError(f"{route} overflows in {variant}: {result}")
+                            if result["headingCount"] != 1:
+                                raise AssertionError(f"{route} should keep one page heading in {variant}: {result}")
+                            responsive_checks[variant] = result
+                            responsive_path = f"{name}-{variant}.png"
+                            await page.screenshot(path=str(output / responsive_path), full_page=False, animations="disabled")
+                            capture["files"].append(responsive_path)
+                            if enlarge_text:
+                                await page.evaluate("""() => {
+                                  for (const [el, value, priority] of window.__phase35FontOriginals || []) {
+                                    if (value) el.style.setProperty('font-size', value, priority);
+                                    else el.style.removeProperty('font-size');
+                                  }
+                                  delete window.__phase35FontOriginals;
+                                }""")
+                        capture["audit"]["phase35Responsive"] = responsive_checks
+                    if args.phase35:
+                        visible_dashes = await page.evaluate("(document.body.innerText.match(/[—–]/g) || []).length")
+                        if visible_dashes:
+                            raise AssertionError(f"visible em/en-dash copy needs rewriting on {route} ({mode}, {viewport}): {visible_dashes}")
                     if name in ("sales", "attendance") and mode == "standard":
                         async with page.expect_download() as download_info:
                             await page.get_by_role("button", name="Ekspor CSV", exact=True).click()
@@ -437,7 +534,8 @@ async def main():
         await browser.close()
 
     manifest = {"phase": args.phase, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit,
-        "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844"},
+        "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844",
+            **({"tablet": "768x1024", "landscape": "844x390", "keyboardHeightSimulation": "390x500", "textEnlargementSimulation": "200% text via injected CSS"} if args.phase35 else {})},
         "theme": "dark", "timezone": "Asia/Jakarta", "api": "All API requests are intercepted; responses use local fixtures and unmapped requests fail the capture.",
         "apiRequests": sorted(observed_api), "csvQueries": observed_csv_queries, "unhandledApiRequests": unhandled_api,
         "pageErrors": [{"route": c["route"], "scenario": c["scenario"], "viewport": c["viewport"], "errors": c["pageErrors"]} for c in captures if c.get("pageErrors")],

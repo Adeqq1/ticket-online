@@ -94,7 +94,7 @@
     {#if exportError}<p class="staff-form-message staff-form-error" role="alert">{exportError}</p>{/if}
     {#if loading && !data}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan…</p>{/if}
     {#if data}
-      <p class="sales-period">Periode {period(data.period.dateFrom)}–{period(data.period.dateTo)} · WIB <span>Data diperbarui {time(data.dataUpdatedAt)}</span></p>
+      <p class="sales-period">Periode {period(data.period.dateFrom)} sampai {period(data.period.dateTo)} · WIB <span>Data diperbarui {time(data.dataUpdatedAt)}</span></p>
       {#if draftChanged}<p class="report-refresh-note" role="status">Filter berubah. Tekan Terapkan untuk memperbarui laporan; ekspor masih memakai periode di atas.</p>{/if}
       {#if loading}<p class="report-refresh-note" role="status" aria-live="polite">Memperbarui laporan. Angka dan ekspor tetap mengacu pada snapshot terakhir sampai data baru tersedia.</p>{:else if error}<p class="report-refresh-note" role="status">Pembaruan gagal. Snapshot terakhir tetap ditampilkan.</p>{/if}
       <p class="report-definition">Penerimaan setelah refund bukan laba atau settlement bank; biaya provider belum dikurangi. Refund berjalan dan rekonsiliasi terbuka menunjukkan kondisi pada waktu snapshot.</p>
