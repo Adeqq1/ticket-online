@@ -125,6 +125,10 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
         return 200, {"events": [] if scenario == "empty" else events}
     if endpoint.startswith("/api/v1/events/"):
         result = event("POSTPONED" if state == "changed" else "SCHEDULED")
+        if scenario == "phase27-share-long":
+            result.update({"artist": "Musisi " * 24, "venue": "Gedung Konser Internasional " * 10, "address": "Jalan Musik & Kenangan #2, Kecamatan " * 8, "city": "Yogyakarta"})
+        if scenario == "phase27-share-no-location":
+            result.update({"venue": "", "address": "", "city": ""})
         if scenario in ("phase22-rescheduled", "phase22-postponed", "phase22-cancelled"):
             event_state = {"phase22-rescheduled": "RESCHEDULED", "phase22-postponed": "POSTPONED", "phase22-cancelled": "CANCELLED"}[scenario]
             result = event(event_state)
@@ -342,6 +346,7 @@ async def main():
             await context.route("**/api/v1/**", api)
             await context.route("https://picsum.photos/**", photo)
             await context.add_init_script(f"""localStorage.setItem('ticket-online:order:{ORDER_ID}', JSON.stringify({json.dumps({"orderId": ORDER_ID, "accessToken": TOKEN, "expiresAt": EXPIRY, "accessExpiresAt": None, "reservationId": RESERVATION_ID, "reference": "TO-0123456789abcdef0123", "ticketIds": [TICKET_ID]})}));""")
+            await context.add_init_script("""Object.defineProperty(Navigator.prototype, 'share', { configurable:true, get(){const scenario=new URL(location.href).searchParams.get('scenario');if(!scenario?.startsWith('phase27-share'))return undefined;return async payload=>{window.__sharedPayload=payload;if(scenario==='phase27-share-cancel')throw new DOMException('Canceled','AbortError');if(scenario==='phase27-share-fail')throw new Error('Share unavailable')}}});Object.defineProperty(Navigator.prototype, 'clipboard', { configurable:true, get(){const scenario=new URL(location.href).searchParams.get('scenario');if(!scenario?.startsWith('phase27-copy'))return undefined;if(scenario==='phase27-copy-unavailable')return undefined;return{writeText:async value=>{if(scenario==='phase27-copy-fail')throw new Error('Clipboard unavailable');window.__copiedText=value}}}});""")
             page = await context.new_page()
             for route_name, url, label in routes:
                 await page.goto(BASE_URL + url, wait_until="domcontentloaded")
@@ -584,6 +589,52 @@ async def main():
                 assert await page.get_by_text("Jadwal diperbarui", exact=True).is_visible(), "Changed event schedules should be visible on the card."
                 await page.locator(".poster-unavailable").wait_for(state="attached")
                 assert await page.locator(".poster-unavailable").count() == 1, "A failed event poster should leave the neutral poster fallback."
+
+                await page.set_viewport_size({"width": 390, "height": 844})
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share&festival=2&token=private#TO-secret", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Nusa Malam").wait_for()
+                assert await page.locator(".detail-actions .detail-action").all_text_contents() == ["Bagikan konser", "Buka lokasi ↗"], "Share and location should appear as secondary actions below the concert summary."
+                assert await page.locator(".mobile-cart").is_visible(), "Secondary actions should leave the mobile purchase bar visible."
+                assert await page.locator("#tier-festival .tier-controls output").inner_text() == "2", "The checkout quantity should stay selected while using secondary actions."
+                map_link = page.get_by_role("link", name="Buka lokasi")
+                map_url = urlparse(await map_link.get_attribute("href"))
+                map_query = dict(parse_qsl(map_url.query))
+                assert map_url.netloc == "www.google.com" and map_url.path == "/maps/search/" and map_query.get("api") == "1", "The location action should open a Google Maps search in a new tab."
+                assert map_query.get("query") == "Ruang Selatan, Jl. Musik Raya, Jakarta", "The map search should contain only the public location fields."
+                assert await map_link.get_attribute("target") == "_blank" and {"noopener", "noreferrer"} <= set((await map_link.get_attribute("rel")).split()), "External maps links should open safely in another tab."
+                await page.get_by_role("button", name="Bagikan konser").click()
+                payload = await page.evaluate("window.__sharedPayload")
+                assert payload == {"title": "Nusa Malam", "url": BASE_URL + "/konser/nusa-malam"}, "Sharing should use the clean public URL without query, fragment, token, or cart values."
+
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-cancel", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Bagikan konser").click()
+                assert await page.locator(".detail-share-feedback").count() == 0, "Canceling native share should not report an error or trigger a fallback."
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-fail", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Bagikan konser").click()
+                await page.get_by_role("alert").filter(has_text="Berbagi tidak tersedia").wait_for()
+                assert await page.get_by_role("button", name="Salin tautan konser").is_visible(), "A failed native share should offer a separate copy action."
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                await page.get_by_role("textbox", name="Tautan konser").wait_for()
+                assert await page.locator(".detail-manual-link input").evaluate("element => element === document.activeElement && element.selectionStart === 0 && element.selectionEnd === element.value.length"), "Missing clipboard access should select the clean URL for manual copying."
+
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-copy", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                assert await page.evaluate("window.__copiedText") == BASE_URL + "/konser/nusa-malam", "The clipboard fallback should copy only the public concert URL."
+                await page.get_by_role("status").filter(has_text="Tautan konser disalin").wait_for()
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-copy-fail", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                await page.get_by_role("textbox", name="Tautan konser").wait_for()
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-copy-unavailable", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                await page.get_by_role("textbox", name="Tautan konser").wait_for()
+
+                await page.set_viewport_size({"width": 320, "height": 740})
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-long", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Musisi").wait_for()
+                await page.locator(".detail-info").filter(has_text="Lokasi").locator("summary").click()
+                assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Long concert and location names should wrap without horizontal overflow at 320px."
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-no-location", wait_until="domcontentloaded")
+                assert await page.locator(".detail-location-unavailable").is_visible() and await page.locator(".detail-actions-row .detail-action[href]").count() == 0, "Missing API location details should not create an empty map link."
 
                 await page.set_viewport_size({"width": 390, "height": 844})
                 await page.evaluate("sessionStorage.removeItem('ticket-online:catalog:v1')")
