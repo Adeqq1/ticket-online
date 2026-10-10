@@ -1,16 +1,67 @@
-.ticket-page { padding-block: 42px 88px; }.ticket-page > header { max-width: 680px; margin-bottom: 34px; }.ticket-kicker { margin: 0 0 10px; color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }.ticket-page h1, .ticket-missing h1 { margin: 0; font-size: clamp(42px, 6vw, 70px); line-height: .95; letter-spacing: -.07em; }.ticket-page header > p:last-child, .ticket-caption, .ticket-missing p { color: var(--muted); line-height: 1.5; }.boarding-pass { display: grid; grid-template-columns: minmax(0, 1fr) 280px; overflow: hidden; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); box-shadow: 10px 12px 0 var(--ink); }.pass-main, .pass-stub { position: relative; padding: clamp(24px, 4vw, 44px); }.pass-main { min-height: 540px; }.pass-stub { display: flex; flex-direction: column; justify-content: space-between; border-left: 2px dashed color-mix(in srgb, var(--accent-ink) 55%, transparent); background: color-mix(in srgb, var(--accent) 84%, var(--ink)); }.pass-stub::before, .pass-stub::after { content: ""; position: absolute; left: -13px; width: 24px; height: 24px; border-radius: 50%; background: var(--canvas); }.pass-stub::before { top: -12px; }.pass-stub::after { bottom: -12px; }.pass-label, .pass-row span, .ticket-lines span, .pass-stub small { display: block; color: color-mix(in srgb, var(--accent-ink) 70%, transparent); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }.pass-top { display: flex; justify-content: space-between; gap: 20px; }.pass-status { border: 1px solid currentColor; padding: 4px 7px; align-self: start; font-size: 12px; font-weight: 700; }.pass-main h2 { max-width: 650px; margin: clamp(52px, 10vw, 108px) 0 34px; font-size: clamp(48px, 8vw, 92px); line-height: .86; letter-spacing: -.08em; }.pass-venue { margin: 0; font-size: 18px; font-weight: 700; }.pass-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 48px; }.pass-row b, .ticket-lines b { display: block; margin-top: 6px; font-size: 17px; }.ticket-lines { display: grid; gap: 14px; margin-top: 32px; padding-top: 20px; border-top: 1px solid color-mix(in srgb, var(--accent-ink) 40%, transparent); }.ticket-line { display: grid; grid-template-columns: 1fr auto; gap: 12px; }.ticket-line p { grid-column: 1 / -1; margin: 0; color: color-mix(in srgb, var(--accent-ink) 80%, transparent); font-size: 14px; }.qr-code { width: 180px; aspect-ratio: 1; padding: 10px; background: #fff; }.barcode { height: 46px; margin-top: 24px; background: repeating-linear-gradient(90deg, #fff 0 2px, transparent 2px 4px, #fff 4px 7px, transparent 7px 9px, #fff 9px 10px, transparent 10px 14px); }.ticket-reference { margin: 10px 0 0; font-family: "Courier New", monospace; font-size: 18px; font-weight: 700; letter-spacing: .08em; }.countdown { margin-top: 32px; padding-top: 20px; border-top: 1px solid color-mix(in srgb, var(--accent-ink) 40%, transparent); }.countdown strong { display: block; margin-top: 8px; font-size: 22px; letter-spacing: -.04em; }.ticket-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }.ticket-actions .button-secondary { border: 1px solid var(--line); background: transparent; color: var(--ink); }.ticket-caption { margin: 22px 0 0; font-size: 14px; }.ticket-missing { min-height: 60dvh; padding-block: 100px; }.ticket-missing .button { margin-top: 16px; }.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-@media (max-width: 767px) { .ticket-page { padding-block: 28px 56px; }.boarding-pass { grid-template-columns: 1fr; box-shadow: 6px 7px 0 var(--ink); }.pass-main { min-height: auto; }.pass-main h2 { margin-block: 62px 32px; font-size: clamp(48px, 14vw, 72px); }.pass-grid { margin-top: 36px; }.pass-stub { min-height: 350px; border-top: 2px dashed color-mix(in srgb, var(--accent-ink) 55%, transparent); border-left: 0; }.pass-stub::before, .pass-stub::after { top: -13px; bottom: auto; }.pass-stub::before { left: -12px; }.pass-stub::after { right: -12px; left: auto; }.qr-code { width: 180px; }.ticket-actions { display: grid; }.ticket-actions .button { width: 100%; } }
-@media (max-width: 480px) { .pass-grid { grid-template-columns: 1fr; }.pass-main h2 { font-size: clamp(42px, 14vw, 64px); }.ticket-actions { gap: 10px; } }
-@media print { @page { margin: 12mm; } body { background: #fff; color: #111; }.site-header, .site-footer, .skip-link, .ticket-actions, .ticket-caption, .toast, .countdown { display: none !important; }.ticket-page { padding: 0; }.ticket-page > header { margin-bottom: 16px; }.ticket-page h1 { font-size: 32px; }.boarding-pass { grid-template-columns: minmax(0, 1fr) 220px; break-inside: avoid; box-shadow: none; background: #1358d8 !important; color: #fff !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }.pass-main { min-height: 0; padding: 20px; }.pass-main h2 { margin-block: 28px 18px; font-size: 48px; }.pass-stub { min-height: 0; border-top: 0; border-left: 2px dashed #fff; padding: 20px; background: #1049ae !important; }.pass-stub::before { top: -12px; left: -13px; }.pass-stub::after { top: auto; right: auto; bottom: -12px; left: -13px; }.pass-stub::before, .pass-stub::after { background: #fff; }.ticket-reference { color: #fff !important; } }
-
-.pass-row b, .ticket-line, .ticket-reference { overflow-wrap: anywhere; }
-@media print {
-  :root { --canvas: #fff; --ink: #111; --muted: #444; --accent: #1358d8; --accent-ink: #fff; }
-}
-
-.qr-code { display: block; width: 180px; height: 180px; margin-top: 18px; padding: 8px; background: #fff; }
-
+.ticket-page { padding-block: 42px 88px; }
+.ticket-page > header { max-width: 680px; margin-bottom: 28px; }
+.ticket-kicker { margin: 0 0 10px; color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.ticket-page h1, .ticket-missing h1 { margin: 0; font-size: clamp(42px, 6vw, 70px); line-height: .95; letter-spacing: -.07em; }
+.ticket-page header > p:last-child, .ticket-caption, .ticket-missing p { color: var(--muted); line-height: 1.5; }
+.boarding-pass { display: grid; grid-template-columns: minmax(0, 1fr) 280px; overflow: hidden; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); box-shadow: 8px 9px 0 var(--ink); }
+.pass-main, .pass-stub { position: relative; padding: clamp(24px, 4vw, 44px); }
+.pass-main { display: grid; align-content: space-between; gap: 32px; }
+.pass-stub { display: flex; flex-direction: column; justify-content: space-between; border-left: 2px dashed color-mix(in srgb, var(--accent-ink) 55%, transparent); background: color-mix(in srgb, var(--accent) 84%, var(--ink)); }
+.pass-stub::before, .pass-stub::after { position: absolute; left: -13px; width: 24px; height: 24px; border-radius: 50%; background: var(--canvas); content: ""; }
+.pass-stub::before { top: -12px; }
+.pass-stub::after { bottom: -12px; }
+.pass-label, .pass-row span, .ticket-lines span { display: block; color: color-mix(in srgb, var(--accent-ink) 76%, transparent); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.pass-top { display: flex; justify-content: space-between; gap: 20px; }
+.pass-status { align-self: start; border: 1px solid currentColor; padding: 4px 7px; font-size: 12px; font-weight: 700; }
+.pass-main h2 { max-width: 650px; margin: 52px 0 14px; font-size: clamp(42px, 7vw, 76px); line-height: .94; letter-spacing: -.07em; overflow-wrap: anywhere; }
+.pass-venue { margin: 0; font-size: 18px; font-weight: 700; }
+.pass-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 22px; margin-top: 30px; }
+.pass-row b, .ticket-lines b { display: block; margin-top: 5px; font-size: 16px; overflow-wrap: anywhere; }
+.pass-details { border-top: 1px solid color-mix(in srgb, var(--accent-ink) 40%, transparent); padding-top: 14px; }
+.pass-details summary { min-height: 44px; cursor: pointer; font-weight: 700; }
+.ticket-lines { display: grid; gap: 14px; margin-top: 12px; }
+.ticket-line { display: grid; gap: 4px; }
+.qr-code { display: block; width: 180px; height: 180px; margin: 18px auto 0; padding: 10px; border: 0; background: #fff; }
 .ticket-code { margin: 18px 0; overflow-wrap: anywhere; font-family: "Courier New", monospace; font-size: clamp(19px, 2.4vw, 28px); font-weight: 700; letter-spacing: .04em; }
-@media (max-width: 767px) { .pass-stub { min-height: 240px; } }
-@media print { .ticket-code { color: #fff !important; } }
+.countdown { margin-top: 28px; padding-top: 18px; border-top: 1px solid color-mix(in srgb, var(--accent-ink) 40%, transparent); }
+.countdown strong { display: block; margin-top: 8px; font-size: 22px; }
+.ticket-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.ticket-actions .button-secondary { border: 1px solid var(--line); background: transparent; color: var(--ink); }
+.ticket-caption { margin: 18px 0 0; font-size: 14px; }
+.ticket-missing { min-height: 60dvh; padding-block: 100px; }
+.ticket-missing .button { margin: 16px 8px 0 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media print { .qr-code { width: 45mm; height: 45mm; padding: 2mm; background: #fff !important; } }
+@media (max-width: 767px) {
+  .ticket-page { padding-block: 28px 56px; }
+  .boarding-pass { grid-template-columns: 1fr; }
+  .pass-main { order: 1; gap: 24px; }
+  .pass-stub { order: 2; min-height: 0; border-top: 2px dashed color-mix(in srgb, var(--accent-ink) 55%, transparent); border-left: 0; }
+  .pass-stub::before, .pass-stub::after { top: -13px; bottom: auto; }
+  .pass-stub::before { left: -12px; }
+  .pass-stub::after { right: -12px; left: auto; }
+  .pass-main h2 { margin-top: 36px; font-size: clamp(40px, 12vw, 64px); }
+  .pass-grid { gap: 16px; margin-top: 24px; }
+  .ticket-actions { display: grid; }
+  .ticket-actions .button { width: 100%; }
+}
+@media (max-width: 480px) { .pass-grid { grid-template-columns: 1fr 1fr; gap: 14px 10px; }.pass-row b { font-size: 15px; } }
+@media print {
+  @page { margin: 12mm; }
+  body { background: #fff; color: #111; }
+  .site-header, .site-footer, .skip-link, .ticket-actions, .ticket-caption, .toast, .countdown { display: none !important; }
+  .ticket-page { padding: 0; }
+  .ticket-page > header { margin-bottom: 16px; }
+  .ticket-page h1 { font-size: 32px; }
+  .boarding-pass { grid-template-columns: minmax(0, 1fr) 220px; break-inside: avoid; box-shadow: none; background: #1358d8 !important; color: #fff !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .pass-main { display: grid; min-height: 0; gap: 20px; padding: 20px; }
+  .pass-main h2 { margin: 26px 0 12px; font-size: 42px; }
+  .pass-stub { min-height: 0; border-top: 0; border-left: 2px dashed #fff; padding: 20px; background: #1049ae !important; }
+  .pass-stub::before { top: -12px; left: -13px; }
+  .pass-stub::after { top: auto; right: auto; bottom: -12px; left: -13px; }
+  .pass-stub::before, .pass-stub::after { background: #fff; }
+  .pass-details { display: block; }
+  .pass-details summary { display: none; }
+  .ticket-lines { grid-template-columns: 1fr 1fr; }
+  .ticket-code { color: #fff !important; }
+}

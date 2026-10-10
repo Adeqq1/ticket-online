@@ -1,6 +1,7 @@
 .guide-hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(260px, .55fr); gap: 60px; align-items: end; padding-block: 104px 72px; }
 .guide-hero h1 { max-width: 760px; margin: 0; font-size: clamp(48px, 6vw, 82px); line-height: .96; }
 .guide-intro { max-width: 330px; margin: 0 0 4px; color: var(--muted); font-size: 18px; line-height: 1.5; }
+.guide-recovery { margin-block: 0 18px; }
 .guide-index { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .guide-index a { display: flex; gap: 12px; align-items: center; min-height: 70px; color: var(--muted); font-size: 14px; font-weight: 700; transition: color 180ms ease; }
 .guide-index a + a { padding-left: 24px; border-left: 1px solid var(--line); }
@@ -21,16 +22,18 @@
 @keyframes guide-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .accordion-panel { animation: none; } }
 @media (max-width: 767px) {
-  .guide-hero { grid-template-columns: 1fr; gap: 24px; padding-block: 64px 48px; }
+  .guide-hero { grid-template-columns: 1fr; gap: 24px; padding-block: 52px 28px; }
   .guide-hero h1 { font-size: clamp(44px, 13vw, 64px); }
   .guide-intro { margin: 0; font-size: 16px; }
-  .guide-index { grid-template-columns: 1fr 1fr; }
-  .guide-index a { min-height: 58px; }
+  .guide-index { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .guide-index a { min-width: 0; min-height: 58px; overflow-wrap: anywhere; }
   .guide-index a + a { padding-left: 14px; }
   .guide-index a:nth-child(3) { padding-left: 0; border-left: 0; }
-  .guide-content { padding-bottom: 72px; }
-  .guide-section { grid-template-columns: 1fr; gap: 30px; padding-block: 52px; }
-  .guide-section-heading { gap: 14px; }
-  .guide-section-heading h2 { font-size: 36px; }
+  .guide-content { padding-top: 8px; padding-bottom: 56px; }
+  .guide-section { grid-template-columns: 1fr; gap: 18px; padding-block: 32px; }
+  .guide-section-heading { min-width: 0; gap: 14px; }
+  .guide-section-heading h2 { min-width: 0; max-width: none; flex: 1; font-size: 36px; overflow-wrap: anywhere; }
+  .guide-section > * { min-width: 0; }
+  .accordion-trigger { min-width: 0; overflow-wrap: anywhere; }
   .accordion-panel { padding-right: 24px; }
 }

@@ -1,53 +1,111 @@
-.detail-hero { position: relative; isolation: isolate; overflow: hidden; min-height: 470px; background: var(--inverse-surface); color: var(--inverse-text); }
-.detail-backdrop { position: absolute; z-index: -1; width: 100%; height: 100%; object-fit: cover; opacity: .26; filter: blur(18px) saturate(.7); transform: scale(1.08); }
-.detail-hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, color-mix(in srgb, var(--inverse-surface) 92%, transparent), color-mix(in srgb, var(--inverse-surface) 45%, transparent)); }
-.detail-hero-inner { min-height: 470px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: clamp(32px, 7vw, 100px); align-items: center; padding-block: 48px; }
-.detail-poster { width: 100%; max-width: 280px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--radius); }
-.detail-status { margin: 0 0 16px; color: var(--accent); font-size: 13px; font-weight: 700; }
-.detail-hero h1 { max-width: 660px; margin: 0 0 20px; font-size: clamp(48px, 7vw, 88px); line-height: .94; letter-spacing: -.07em; }
-.detail-summary { margin: 8px 0; color: color-mix(in srgb, var(--inverse-text) 80%, transparent); font-size: 17px; }
-.detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: clamp(40px, 7vw, 100px); padding-block: 76px 140px; }
-.detail-main > [role="tabpanel"] { max-width: 720px; padding: 36px 0; }
-.detail-main h2, .cart h2 { margin: 0 0 16px; font-size: clamp(30px, 4vw, 48px); line-height: 1; letter-spacing: -.06em; }
-.detail-main p, .terms-list { color: var(--muted); line-height: 1.6; }
-.tabs { display: flex; gap: 20px; overflow-x: auto; border-bottom: 1px solid var(--line); }
-.tabs button { flex: 0 0 auto; border: 0; border-bottom: 2px solid transparent; padding: 0 0 14px; background: transparent; color: var(--muted); font-weight: 700; }
-.tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--ink); }
-.lineup-list, .terms-list { padding-left: 20px; }
-.lineup-list li { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 20px; font-weight: 700; }
-.location-map { margin: 0; overflow: hidden; border-radius: var(--radius); background: var(--surface); }
-.location-map > div { position: relative; height: 260px; background: repeating-linear-gradient(25deg, transparent 0 45px, var(--line) 46px 50px, transparent 51px 95px), repeating-linear-gradient(120deg, transparent 0 55px, var(--line) 56px 60px, transparent 61px 105px); }
-.location-map b { position: absolute; top: 48%; left: 43%; padding: 9px; background: var(--accent); color: var(--accent-ink); font-size: 13px; }
-.location-map figcaption { padding: 16px; color: var(--muted); }
-.ticket-selection { padding-top: 42px; }
-.stage-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 720px; padding: 18px; background: var(--surface); border-radius: var(--radius); }
-.stage { grid-column: 1 / -1; padding: 14px; background: var(--inverse-surface); color: var(--inverse-text); text-align: center; font-weight: 700; letter-spacing: .12em; }
-.zone { min-height: 112px; border: 1px solid var(--control-line); border-radius: var(--radius); background: var(--canvas); color: var(--ink); font-weight: 700; }
-.zone.map-vip { grid-row: 2; }.zone.map-festival, .zone.map-tribune { grid-column: 1 / -1; }.zone.map-festival { grid-row: 3; }.zone.map-tribune { grid-row: 4; }
-.zone small { display: block; margin-top: 7px; color: var(--muted); font-weight: 400; }
-.zone[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
-.zone { transition: transform 180ms ease, border-color 180ms ease, background 180ms ease; }
-.zone:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--accent); }
-.zone em { display: block; margin-top: 7px; color: var(--accent); font-size: 12px; font-style: normal; }
-.zone:disabled { cursor: not-allowed; }
-.tier-list { margin-top: 26px; border-top: 1px solid var(--line); }
-.ticket-tier { display: flex; justify-content: space-between; gap: 20px; padding: 22px 0; border-bottom: 1px solid var(--line); }
-.ticket-tier.is-selected { padding-inline: 12px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.ticket-tier.is-selected { box-shadow: inset 3px 0 var(--accent); }
-.ticket-tier h3 { margin: 0 0 7px; font-size: 23px; letter-spacing: -.05em; }
-.ticket-tier p { margin: 0 0 12px; font-size: 14px; }
-.tier-controls { min-width: 146px; text-align: right; }
-.stock { display: block; min-height: 20px; margin-bottom: 12px; color: var(--muted); font-size: 13px; font-weight: 700; }
-.low-stock, .sold-out { color: var(--danger); }
-.zone.is-sold-out { color: var(--muted); opacity: .7; }
-.zone.is-sold-out small::after { content: " · Habis"; color: var(--danger); font-weight: 700; }
-.tier-controls > div { display: flex; justify-content: end; align-items: center; gap: 9px; }
-.tier-controls button { width: 44px; height: 44px; border: 1px solid var(--control-line); border-radius: var(--radius); background: transparent; color: var(--ink); font-size: 18px; }.tier-controls button:disabled { opacity: .45; cursor: not-allowed; }
-.tier-controls output { min-width: 20px; font-weight: 700; }
-.cart { position: sticky; top: 24px; align-self: start; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.cart h2 { font-size: 28px; }.cart p { margin: 0 0 10px; line-height: 1.4; }.cart-empty { color: var(--muted); }.cart-total { margin-top: 26px !important; padding-top: 16px; border-top: 1px solid var(--line); font-weight: 700; }.cart-checkout { width: 100%; margin-top: 10px; }.cart-checkout:disabled { border-color: var(--line); background: var(--line); color: var(--muted); cursor: not-allowed; }
-.mobile-cart { display: none; }.detail-missing { min-height: 60dvh; padding-block: 110px; }.detail-missing h1 { font-size: clamp(42px, 7vw, 76px); letter-spacing: -.07em; }.detail-missing p { max-width: 480px; margin-bottom: 28px; color: var(--muted); }
-dialog { width: min(100% - 32px, 460px); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; background: var(--canvas); color: var(--ink); }dialog::backdrop { background: color-mix(in srgb, var(--ink) 65%, transparent); }dialog h2 { margin-top: 0; font-size: 28px; letter-spacing: -.05em; }dialog p { color: var(--muted); line-height: 1.5; }
-@media (prefers-reduced-transparency: reduce) { .detail-backdrop { display: none; }.detail-hero::after { background: var(--inverse-surface); } }
-@media (max-width: 767px) { .detail-hero-inner { min-height: auto; grid-template-columns: 1fr; gap: 26px; padding-block: 38px; }.detail-poster { max-width: 180px; }.detail-layout { grid-template-columns: 1fr; padding-block: 52px calc(112px + env(safe-area-inset-bottom)); }.cart { display: none; }.zone { min-height: 96px; }.ticket-tier { align-items: start; }.tier-controls { min-width: 132px; }.mobile-cart { position: fixed; z-index: 2; right: 0; bottom: 0; left: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--control-line); background: var(--canvas); }.mobile-cart .button { min-height: 44px; padding-inline: 14px; } }
-@media (max-width: 480px) { .ticket-tier { display: grid; gap: 18px; }.tier-controls { min-width: 0; text-align: left; }.tier-controls > div { justify-content: start; } }
+.concert-detail .detail-hero { background: var(--inverse-surface); color: var(--inverse-text); }
+.concert-detail .detail-hero-inner { min-height: 320px; display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: clamp(28px, 5vw, 64px); align-items: center; padding-block: 28px; }
+.concert-detail .detail-poster { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--radius); background: var(--surface); }
+.concert-detail .detail-status { margin: 0 0 8px; color: var(--accent); font-size: 13px; font-weight: 700; }
+.concert-detail .detail-hero h1 { max-width: 660px; margin: 0 0 14px; font-size: clamp(40px, 6vw, 68px); line-height: 1; letter-spacing: -.07em; }
+.concert-detail .detail-summary { margin: 5px 0; color: color-mix(in srgb, var(--inverse-text) 85%, transparent); font-size: 16px; }
+.concert-detail .detail-notices { padding-top: 12px; }
+.concert-detail .detail-notices:empty { display: none; }
+.concert-detail .event-notice { margin: 0 0 8px; }
+.concert-detail .refund-note { margin: 0 0 8px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--surface); line-height: 1.5; }
+.concert-detail .detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: clamp(32px, 6vw, 80px); align-items: start; padding-block: 24px 80px; }
+.concert-detail .detail-main > [role="tabpanel"] { max-width: 720px; padding: 20px 0; }
+.concert-detail .detail-main h2, .concert-detail .cart h2 { margin: 0 0 12px; font-size: clamp(28px, 3.5vw, 40px); line-height: 1.08; letter-spacing: -.06em; }
+.concert-detail .detail-main p, .concert-detail .terms-list { color: var(--muted); line-height: 1.55; }
+.concert-detail .ticket-selection { padding-top: 12px; scroll-margin-bottom: calc(var(--detail-mobile-cart-height, 0px) + 16px); }
+.concert-detail .ticket-selection > p { margin: 0 0 16px; }
+.concert-detail .detail-info-list { display: grid; gap: 8px; max-width: 760px; margin-top: 30px; }
+.concert-detail .detail-info { border-top: 1px solid var(--line); }
+.concert-detail .detail-info:last-child { border-bottom: 1px solid var(--line); }
+.concert-detail .detail-info summary, .concert-detail .zone-details summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; font-weight: 700; list-style: none; }
+.concert-detail .detail-info summary::-webkit-details-marker, .concert-detail .zone-details summary::-webkit-details-marker { display: none; }
+.concert-detail .detail-info summary::before, .concert-detail .zone-details summary::before { content: "+"; display: grid; place-items: center; width: 26px; height: 26px; margin-right: 10px; border-radius: 50%; background: var(--surface); color: var(--accent); font-size: 18px; }
+.concert-detail .detail-info[open] summary::before, .concert-detail .zone-details[open] summary::before { content: "−"; }
+.concert-detail .detail-info-content { padding: 4px 0 16px 36px; }
+.concert-detail .detail-info-content > :first-child { margin-top: 0; }
+.concert-detail .lineup-list, .concert-detail .terms-list { padding-left: 20px; }
+.concert-detail .lineup-list li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 18px; font-weight: 700; }
+.concert-detail .location-map { margin: 0; overflow: hidden; border-radius: var(--radius); background: var(--surface); }
+.concert-detail .location-map > div { position: relative; height: 240px; background: repeating-linear-gradient(25deg, transparent 0 45px, var(--line) 46px 50px, transparent 51px 95px), repeating-linear-gradient(120deg, transparent 0 55px, var(--line) 56px 60px, transparent 61px 105px); }
+.concert-detail .location-map b { position: absolute; top: 48%; left: 43%; padding: 9px; background: var(--accent); color: var(--accent-ink); font-size: 13px; }
+.concert-detail .location-map figcaption { padding: 14px; color: var(--muted); }
+.concert-detail .zone-details { max-width: 720px; margin-bottom: 10px; }
+.concert-detail .zone-details summary { width: fit-content; padding-right: 12px; border-radius: var(--radius); color: var(--accent); }
+.concert-detail .stage-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 720px; padding: 14px; border-radius: var(--radius); background: var(--surface); }
+.concert-detail .stage { grid-column: 1 / -1; padding: 12px; background: var(--inverse-surface); color: var(--inverse-text); text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .12em; }
+.concert-detail .zone { min-height: 92px; border: 1px solid var(--control-line); border-radius: var(--radius); background: var(--canvas); color: var(--ink); font-weight: 700; transition: transform 180ms ease, border-color 180ms ease, background 180ms ease; }
+.concert-detail .zone.map-vip { grid-row: 2; }
+.concert-detail .zone.map-festival, .concert-detail .zone.map-tribune { grid-column: 1 / -1; }
+.concert-detail .zone.map-festival { grid-row: 3; }
+.concert-detail .zone.map-tribune { grid-row: 4; }
+.concert-detail .zone small, .concert-detail .zone em { display: block; margin-top: 6px; }
+.concert-detail .zone small { color: var(--muted); font-weight: 400; }
+.concert-detail .zone em { color: var(--accent); font-size: 12px; font-style: normal; }
+.concert-detail .zone[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.concert-detail .zone:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--accent); }
+.concert-detail .zone:disabled { cursor: not-allowed; color: var(--muted); opacity: .7; }
+.concert-detail .zone.is-sold-out small::after { content: " · Habis"; color: var(--danger); font-weight: 700; }
+.concert-detail .tier-list { max-width: 760px; margin-top: 12px; border-top: 1px solid var(--line); }
+.concert-detail .ticket-tier { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 16px 12px; border-bottom: 1px solid var(--line); scroll-margin-bottom: calc(var(--detail-mobile-cart-height, 0px) + 16px); }
+.concert-detail .ticket-tier.is-selected { background: color-mix(in srgb, var(--accent) 8%, transparent); box-shadow: inset 3px 0 var(--accent); }
+.concert-detail .ticket-tier h3 { margin: 0 0 5px; font-size: 20px; letter-spacing: -.05em; }
+.concert-detail .ticket-tier p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+.concert-detail .ticket-tier strong { font-size: 15px; }
+.concert-detail .tier-limit { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.concert-detail .tier-controls { min-width: 130px; text-align: right; }
+.concert-detail .stock { display: block; min-height: 20px; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.concert-detail .low-stock, .concert-detail .sold-out, .concert-detail .limit-message { color: var(--danger); }
+.concert-detail .limit-message { display: block; margin: 0 0 6px; font-size: 11px; }
+.concert-detail .tier-controls > div { display: flex; justify-content: end; align-items: center; gap: 8px; }
+.concert-detail .tier-controls button { width: 44px; height: 44px; border: 1px solid var(--control-line); border-radius: var(--radius); background: transparent; color: var(--ink); font-size: 18px; }
+.concert-detail .tier-controls button:disabled { opacity: .45; cursor: not-allowed; }
+.concert-detail .tier-controls output { min-width: 20px; font-weight: 700; }
+.concert-detail .cart { position: sticky; top: 24px; align-self: start; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.concert-detail .cart h2 { font-size: 26px; }
+.concert-detail .cart p { margin: 0 0 10px; line-height: 1.45; }
+.concert-detail .cart .cart-empty, .concert-detail .sale-closed { color: var(--muted); font-size: 13px; }
+.concert-detail .cart-total { margin-top: 16px !important; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 700; }
+.concert-detail .cart-checkout { width: 100%; margin-top: 8px; }
+.concert-detail .cart-checkout:disabled { border-color: var(--line); background: var(--line); color: var(--muted); cursor: not-allowed; }
+.concert-detail .mobile-cart { display: none; }
+.detail-missing { min-height: 60dvh; padding-block: 110px; }
+.detail-missing h1 { font-size: clamp(42px, 7vw, 76px); letter-spacing: -.07em; }
+.detail-missing p { max-width: 480px; margin-bottom: 28px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .concert-detail .zone { transition: none; }.concert-detail .zone:hover:not(:disabled) { transform: none; } }
+@media (max-width: 767px) {
+  .concert-detail .detail-hero-inner { min-height: auto; grid-template-columns: 104px minmax(0, 1fr); gap: 16px; padding-block: 20px; }
+  .concert-detail .detail-poster { max-width: 104px; }
+  .concert-detail .detail-hero h1 { margin-bottom: 8px; font-size: clamp(27px, 7.5vw, 38px); }
+  .concert-detail .detail-status { margin-bottom: 4px; font-size: 12px; }
+  .concert-detail .detail-summary { margin: 3px 0; font-size: 13px; line-height: 1.4; }
+  .concert-detail .detail-layout { grid-template-columns: 1fr; gap: 14px; padding-block: 4px calc(var(--detail-mobile-cart-height, 88px) + 24px + env(safe-area-inset-bottom)); }
+  .concert-detail :where(a, button, summary) { scroll-margin-block-end: calc(var(--detail-mobile-cart-height, 88px) + 24px); }
+  .concert-detail .detail-notices { padding-top: 10px; }
+  .concert-detail .ticket-selection { padding-top: 8px; }
+  .concert-detail .detail-main h2 { font-size: 28px; }
+  .concert-detail .detail-info-list { gap: 2px; margin-top: 20px; }
+  .concert-detail .detail-info summary { min-height: 46px; }
+  .concert-detail .detail-info-content { padding-left: 34px; }
+  .concert-detail .zone-details { margin-bottom: 8px; }
+  .concert-detail .stage-layout { gap: 8px; padding: 10px; }
+  .concert-detail .zone { min-height: 78px; padding: 8px 4px; font-size: 13px; }
+  .concert-detail .ticket-tier { gap: 10px; padding: 14px 8px; }
+  .concert-detail .ticket-tier h3 { font-size: 18px; }
+  .concert-detail .tier-controls { min-width: 112px; }
+  .concert-detail .tier-controls > div { gap: 5px; }
+  .concert-detail .mobile-cart { position: fixed; z-index: 5; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 72px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--control-line); background: var(--canvas); box-shadow: 0 -8px 24px color-mix(in srgb, var(--ink) 8%, transparent); }
+  .concert-detail .mobile-cart > div { display: grid; min-width: 0; gap: 2px; font-size: 13px; line-height: 1.35; }
+  .concert-detail .mobile-cart .sale-closed { color: var(--danger); }
+  .concert-detail .mobile-cart .button { min-height: 46px; padding-inline: 14px; font-size: 13px; }
+  .concert-detail .mobile-cart .button:disabled { border-color: var(--line); background: var(--line); color: var(--muted); cursor: not-allowed; }
+  .concert-detail .cart { display: none; }
+}
+@media (max-width: 380px) {
+  .concert-detail .detail-hero-inner { grid-template-columns: 88px minmax(0, 1fr); gap: 12px; }
+  .concert-detail .detail-poster { max-width: 88px; }
+  .concert-detail .ticket-tier { grid-template-columns: minmax(0, 1fr); }
+  .concert-detail .tier-controls { min-width: 0; text-align: left; }
+  .concert-detail .tier-controls > div { justify-content: start; }
+  .concert-detail .tier-controls .stock, .concert-detail .tier-controls .limit-message { display: inline-block; margin-right: 8px; }
+}
+@media print { .concert-detail .mobile-cart { display: none !important; }.concert-detail .cart { position: static; } }

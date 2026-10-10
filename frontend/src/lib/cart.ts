@@ -1,6 +1,5 @@
 import type { Concert } from "./concerts.ts";
 
-export type Tab = "description" | "lineup" | "location" | "terms";
 export type DetailState = { selectedZoneId: string | null; quantities: Record<string, number> };
 export const initialState: DetailState = { selectedZoneId: null, quantities: {} };
 

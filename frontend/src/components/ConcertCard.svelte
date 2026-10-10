@@ -1,21 +1,21 @@
 <script lang="ts">
   import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
+  import { eventStatus } from "../lib/event-changes.ts";
   let { concert, variant = "catalog" }: { concert: Concert; variant?: "featured" | "catalog" } = $props();
+  const changedStatus = $derived(eventStatus(concert.currentEvent));
+  const available = $derived(concert.ticketTiers.length > 0 && concert.status !== "Sold Out" && !concert.currentEvent?.salesPaused);
 </script>
 
-{#if variant === "featured"}
-  <article class="event-card">
-    <a class="event-card-link" href={`/konser/${concert.id}`}>
-      <img src={concert.image} alt={`Poster contoh konser ${concert.artist}`} width="900" height="1100" loading="lazy" />
-      <div class="event-card-copy"><p>{eventDate(concert.startsAt)}</p><h3>{concert.artist}</h3><span>{concert.venue}, {concert.city}</span></div>
-    </a>
-  </article>
-{:else}
-  <article class:is-sold-out={concert.status === "Sold Out"} class="concert-card">
-    <a class="concert-card-link" href={`/konser/${concert.id}`}>
-      <img src={concert.image} alt={`Poster contoh konser ${concert.artist}`} width="900" height="1100" loading="lazy" />
-      <span class="concert-status">{concert.ticketTiers.length ? concert.status : "Tiket belum tersedia"}</span>
-      <div class="concert-card-body"><p class="concert-meta">{eventDate(concert.startsAt)}, {concert.genre}</p><h2>{concert.artist}</h2><p class="concert-venue">{concert.venue}, {concert.city}</p>{#if concert.ticketTiers.length}<p class="concert-price">Mulai {formatRupiah.format(concert.price)}</p>{:else}<p class="concert-price">Tiket belum tersedia</p>{/if}</div>
-    </a>
-  </article>
-{/if}
+<article class:is-sold-out={!available} class="concert-card">
+  <a class="concert-card-link" href={`/konser/${concert.id}`}>
+    <img class="concert-poster" src={concert.image} alt={`Poster konser ${concert.artist}`} width="900" height="1100" loading="lazy" onerror={(event) => event.currentTarget.classList.add("poster-unavailable")} />
+    <div class="concert-card-body">
+      {#if changedStatus}<p class="concert-change">{changedStatus}</p>{/if}
+      <p class="concert-meta">{eventDate(concert.currentEvent ? concert.currentEvent.startsAt : concert.startsAt)}{variant === "catalog" ? ` · ${concert.genre}` : ""}</p>
+      <h3>{concert.artist}</h3>
+      <p class="concert-venue">{concert.venue}, {concert.city}</p>
+      <p class="concert-price">{concert.ticketTiers.length ? `Mulai ${formatRupiah.format(Math.min(...concert.ticketTiers.map((tier) => tier.price)))}` : "Tiket belum tersedia"}</p>
+      <span class="concert-status">{available ? concert.status : concert.status === "Sold Out" ? "Habis" : "Tiket belum tersedia"}</span>
+    </div>
+  </a>
+</article>

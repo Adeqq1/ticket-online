@@ -1,0 +1,77 @@
+@font-face {
+  font-family: Manrope;
+  src: url("/fonts/Manrope-Variable.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+.public-site {
+  --canvas: #f7f8fa;
+  --surface: #fff;
+  --ink: #17211f;
+  --muted: #56615e;
+  --line: #d5dce4;
+  --control-line: #7d8a84;
+  --accent: #1358d8;
+  --accent-ink: #fff;
+  --danger: #8f2f22;
+  --status-success: #166534;
+  --status-warning: #854d0e;
+  --status-info: #1d4ed8;
+  --inverse-surface: #17211f;
+  --inverse-text: #f3f4f0;
+  --radius: 8px;
+  min-height: 100dvh;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: Manrope, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+}
+
+.public-site :where(button, input, select, textarea, output) { font: inherit; }
+.public-site :where(a, button, input, select, summary) { -webkit-tap-highlight-color: transparent; }
+.public-site :where(:focus-visible) { outline-color: var(--accent); }
+.public-site input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), .public-site select, .public-site textarea { font-size: 16px; }
+.public-site .button-small { min-height: 44px; }
+.public-site :where(.wordmark) { min-height: 44px; padding-block: 7px; margin-block: -7px; }
+.public-site .wordmark { padding-inline: 7px; margin-inline: -7px; }
+.public-site input[type="range"] { min-height: 44px; }
+.public-site :where(.nav-links a, .footer-links a, .text-button, .back-link, .catalog-link, .my-ticket-reference, .my-ticket-action) { min-height: 44px; align-items: center; }
+.public-site :where(.nav-links a, .footer-links a, .catalog-link, .my-ticket-reference, .my-ticket-action) { display: inline-flex; }
+.public-site :where(.text-button, .back-link) { display: inline-flex; }
+.public-site :where(.shell) { width: min(100% - 40px, 1280px); }
+.public-site :where(.button) { border-radius: var(--radius); transition-duration: 180ms; }
+.public-site .button { white-space: normal; }
+.public-site h1 { overflow-wrap: anywhere; }
+.public-site :where(.wordmark) { font-family: Arial, Helvetica, sans-serif; }
+.public-site :where(.my-tickets-heading h1) { overflow-wrap: anywhere; }
+
+@media (max-width: 767px) {
+  .public-site :where(.shell) { width: min(100% - 32px, 1280px); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .public-site {
+    --canvas: #151a19;
+    --surface: #202826;
+    --ink: #edf1e9;
+    --muted: #bcc7c0;
+    --line: #4b5752;
+    --control-line: #73827b;
+    --accent: #769dff;
+    --accent-ink: #101a35;
+    --danger: #ff9585;
+    --status-success: #86efac;
+    --status-warning: #fcd34d;
+    --status-info: #93c5fd;
+    --inverse-surface: #202826;
+    --inverse-text: #edf1e9;
+  }
+}
+
+@media print {
+  .public-site { --canvas: #fff; --ink: #111; --muted: #444; --accent: #1358d8; --accent-ink: #fff; }
+}

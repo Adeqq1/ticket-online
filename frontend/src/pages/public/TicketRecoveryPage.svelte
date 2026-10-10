@@ -91,8 +91,14 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Pemulihan tiket</p>
     <h1>Pulihkan tiket.</h1>
-    <p>Buka kembali e-ticket di browser baru. Tautan pemulihan dikirim ke email pembeli yang tersimpan pada pesanan.</p>
+    <p>Gunakan email pembeli dan kode pesanan untuk membuka e-ticket di browser ini.</p>
   </header>
+
+  <ol class="recovery-steps" aria-label="Langkah pemulihan tiket">
+    <li><strong>Siapkan data pesanan</strong><span>Email pembeli dan kode yang diawali TO-.</span></li>
+    <li><strong>Minta tautan</strong><span>Tautan dikirim ke email pembeli.</span></li>
+    <li><strong>Buka tautan email</strong><span>Pulihkan akses sebelum tautan kedaluwarsa.</span></li>
+  </ol>
 
   {#if unsaved}
     <div class="recovery-panel" id="recovery-unsaved" tabindex="-1" role="alert">
@@ -128,7 +134,7 @@
     {:else}
       <div class="recovery-panel">
         <h2>Siapkan data pemulihan</h2>
-        <p>Cari email berjudul “E-ticket pesanan” dan salin kode pesanan yang diawali <code>TO-</code>. Kode pesanan berbeda dari kode tiket yang diawali <code>ET-</code>. Gunakan email pembeli yang dipakai saat checkout.</p>
+        <p>Cari email berjudul “E-ticket pesanan” untuk menemukan kode pesanan. Kode <code>TO-…</code> berbeda dari kode tiket <code>ET-…</code>. Gunakan email pembeli saat checkout.</p>
       </div>
       <form class="recovery-panel field-grid" novalidate onsubmit={submitRequest} aria-describedby="recovery-form-error">
         {#if linkSpent}<p class="recovery-wide">Minta tautan baru dengan email pembeli dan kode pesanan (reference).</p>{/if}
@@ -138,7 +144,7 @@
         </label>
         <label for="recovery-reference">Kode pesanan (reference)
           <input id="recovery-reference" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="23" placeholder="TO-…" bind:value={reference} required aria-invalid={Boolean(errors.reference)} aria-describedby="recovery-reference-hint recovery-reference-error" class:is-invalid={Boolean(errors.reference)} />
-          <span id="recovery-reference-hint" class="recovery-hint">Kode ini diawali TO-. Kode tiket yang diawali ET- berbeda dan tidak digunakan di sini.</span>
+          <span id="recovery-reference-hint" class="recovery-hint">Kode pesanan diawali TO-. Kode tiket ET- tidak berlaku di sini.</span>
           <small id="recovery-reference-error" aria-live="polite">{errors.reference}</small>
         </label>
         <p id="recovery-form-error" class="form-error recovery-wide" aria-live="polite">{formError}</p>

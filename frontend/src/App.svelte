@@ -14,10 +14,12 @@
   import AdminArea from "./layouts/AdminArea.svelte";
   import { matchRoute } from "./lib/route.ts";
   const route = $state(matchRoute(location.pathname));
+  const isAdmin = route.name.startsWith("admin-");
 </script>
 
-{#if !["admin-scan", "admin-staff", "admin-events", "admin-orders", "admin-issues", "admin-operations", "admin-reports", "admin-attendance-report", "admin-conversion-report", "admin-check-ins", "admin-login"].includes(route.name)}<SiteHeader page={route.name === "home" ? "home" : route.name === "concerts" ? "concerts" : route.name === "my-tickets" ? "my-tickets" : route.name === "guide" ? "guide" : "other"} />{/if}
-<main id="konten" tabindex="-1" class:admin-main={["admin-scan", "admin-staff", "admin-events", "admin-orders", "admin-issues", "admin-operations", "admin-reports", "admin-attendance-report", "admin-conversion-report", "admin-check-ins", "admin-login"].includes(route.name)}>
+<div class:public-site={!isAdmin}>
+{#if !isAdmin}<SiteHeader page={route.name === "home" ? "home" : route.name === "concerts" ? "concerts" : route.name === "my-tickets" ? "my-tickets" : route.name === "guide" ? "guide" : "other"} />{/if}
+<main id="konten" tabindex="-1" class:admin-main={isAdmin}>
   {#if route.name === "home"}<HomePage />
   {:else if route.name === "concerts"}<ConcertCatalogPage />
   {:else if route.name === "concert-detail"}<ConcertDetailPage id={route.id} />
@@ -40,4 +42,5 @@
   {:else if route.name === "admin-scan"}<AdminArea page="scan" />
   {:else}<UnknownRoutePage />{/if}
 </main>
-{#if !["admin-scan", "admin-staff", "admin-events", "admin-orders", "admin-issues", "admin-operations", "admin-reports", "admin-attendance-report", "admin-conversion-report", "admin-check-ins", "admin-login"].includes(route.name)}<SiteFooter />{/if}
+{#if !isAdmin}<SiteFooter />{/if}
+</div>
