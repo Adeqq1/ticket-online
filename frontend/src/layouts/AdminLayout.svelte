@@ -76,8 +76,9 @@
 
 <style>
   .admin-topbar { width: min(100% - 56px, 1500px); }
+  .admin-topbar .scan-brand { min-height: 44px; }
   .admin-menu-trigger { display: none; }
-  .admin-logout, .admin-mobile-menu-heading button { min-height: 44px; }
+  .admin-logout, .admin-mobile-menu-heading button { min-width: 44px; min-height: 44px; }
   .admin-layout-grid { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: clamp(28px, 4vw, 64px); width: min(100% - 56px, 1500px); margin: 0 auto; }
   .admin-sidebar { position: sticky; top: 20px; align-self: start; display: grid; gap: 24px; padding: 32px 0; }
   .admin-nav-group { display: grid; align-content: start; gap: 4px; }
@@ -98,7 +99,7 @@
   .admin-layout :is(a, button):focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
   @media (max-width: 1023px) {
     .admin-topbar { width: min(100% - 32px, 1500px); min-height: 64px; }
-    .admin-menu-trigger { display: inline-flex; min-height: 44px; }
+    .admin-menu-trigger { display: inline-flex; min-width: 44px; min-height: 44px; justify-content: center; }
     .admin-layout .staff-login-label { display: none; }
     .admin-sidebar { display: none; }
     .admin-layout-grid { display: block; width: min(100% - 32px, 900px); }

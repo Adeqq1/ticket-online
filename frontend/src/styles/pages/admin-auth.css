@@ -4,15 +4,15 @@
 .staff-login-card h1, .staff-gate-message h1, .staff-admin-heading h1 { margin: 0; color: var(--scan-text); font-size: clamp(36px, 6vw, 60px); line-height: .98; letter-spacing: -.065em; }
 .staff-login-copy, .staff-admin-heading > div > p:last-child { color: var(--scan-muted); line-height: 1.55; }
 .staff-form { display: grid; gap: 17px; margin-top: 28px; }
-.staff-form > label { display: grid; gap: 8px; color: var(--scan-muted); font-size: 12px; }
-.staff-form input:not([type="checkbox"]), .staff-assignment-controls select { box-sizing: border-box; width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid #516059; border-radius: 0; background: #111918; color: var(--scan-text); font: 14px Arial, Helvetica, sans-serif; }
+.staff-form > label { display: grid; gap: 8px; color: var(--scan-muted); font-size: 16px; line-height: 1.45; }
+.staff-form input:not([type="checkbox"]), .staff-assignment-controls select { box-sizing: border-box; width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid #516059; border-radius: 0; background: #111918; color: var(--scan-text); font: 16px Arial, Helvetica, sans-serif; }
 .staff-form input:focus-visible, .staff-assignment-controls select:focus-visible, .staff-text-button:focus-visible, .staff-secondary-button:focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
 .staff-form input:disabled, .staff-assignment-controls select:disabled { opacity: .65; }
-.staff-form small, .staff-login-card .staff-session-note { color: var(--scan-muted); font-size: 11px; line-height: 1.5; }
+.staff-form small, .staff-login-card .staff-session-note { color: var(--scan-muted); font-size: 14px; line-height: 1.5; }
 .staff-submit { min-height: 48px; margin-top: 3px; cursor: pointer; }
 .staff-submit:disabled, .staff-secondary-button:disabled, .staff-text-button:disabled { cursor: not-allowed; opacity: .6; }
 .staff-session-note { margin: 24px 0 0; }
-.staff-form-message { margin: 0; padding: 12px 14px; border: 1px solid var(--scan-line); font-size: 13px; line-height: 1.5; }
+.staff-form-message { margin: 0; padding: 12px 14px; border: 1px solid var(--scan-line); font-size: 14px; line-height: 1.5; }
 .staff-form-error { border-color: color-mix(in srgb, var(--scan-red) 60%, var(--scan-line)); color: #ffc0b8; }
 .staff-form-success { border-color: color-mix(in srgb, var(--scan-lime) 60%, var(--scan-line)); color: var(--scan-lime); }
 .staff-gate-state { min-height: 100dvh; }
@@ -31,35 +31,35 @@
 .staff-panel-heading > div { display: flex; align-items: baseline; gap: 12px; }
 .staff-panel-heading h2 { margin: 0; font-size: clamp(19px, 2vw, 25px); letter-spacing: -.04em; }
 .staff-panel-heading .panel-index { flex: 0 0 auto; }
-.staff-muted { color: var(--scan-muted); font-size: 13px; line-height: 1.5; }
-.staff-text-button { padding: 4px 0; border: 0; border-bottom: 1px solid var(--scan-muted); background: transparent; color: var(--scan-muted); font: 11px Arial, Helvetica, sans-serif; cursor: pointer; }
+.staff-muted { color: var(--scan-muted); font-size: 14px; line-height: 1.5; }
+.staff-text-button { min-width: 44px; min-height: 44px; padding: 4px 0; border: 0; border-bottom: 1px solid var(--scan-muted); background: transparent; color: var(--scan-muted); font: 14px Arial, Helvetica, sans-serif; cursor: pointer; }
 .staff-text-button:hover { border-color: var(--scan-lime); color: var(--scan-lime); }
 .staff-list, .staff-assignment-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .staff-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 15px 0; border-top: 1px solid var(--scan-line); }
 .staff-list li.staff-selected { border-left: 2px solid var(--scan-lime); padding-left: 12px; }
 .staff-list-identity { display: grid; min-width: 0; gap: 4px; }
-.staff-list-identity strong { overflow-wrap: anywhere; color: var(--scan-text); font-size: 13px; }
-.staff-list-identity span { overflow-wrap: anywhere; color: var(--scan-muted); font-size: 11px; }
+.staff-list-identity strong { overflow-wrap: anywhere; color: var(--scan-text); font-size: 16px; }
+.staff-list-identity span { overflow-wrap: anywhere; color: var(--scan-muted); font-size: 14px; }
 .staff-state { color: var(--scan-lime); font: 10px "Courier New", monospace; white-space: nowrap; }
 .staff-state-inactive { color: var(--scan-red); }
 .staff-admin-panel > .staff-form { margin-top: 0; }
 .staff-admin-panel > .staff-form .staff-submit { width: 100%; }
 .staff-assignment-editor { min-width: 0; margin: 0; padding: 0; border: 0; }
-.staff-assignment-editor legend, .staff-edit-grid h3 { margin-bottom: 10px; color: var(--scan-muted); font-size: 12px; font-weight: 400; }
+.staff-assignment-editor legend, .staff-edit-grid h3 { margin-bottom: 10px; color: var(--scan-muted); font-size: 16px; font-weight: 400; }
 .staff-assignment-controls { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 9px; }
-.staff-assignment-controls label { display: grid; gap: 7px; min-width: 0; color: var(--scan-muted); font-size: 11px; }
-.staff-assignment-controls select { min-width: 0; min-height: 40px; font-size: 12px; }
-.staff-secondary-button { display: inline-grid; min-height: 40px; place-items: center; padding: 8px 12px; border: 1px solid #516059; background: #111918; color: var(--scan-text); font-size: 11px; text-decoration: none; cursor: pointer; }
+.staff-assignment-controls label { display: grid; gap: 7px; min-width: 0; color: var(--scan-muted); font-size: 16px; }
+.staff-assignment-controls select { min-width: 0; min-height: 44px; font-size: 16px; }
+.staff-secondary-button { display: inline-grid; min-height: 44px; place-items: center; padding: 8px 12px; border: 1px solid #516059; background: #111918; color: var(--scan-text); font-size: 14px; text-decoration: none; cursor: pointer; }
 .staff-secondary-button:hover:not(:disabled) { border-color: var(--scan-lime); color: var(--scan-lime); }
 .staff-assignment-list { gap: 7px; margin-top: 12px; }
-.staff-assignment-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--scan-line); color: var(--scan-text); font-size: 11px; }
-.staff-assignment-list button { border: 0; background: transparent; color: var(--scan-muted); font-size: 10px; cursor: pointer; }
+.staff-assignment-list li { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--scan-line); color: var(--scan-text); font-size: 14px; }
+.staff-assignment-list button { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--scan-muted); font-size: 14px; cursor: pointer; }
 .staff-assignment-list button:hover { color: var(--scan-red); }
 .staff-edit-panel { margin-top: 16px; }
 .staff-edit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 .staff-edit-grid .staff-form { align-content: start; margin-top: 0; }
-.staff-edit-grid h3 { margin: 0; color: var(--scan-text); font-size: 15px; }
-.staff-checkbox { display: flex !important; align-items: center; gap: 9px !important; }
+.staff-edit-grid h3 { margin: 0; color: var(--scan-text); font-size: 18px; }
+.staff-checkbox { display: flex !important; min-height: 44px; align-items: center; gap: 9px !important; }
 .staff-checkbox input { accent-color: var(--scan-lime); }
 .staff-admin-content > .staff-form-message { margin-bottom: 16px; }
 .staff-admin-content .scan-footer { margin-top: 40px; }
@@ -110,8 +110,8 @@
 .event-admin-grid { grid-template-columns: minmax(260px, .72fr) minmax(0, 1.5fr); align-items: start; }
 .event-list-filters, .event-admin-form { display: grid; gap: 14px; }
 .event-list-filters { margin-bottom: 14px; }
-.event-list-filters label, .event-admin-form label { display: grid; gap: 7px; color: var(--scan-muted); font-size: 12px; }
-.event-list-filters input, .event-list-filters select, .event-admin-form input, .event-admin-form select, .event-admin-form textarea { width: 100%; min-width: 0; min-height: 42px; padding: 10px 12px; border: 1px solid var(--scan-line); border-radius: 0; background: #111918; color: var(--scan-text); font: 13px Arial, Helvetica, sans-serif; }
+.event-list-filters label, .event-admin-form label { display: grid; gap: 7px; color: var(--scan-muted); font-size: 16px; line-height: 1.45; }
+.event-list-filters input, .event-list-filters select, .event-admin-form input, .event-admin-form select, .event-admin-form textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 46px; padding: 10px 12px; border: 1px solid var(--scan-line); border-radius: 0; background: #111918; color: var(--scan-text); font: 16px Arial, Helvetica, sans-serif; }
 .event-admin-form textarea { resize: vertical; line-height: 1.5; }
 .event-list-filters input:focus-visible, .event-list-filters select:focus-visible, .event-admin-form input:focus-visible, .event-admin-form select:focus-visible, .event-admin-form textarea:focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 2px; }
 .event-admin-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
@@ -120,8 +120,8 @@
 .event-admin-list button { display: flex; width: 100%; min-height: 62px; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 0; background: transparent; color: var(--scan-text); text-align: left; cursor: pointer; }
 .event-admin-list button > span:first-child { display: grid; gap: 5px; min-width: 0; }
 .event-admin-list strong, .event-admin-list small { overflow-wrap: anywhere; }
-.event-admin-list small, .event-admin-form small, .event-lock-note { color: var(--scan-muted); font-size: 11px; line-height: 1.5; }
-.event-publication { display: inline-block; padding: 5px 7px; border: 1px solid var(--scan-line); color: var(--scan-muted); font: 10px "Courier New", monospace; white-space: nowrap; }
+.event-admin-list small, .event-admin-form small, .event-lock-note { color: var(--scan-muted); font-size: 14px; line-height: 1.5; }
+.event-publication { display: inline-block; padding: 5px 7px; border: 1px solid var(--scan-line); color: var(--scan-muted); font: 14px "Courier New", monospace; white-space: nowrap; }
 .event-published { border-color: var(--scan-lime); color: var(--scan-lime); }
 .event-archived { border-color: var(--scan-red); color: var(--scan-red); }
 .event-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

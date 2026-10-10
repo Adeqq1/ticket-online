@@ -3,7 +3,7 @@
   import { ApiError, commitEventChange, getEventChanges, previewEventChange, type AdminApiEvent, type EventChange, type EventChangeInput, type EventChangePreview } from "../../lib/api.ts";
   import { eventDate, formatRupiah } from "../../lib/concerts.ts";
   import { eventStatus, wibDateTime } from "../../lib/event-changes.ts";
-  let { event, accessToken, onSaved, onUnauthorized }: { event: AdminApiEvent; accessToken: string; onSaved: () => Promise<void>; onUnauthorized: () => void } = $props();
+  let { event, accessToken, onSaved, onUnauthorized, onDirtyChange }: { event: AdminApiEvent; accessToken: string; onSaved: () => Promise<void>; onUnauthorized: () => void; onDirtyChange?: (dirty: boolean) => void } = $props();
   let action = $state<EventChangeInput["action"]>("POSTPONED");
   let reason = $state("");
   let announcement = $state("");
@@ -21,6 +21,7 @@
   let historyBusy = $state(false);
   let impactHeading = $state<HTMLHeadingElement>();
   let resultMessage = $state<HTMLParagraphElement>();
+  $effect(() => onDirtyChange?.(action !== "POSTPONED" || Boolean(reason || announcement || startsAt || deadline)));
   $effect(() => {
     const id = event.id;
     const controller = new AbortController();
@@ -49,6 +50,7 @@
       await commitEventChange(accessToken, event.id, input, key);
       saved = true;
       uncertain = false; preview = null; input = null; confirmed = false;
+      action = "POSTPONED"; reason = ""; announcement = ""; startsAt = ""; deadline = "";
       message = "Keputusan tersimpan. Reservasi, pembayaran, pemberitahuan, dan refund diproses bertahap.";
       await onSaved();
       history = await getEventChanges(accessToken, event.id);
