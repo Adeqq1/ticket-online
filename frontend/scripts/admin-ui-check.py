@@ -54,7 +54,8 @@ KNOWN_API = {
 def known_api_request(method, path):
     if (method, path) in KNOWN_API:
         return True
-    return method == "GET" and bool(re.fullmatch(r"/admin/orders/[0-9a-f]{32}|/admin/events/[^/]+/changes", path))
+    return (method == "GET" and bool(re.fullmatch(r"/admin/orders/[0-9a-f]{32}|/admin/payment-cases/[0-9]+|/admin/email-jobs/[0-9a-f]{32}|/admin/events/[^/]+/changes", path))) or \
+        (method == "POST" and bool(re.fullmatch(r"/admin/orders/[0-9a-f]{32}/refund(?:/manual)?|/admin/payment-cases/[0-9]+/(?:recheck|notes|resolve)|/admin/email-jobs/[0-9a-f]{32}/retry", path)))
 
 
 def body(path, mode, role):
@@ -83,16 +84,33 @@ def body(path, mode, role):
             "discount": 0, "expiresAt": "2026-10-01T10:10:00Z", "items": [{"tierId": "festival", "name": "Festival",
             "quantity": 1, "unitPrice": 275000, "lineTotal": 275000}], "payment": {"method": "QRIS", "amount": 280000,
             "status": "SUCCEEDED", "paidAt": "2026-10-01T10:01:00Z"}, "tickets": [{**TICKET, "status": "NOT_CHECKED_IN", "checkedInAt": None, "checkedInBy": None}]}
+    if endpoint == f"/admin/orders/{ORDER}/refund": return 200, {"status": "REQUESTED", "amount": 280000, "reason": "Permintaan admin"}
+    if endpoint == f"/admin/orders/{ORDER}/refund/manual": return 200, {"status": "SUCCEEDED", "amount": 280000, "reason": "Transfer dicatat"}
     if endpoint == "/admin/payment-cases":
         case = {"id": "17", "status": "OPEN", "orderId": ORDER, "reference": "TO-0123456789abcdef0123",
             "eventName": EVENT["artist"], "orderStatus": "PENDING", "paymentStatus": "PENDING", "providerStatus": "pending",
             "reason": "Status pembayaran perlu diperiksa", "amount": 280000, "createdAt": "2026-10-10T02:00:00Z",
             "updatedAt": "2026-10-10T02:00:00Z", "lastCheckedAt": None, "lastCheckError": "", "checkInProgress": False}
         return 200, {"items": [] if empty else [case], "nextCursor": None}
+    if endpoint == "/admin/payment-cases/17":
+        return 200, {"id": "17", "status": "OPEN", "orderId": ORDER, "reference": "TO-0123456789abcdef0123",
+            "eventName": EVENT["artist"], "orderStatus": "PENDING", "paymentStatus": "PENDING", "providerStatus": "pending",
+            "reason": "Status pembayaran perlu diperiksa", "amount": 280000, "createdAt": "2026-10-10T02:00:00Z",
+            "updatedAt": "2026-10-10T02:00:00Z", "lastCheckedAt": None, "lastCheckError": "", "checkInProgress": False,
+            "total": 280000, "expiresAt": "2026-10-10T02:10:00Z", "gatewayOrderId": "fixture-order", "canRecheck": True,
+            "canResolve": True, "notes": [], "history": [{"action": "RECHECK", "actorName": "Admin Event", "createdAt": "2026-10-10T02:00:00Z", "data": {"result": "STARTED"}}]}
+    if endpoint == "/admin/payment-cases/17/recheck": return 200, {"caseId": "17", "providerStatus": "settlement"}
+    if endpoint in ("/admin/payment-cases/17/notes", "/admin/payment-cases/17/resolve"): return 204, {}
     if endpoint == "/admin/email-jobs":
         job = {"id": "e" * 32, "kind": "TICKETS", "status": "FAILED", "reference": "TO-0123456789abcdef0123",
             "recipient": "nadia@example.test", "attempts": 2, "lastError": "SMTP belum merespons", "updatedAt": "2026-10-10T02:00:00Z", "supersededBy": None}
         return 200, {"items": [] if empty else [job], "nextCursor": None}
+    if endpoint == f"/admin/email-jobs/{'e' * 32}":
+        return 200, {"id": "e" * 32, "kind": "TICKETS", "status": "FAILED", "reference": "TO-0123456789abcdef0123",
+            "recipient": "nadia@example.test", "attempts": 2, "lastError": "SMTP belum merespons", "updatedAt": "2026-10-10T02:00:00Z",
+            "supersededBy": None, "orderStatus": "PAID", "canRetry": True, "retryReason": "", "retryJobId": None,
+            "history": [{"action": "RETRY", "actorName": "Admin Event", "createdAt": "2026-10-10T02:00:00Z", "data": {"retryJobId": "f" * 32, "kind": "TICKETS"}}]}
+    if endpoint == f"/admin/email-jobs/{'e' * 32}/retry": return 200, {"jobId": "e" * 32, "retryJobId": "f" * 32, "status": "PENDING"}
     if endpoint == "/admin/operations":
         return 200, {"collectedAt": "2026-10-10T03:00:00Z", "api5xxLast5m": 0, "failedEmailJobs": 0,
             "oldestPendingEmailSeconds": 0, "openPaymentCases": 0, "openRefunds": 0, "heldTickets": 0,
@@ -192,7 +210,7 @@ async def main():
 
                     await page.route("**/*", fixture)
                     target = route
-                    if name == "orders" and mode == "standard": target += f"?orderId={ORDER}"
+                    if name == "orders" and mode == "standard" and viewport == "desktop": target += f"?orderId={ORDER}"
                     await page.goto(args.base_url + target, wait_until="domcontentloaded")
                     await page.locator("#konten").wait_for()
                     await page.wait_for_function("document.title !== 'Tiket Online'", timeout=15000)
@@ -202,6 +220,22 @@ async def main():
                         await page.locator(".history-filter-form select").first.select_option(EVENT["id"])
                         await page.get_by_role("button", name="Terapkan", exact=True).click()
                         await page.wait_for_timeout(400)
+                    if name == "issues" and mode == "standard":
+                        await page.get_by_role("button", name="Detail", exact=True).first.click()
+                        await page.get_by_role("heading", name="Kasus TO-0123456789abcdef0123").wait_for()
+                    mobile_order_list = None
+                    if name == "orders" and mode == "standard" and viewport == "mobile":
+                        search_input = page.locator("#order-search-form input").first
+                        await search_input.fill("TO-0123456789abcdef0123")
+                        await page.locator("#order-search-form").get_by_role("button", name="Cari", exact=True).click()
+                        await page.get_by_role("button", name="Buka pesanan TO-0123456789abcdef0123").wait_for()
+                        mobile_order_list = "orders-filtered-list-mobile.png"
+                        await page.locator(".order-list-panel").scroll_into_view_if_needed()
+                        await page.screenshot(path=str(output / mobile_order_list), full_page=False, animations="disabled")
+                        await page.get_by_role("button", name="Buka pesanan TO-0123456789abcdef0123").click()
+                        await page.get_by_role("heading", name="Detail pesanan").wait_for()
+                        if await search_input.input_value() != "TO-0123456789abcdef0123":
+                            raise AssertionError("mobile order selection discarded the active search filter")
                     if name == "login" and mode in ("loading", "error"):
                         await page.get_by_label("Email", exact=True).fill("admin@example.test")
                         await page.get_by_label("Password", exact=True).fill("fixture-password")
@@ -259,6 +293,9 @@ async def main():
                         await page.keyboard.press("Tab")
                         capture["audit"]["firstTabFocus"] = await page.evaluate("""() => ({tag:document.activeElement?.tagName,id:document.activeElement?.id||'',label:document.activeElement?.getAttribute('aria-label')||document.activeElement?.innerText?.trim()||''})""")
                         if viewport == "mobile":
+                            if mobile_order_list:
+                                capture["files"].append(mobile_order_list)
+                                capture["audit"]["mobileOrderSelection"] = {"filteredListCaptured": True, "selectedDetailOpened": True, "searchValuePreserved": True}
                             if role == "ADMIN":
                                 menu_button = page.get_by_role("button", name="Menu", exact=True)
                                 await menu_button.focus()
