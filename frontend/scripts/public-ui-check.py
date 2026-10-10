@@ -103,7 +103,15 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
         return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Layanan sedang tidak tersedia."}}
     events = [event("POSTPONED" if state == "changed" else "SCHEDULED")]
     if endpoint == "/api/v1/events":
-        if scenario == "phase21-search":
+        if scenario == "phase26-search":
+            base = events[0]
+            events = [
+                base,
+                {**base, "id": "jazz-mahal", "artist": "Jazz Mahal", "city": "Makassar", "genre": "Jazz", "startsAt": "2027-08-10T19:30:00+07:00", "price": 2500000},
+                {**base, "id": "melodi-medan", "artist": "Melodi Medan", "city": "Medan", "genre": "Dangdut", "startsAt": "2027-09-01T19:30:00+07:00", "price": 100000},
+                *[{**base, "id": f"tambahan-{index}", "artist": f"Konser Tambahan {index}", "startsAt": f"2027-10-{index:02d}T19:30:00+07:00"} for index in range(1, 7)],
+            ]
+        elif scenario == "phase21-search":
             events = [{**events[0], "id": f"fixture-{index}", "artist": f"Konser Contoh {index}", "venue": f"Venue {index}"} for index in range(1, 5)]
             events.append({**events[0], "id": "fixture-fifth", "artist": "Panggung Terakhir", "venue": "Gedung Musik", "image": "https://picsum.photos/seed/nusa-malam/900/1100"})
         elif scenario == "phase21-card-states":
@@ -117,6 +125,10 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
         return 200, {"events": [] if scenario == "empty" else events}
     if endpoint.startswith("/api/v1/events/"):
         result = event("POSTPONED" if state == "changed" else "SCHEDULED")
+        if scenario == "phase27-share-long":
+            result.update({"artist": "Musisi " * 24, "venue": "Gedung Konser Internasional " * 10, "address": "Jalan Musik & Kenangan #2, Kecamatan " * 8, "city": "Yogyakarta"})
+        if scenario == "phase27-share-no-location":
+            result.update({"venue": "", "address": "", "city": ""})
         if scenario in ("phase22-rescheduled", "phase22-postponed", "phase22-cancelled"):
             event_state = {"phase22-rescheduled": "RESCHEDULED", "phase22-postponed": "POSTPONED", "phase22-cancelled": "CANCELLED"}[scenario]
             result = event(event_state)
@@ -275,7 +287,7 @@ async def main():
         ("not-found", "/alamat-tidak-dikenal", "tidak-ditemukan"),
     ]
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        browser = await playwright.chromium.launch(channel="chrome", headless=True, ignore_default_args=["--disable-back-forward-cache"])
         if args.admin_before or args.admin_after:
             await capture_admin(browser, "before" if args.admin_before else "after")
             await browser.close()
@@ -334,6 +346,7 @@ async def main():
             await context.route("**/api/v1/**", api)
             await context.route("https://picsum.photos/**", photo)
             await context.add_init_script(f"""localStorage.setItem('ticket-online:order:{ORDER_ID}', JSON.stringify({json.dumps({"orderId": ORDER_ID, "accessToken": TOKEN, "expiresAt": EXPIRY, "accessExpiresAt": None, "reservationId": RESERVATION_ID, "reference": "TO-0123456789abcdef0123", "ticketIds": [TICKET_ID]})}));""")
+            await context.add_init_script("""Object.defineProperty(Navigator.prototype, 'share', { configurable:true, get(){const scenario=new URL(location.href).searchParams.get('scenario');if(!scenario?.startsWith('phase27-share'))return undefined;return async payload=>{window.__sharedPayload=payload;if(scenario==='phase27-share-cancel')throw new DOMException('Canceled','AbortError');if(scenario==='phase27-share-fail')throw new Error('Share unavailable')}}});Object.defineProperty(Navigator.prototype, 'clipboard', { configurable:true, get(){const scenario=new URL(location.href).searchParams.get('scenario');if(!scenario?.startsWith('phase27-copy'))return undefined;if(scenario==='phase27-copy-unavailable')return undefined;return{writeText:async value=>{if(scenario==='phase27-copy-fail')throw new Error('Clipboard unavailable');window.__copiedText=value}}}});""")
             page = await context.new_page()
             for route_name, url, label in routes:
                 await page.goto(BASE_URL + url, wait_until="domcontentloaded")
@@ -345,6 +358,13 @@ async def main():
                 if route_name == "my-tickets":
                     assert await page.get_by_role("link", name="Sudah membeli, tetapi tiket tidak muncul?").is_visible(), "Ticket recovery should remain easy to find above the ticket list."
                     assert await page.locator(".my-ticket-card").count() == 1, "A saved order should render a concise ticket card."
+                    footer_visibility = await page.locator(".site-footer").evaluate("element => getComputedStyle(element).visibility")
+                    assert footer_visibility == "visible", f"The footer should remain visible with an empty live region; got {footer_visibility}."
+                    await page.locator(".site-footer a").first.focus()
+                    assert await page.evaluate("document.activeElement.closest('.site-footer') !== null"), "Footer links should remain focusable after My Tickets loads."
+                if route_name == "order":
+                    footer_visibility = await page.locator(".site-footer").evaluate("element => getComputedStyle(element).visibility")
+                    assert footer_visibility == "visible", f"The footer should remain visible with an order status live region; got {footer_visibility}."
                 if route_name == "ticket":
                     assert await page.locator(".pass-details").evaluate("element => !element.open"), "Secondary ticket details should start collapsed."
                     assert await page.locator(".qr-code").is_visible(), "The usable ticket should show its QR code."
@@ -365,6 +385,7 @@ async def main():
                     assert await page.locator("#recovery-email").get_attribute("aria-invalid") == "true", "Recovery validation should identify a missing buyer email."
                     assert await page.locator("#recovery-reference").get_attribute("aria-invalid") == "true", "Recovery validation should identify a missing order reference."
                 if route_name == "catalog" and viewport_name == "desktop":
+                    await page.wait_for_function("document.querySelector('.filters')?.open === true")
                     assert await page.locator(".filters").evaluate("element => element.open"), "Catalog filters should start open on desktop."
                 if route_name == "detail":
                     if viewport_name == "desktop":
@@ -577,18 +598,134 @@ async def main():
                 await page.locator(".poster-unavailable").wait_for(state="attached")
                 assert await page.locator(".poster-unavailable").count() == 1, "A failed event poster should leave the neutral poster fallback."
 
+                await page.set_viewport_size({"width": 390, "height": 844})
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share&festival=2&token=private#TO-secret", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Nusa Malam").wait_for()
+                assert await page.locator(".detail-actions .detail-action").all_text_contents() == ["Bagikan konser", "Buka lokasi ↗"], "Share and location should appear as secondary actions below the concert summary."
+                assert await page.locator(".mobile-cart").is_visible(), "Secondary actions should leave the mobile purchase bar visible."
+                assert await page.locator("#tier-festival .tier-controls output").inner_text() == "2", "The checkout quantity should stay selected while using secondary actions."
+                map_link = page.get_by_role("link", name="Buka lokasi")
+                map_url = urlparse(await map_link.get_attribute("href"))
+                map_query = dict(parse_qsl(map_url.query))
+                assert map_url.netloc == "www.google.com" and map_url.path == "/maps/search/" and map_query.get("api") == "1", "The location action should open a Google Maps search in a new tab."
+                assert map_query.get("query") == "Ruang Selatan, Jl. Musik Raya, Jakarta", "The map search should contain only the public location fields."
+                assert await map_link.get_attribute("target") == "_blank" and {"noopener", "noreferrer"} <= set((await map_link.get_attribute("rel")).split()), "External maps links should open safely in another tab."
+                await page.get_by_role("button", name="Bagikan konser").click()
+                payload = await page.evaluate("window.__sharedPayload")
+                assert payload == {"title": "Nusa Malam", "url": BASE_URL + "/konser/nusa-malam"}, "Sharing should use the clean public URL without query, fragment, token, or cart values."
+
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-cancel", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Bagikan konser").click()
+                assert await page.locator(".detail-share-feedback").count() == 0, "Canceling native share should not report an error or trigger a fallback."
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-fail", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Bagikan konser").click()
+                await page.get_by_role("alert").filter(has_text="Berbagi tidak tersedia").wait_for()
+                assert await page.get_by_role("button", name="Salin tautan konser").is_visible(), "A failed native share should offer a separate copy action."
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                await page.get_by_role("textbox", name="Tautan konser").wait_for()
+                assert await page.locator(".detail-manual-link input").evaluate("element => element === document.activeElement && element.selectionStart === 0 && element.selectionEnd === element.value.length"), "Missing clipboard access should select the clean URL for manual copying."
+
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-copy", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                assert await page.evaluate("window.__copiedText") == BASE_URL + "/konser/nusa-malam", "The clipboard fallback should copy only the public concert URL."
+                await page.get_by_role("status").filter(has_text="Tautan konser disalin").wait_for()
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-copy-fail", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                await page.get_by_role("textbox", name="Tautan konser").wait_for()
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-copy-unavailable", wait_until="domcontentloaded")
+                await page.get_by_role("button", name="Salin tautan konser").click()
+                await page.get_by_role("textbox", name="Tautan konser").wait_for()
+
+                await page.set_viewport_size({"width": 320, "height": 740})
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-long", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Musisi").wait_for()
+                await page.locator(".detail-info").filter(has_text="Lokasi").locator("summary").click()
+                assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Long concert and location names should wrap without horizontal overflow at 320px."
+                await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-no-location", wait_until="domcontentloaded")
+                await page.locator(".detail-heading").wait_for(state="visible")
+                assert await page.locator(".detail-location-unavailable").is_visible() and await page.locator(".detail-actions-row .detail-action[href]").count() == 0, "Missing API location details should not create an empty map link."
+
+                await page.set_viewport_size({"width": 390, "height": 844})
+                await page.evaluate("sessionStorage.removeItem('ticket-online:catalog:v1')")
+                await page.goto(BASE_URL + "/konser?scenario=phase26-search", wait_until="domcontentloaded")
+                await page.get_by_role("heading", name="Jazz Mahal").wait_for()
+                assert await page.locator(".concert-card").count() == 9, "Every catalog event should be visible before the user applies filters."
+                assert await page.locator("#concert-city option").all_text_contents() == ["Semua kota", "Jakarta", "Makassar", "Medan"], "City filters should follow unique API catalog values."
+                assert await page.locator(".genre-chips span").all_text_contents() == ["Dangdut", "Indie", "Jazz"], "Genre filters should follow unique API catalog values."
+                assert (await page.locator(".concert-card h3").all_text_contents())[0] == "Jazz Mahal", "The default catalog order should use the nearest event date."
+                await page.locator(".filters summary").click()
+                await page.locator("#concert-sort").select_option("price")
+                assert (await page.locator(".concert-card h3").all_text_contents())[0] == "Melodi Medan", "Price ordering should use the loaded ticket prices."
+                await page.get_by_label("Batasi harga").check()
+                assert await page.locator("#concert-price").input_value() == "2500000", "Price controls should initialize from the catalog maximum."
+                await page.locator("#concert-price").fill("200000")
+                assert await page.locator(".concert-card h3").all_text_contents() == ["Melodi Medan"], "An active maximum price should include all matching catalog events."
+                await page.locator("#concert-city").select_option(label="Medan")
+                await page.locator("#concert-query").fill("Melodi")
+                assert await page.locator(".filter-chip").count() == 3, "Each active catalog filter should have its own removable chip."
+                await page.evaluate("window.__catalogRestoredFromBFCache=false;addEventListener('pageshow',event=>window.__catalogRestoredFromBFCache=event.persisted)")
+                await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+                await page.wait_for_timeout(100)
+                saved_metrics = await page.evaluate("({y:window.scrollY,height:document.documentElement.scrollHeight,cards:document.querySelectorAll('.concert-card').length,session:sessionStorage.getItem('ticket-online:catalog:v1')})")
+                await page.evaluate("addEventListener('unload',()=>{})")
+                await page.locator(".concert-card-link").first.click()
+                await page.wait_for_url("**/konser/melodi-medan")
+                await page.go_back(wait_until="commit")
+                assert not await page.evaluate("window.__catalogRestoredFromBFCache"), "This return should use a fresh document to verify session restoration without BFCache."
+                await page.wait_for_function("target => Math.abs(window.scrollY - target) < 100", arg=saved_metrics["y"])
+                assert await page.locator("#concert-query").input_value() == "Melodi", "Catalog search should survive returning from detail."
+                restored_metrics = await page.evaluate("({y:window.scrollY,height:document.documentElement.scrollHeight,cards:document.querySelectorAll('.concert-card').length,session:sessionStorage.getItem('ticket-online:catalog:v1')})")
+                assert abs(restored_metrics["y"] - saved_metrics["y"]) < 100, f"Catalog scroll position should be restored after returning from detail: saved {saved_metrics}, restored {restored_metrics}."
+                assert await page.locator(".filter-chip").count() == 3, "Catalog filters should survive returning from detail."
+                await page.locator(".filter-chip").filter(has_text="Kota: Medan").click()
+                assert await page.locator(".filter-chip").count() == 2, "A filter chip should remove only its own filter."
+
+                await page.evaluate("sessionStorage.removeItem('ticket-online:catalog:v1')")
+                bfcache_context = await browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=1)
+                bfcache_events = reply(urlparse("/api/v1/events?scenario=phase26-search"), "phase26-search")[1]["events"]
+                for fixture_event in bfcache_events:
+                    fixture_event["image"] = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 5'%3E%3Crect width='4' height='5' fill='%231358d8'/%3E%3C/svg%3E"
+                await bfcache_context.add_init_script(f"""const fixtureEvents={json.dumps(bfcache_events)};const nativeFetch=window.fetch.bind(window);window.fetch=(input,init)=>{{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.pathname==='/api/v1/events')return Promise.resolve(new Response(JSON.stringify({{events:fixtureEvents}}),{{status:200,headers:{{'Content-Type':'application/json'}}}}));if(url.pathname.startsWith('/api/v1/events/')){{const item=fixtureEvents.find(event=>event.id===decodeURIComponent(url.pathname.split('/').pop()));return Promise.resolve(new Response(JSON.stringify(item),{{status:item?200:404,headers:{{'Content-Type':'application/json'}}}}))}}return nativeFetch(input,init)}}""")
+                bfcache_page = await bfcache_context.new_page()
+                await bfcache_page.goto(BASE_URL + "/konser?scenario=phase26-search", wait_until="domcontentloaded")
+                await bfcache_page.locator(".concert-card").nth(8).wait_for(state="visible")
+                await bfcache_page.evaluate("window.scrollTo(0, 500)")
+                await bfcache_page.wait_for_function("window.scrollY > 100")
+                await bfcache_page.evaluate("window.__catalogPagehideY=null;window.__catalogPageshowPersisted=false;addEventListener('pagehide',()=>window.__catalogPagehideY=window.scrollY);addEventListener('pageshow',event=>{if(event.persisted)window.__catalogPageshowPersisted=true})")
+                await bfcache_page.locator(".concert-card-link").nth(4).click()
+                await bfcache_page.wait_for_url("**/konser/**")
+                await bfcache_page.go_back(wait_until="commit")
+                await bfcache_page.wait_for_function("window.__catalogPageshowPersisted === true")
+                bfcache_metrics = await bfcache_page.evaluate("({saved:window.__catalogPagehideY,restored:window.scrollY})")
+                assert bfcache_metrics["saved"] > 100 and abs(bfcache_metrics["restored"] - bfcache_metrics["saved"]) < 100, f"BFCache should restore a nonzero position without a preexisting catalog session: {bfcache_metrics}."
+                await bfcache_context.close()
                 await page.goto(BASE_URL + "/konser", wait_until="domcontentloaded")
                 await page.locator("#concert-query").fill("Nusa")
                 await page.locator("#concert-query").press("Enter")
-                await page.locator(".filters summary").click()
+                if not await page.locator(".filters").evaluate("element => element.open"):
+                    await page.locator(".filters summary").click()
                 await page.locator("#concert-city").select_option(label="Jakarta")
-                await page.locator(".filters summary").click()
+                if await page.locator(".filters").evaluate("element => element.open"):
+                    await page.locator(".filters summary").click()
                 assert "Jakarta" in await page.locator(".filters summary").inner_text(), "The closed filter summary should show the active city."
                 await page.locator(".reset-filters").click()
                 assert await page.locator("#concert-city").input_value() == "", "Reset should clear the city filter."
                 assert await page.locator("#concert-query").input_value() == "", "Reset should clear the catalog search."
                 assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "The catalog should not overflow at 360px."
                 captures.append(await capture(page, "mobile360-katalog", "mobile 360×800, katalog"))
+
+                for width in (768, 844, 900, 1024, 1440):
+                    await page.set_viewport_size({"width": width, "height": 390 if width == 844 else 900})
+                    if not await page.locator(".filters").evaluate("element => element.open"):
+                        await page.locator(".filters summary").click()
+                    await page.get_by_label("Batasi harga").check()
+                    filter_bounds = await page.evaluate("""() => ({viewport:innerWidth,document:document.documentElement.scrollWidth,body:document.body.scrollWidth,fields:document.querySelector('.filter-fields').getBoundingClientRect().toJSON(),reset:document.querySelector('.reset-filters').getBoundingClientRect().toJSON(),controls:[...document.querySelectorAll('.filter-fields select,.filter-fields input[type=text]')].filter(el=>el.getClientRects().length).map(el=>el.getBoundingClientRect().toJSON())})""")
+                    assert filter_bounds["document"] <= width, f"Open catalog filters should not create horizontal overflow at {width}px: {filter_bounds}."
+                    assert all(control["left"] >= 0 and control["right"] <= width for control in filter_bounds["controls"]), f"Filter controls should remain within the viewport at {width}px: {filter_bounds}."
+                    assert filter_bounds["reset"]["left"] >= filter_bounds["fields"]["right"] or filter_bounds["reset"]["right"] <= filter_bounds["fields"]["left"], f"Reset should not overlap the open filter panel at {width}px: {filter_bounds}."
+                    await page.get_by_label("Batasi harga").uncheck()
+                    await page.locator(".filters summary").click()
+                    layout_checks.append({"route": "catalog-open-filters", "width": width, **filter_bounds})
 
                 widths = (320, 360, 390, 768, 1024, 1440) if args.phase25 else (320,)
                 for width in widths:

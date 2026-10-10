@@ -1,7 +1,7 @@
 <script lang="ts">
   import EventNotice from "../../components/EventNotice.svelte";
   import { canBuy, eventStatus } from "../../lib/event-changes.ts";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { getEvent, ApiError } from "../../lib/api.ts";
   import { eventDate, formatRupiah, parseQuantities, type Concert } from "../../lib/concerts.ts";
   import NotFoundPanel from "../../components/NotFoundPanel.svelte";
@@ -9,12 +9,20 @@
   import SeatingMap from "../../components/detail/SeatingMap.svelte";
   import { cartTotal, changeQuantity, quantityParams, ticketCount, type DetailState } from "../../lib/cart.ts";
   import { recordConversion, trackConversionActivity } from "../../lib/conversion.ts";
+  import { concertMapUrl, publicConcertUrl } from "../../lib/concert-links.ts";
   let { id }: { id: string } = $props();
   let isDesktop = $state(false);
   let zoneMapDetails: HTMLDetailsElement | undefined = $state();
   let mobileCart: HTMLDivElement | undefined = $state();
   let cartObserver: ResizeObserver | undefined = $state();
   let cartRootStyle: CSSStyleDeclaration | undefined;
+  let canShare = $state(false);
+  let shareFallback = $state(false);
+  let shareBusy = $state(false);
+  let shareFeedback = $state("");
+  let shareFeedbackError = $state(false);
+  let manualLink = $state("");
+  let manualLinkInput: HTMLInputElement | undefined = $state();
   let concertData: Concert | undefined = $state();
   let loading: boolean = $state(true);
   let error: string = $state("");
@@ -51,6 +59,35 @@
     requestAnimationFrame(() => { const element = document.getElementById(`tier-${tier?.id}`); element?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); if (event instanceof KeyboardEvent) element?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); });
   }
   function checkout() { if (concertData && saleOpen && count) location.assign(`/checkout/${concertData.id}?${quantityParams(detailState.quantities)}`); }
+  async function copyConcertLink(url: string) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(url);
+      shareFeedback = "Tautan konser disalin.";
+      shareFeedbackError = false;
+    } catch {
+      manualLink = url;
+      shareFeedback = "Salin tautan konser ini secara manual.";
+      shareFeedbackError = false;
+      await tick();
+      manualLinkInput?.focus();
+      manualLinkInput?.select();
+    }
+  }
+  async function shareConcert() {
+    if (!concertData || shareBusy) return;
+    const url = publicConcertUrl(concertData.id);
+    shareFeedback = ""; manualLink = ""; shareFeedbackError = false;
+    if (typeof navigator.share !== "function" || shareFallback) { await copyConcertLink(url); return; }
+    shareBusy = true;
+    try { await navigator.share({ title: concertData.artist, url }); }
+    catch (value) {
+      if (value instanceof DOMException && value.name === "AbortError") return;
+      shareFallback = true;
+      shareFeedback = "Berbagi tidak tersedia. Salin tautan konser.";
+      shareFeedbackError = true;
+    } finally { shareBusy = false; }
+  }
   function keepFocusedControlVisible(event: FocusEvent) {
     const target = event.target;
     if (!(target instanceof HTMLElement) || !target.matches(":focus-visible") || target.closest(".mobile-cart")) return;
@@ -65,6 +102,7 @@
     const controller = new AbortController();
     const stopTracking = trackConversionActivity(id);
     const desktop = window.matchMedia("(min-width: 768px)");
+    canShare = typeof navigator.share === "function";
     const syncViewport = () => { isDesktop = desktop.matches; };
     const rootStyle = document.documentElement.style;
     const previousScrollPadding = rootStyle.scrollPaddingBottom;
@@ -96,8 +134,11 @@
   {@const effectiveStart = concertData.currentEvent ? concertData.currentEvent.startsAt : concertData.startsAt}
   {@const startingPrice = concertData.ticketTiers.length ? Math.min(...concertData.ticketTiers.map((tier) => tier.price)) : undefined}
   {@const eventChange = eventStatus(concertData.currentEvent)}
+  {@const mapUrl = concertMapUrl(concertData)}
+  {@const venueLocation = [concertData.venue, concertData.city].map((value) => value.trim()).filter(Boolean).join(", ")}
   <div class="concert-detail" onfocusin={keepFocusedControlVisible}>
-    <section class="detail-hero"><div class="detail-hero-inner shell"><img class="detail-poster" src={concertData.image} alt={`Poster konser ${concertData.artist}`} width="900" height="1100" fetchpriority="high" /><div class="detail-heading"><p class="detail-status">{eventChange || (concertData.status === "Sold Out" ? "Tiket habis" : startingPrice === undefined ? "Tiket belum tersedia" : concertData.status)}</p><h1>{concertData.artist}</h1><p class="detail-summary">{eventDate(effectiveStart)}</p><p class="detail-summary">{concertData.venue}, {concertData.city}</p><p class="detail-summary">{startingPrice === undefined ? "Harga tiket belum tersedia" : `Mulai ${formatRupiah.format(startingPrice)}`}</p></div></div></section>
+    <section class="detail-hero"><div class="detail-hero-inner shell"><img class="detail-poster" src={concertData.image} alt={`Poster konser ${concertData.artist}`} width="900" height="1100" fetchpriority="high" /><div class="detail-heading"><p class="detail-status">{eventChange || (concertData.status === "Sold Out" ? "Tiket habis" : startingPrice === undefined ? "Tiket belum tersedia" : concertData.status)}</p><h1>{concertData.artist}</h1><p class="detail-summary">{eventDate(effectiveStart)}</p>{#if venueLocation}<p class="detail-summary">{venueLocation}</p>{/if}<p class="detail-summary">{startingPrice === undefined ? "Harga tiket belum tersedia" : `Mulai ${formatRupiah.format(startingPrice)}`}</p></div></div></section>
+    <section class="detail-actions shell" aria-label="Aksi tambahan konser"><div class="detail-actions-row"><button class="detail-action" type="button" aria-label={canShare && !shareFallback ? "Bagikan konser" : "Salin tautan konser"} disabled={shareBusy} onclick={shareConcert}>{shareBusy ? "Membuka…" : canShare && !shareFallback ? "Bagikan konser" : "Salin tautan"}</button>{#if mapUrl}<a class="detail-action" href={mapUrl} target="_blank" rel="noopener noreferrer">Buka lokasi <span aria-hidden="true">↗</span></a>{:else}<span class="detail-location-unavailable">Lokasi belum tersedia.</span>{/if}</div>{#if shareFeedback}<p class="detail-share-feedback" role={shareFeedbackError ? "alert" : "status"} aria-live={shareFeedbackError ? "assertive" : "polite"}>{shareFeedback}</p>{/if}{#if manualLink}<label class="detail-manual-link">Tautan konser<input bind:this={manualLinkInput} type="text" readonly value={manualLink} onclick={(event) => event.currentTarget.select()} /></label>{/if}</section>
     <div class="shell detail-notices"><EventNotice state={concertData.currentEvent} />
       {#if concertData.currentEvent?.status === "RESCHEDULED"}<p class="refund-note">Pembeli lama dapat meminta refund penuh melalui halaman pesanan{concertData.currentEvent.refundDeadline ? ` sampai ${eventDate(concertData.currentEvent.refundDeadline)}` : "; tenggat refund belum diumumkan"}.</p>
       {:else if concertData.currentEvent?.status === "POSTPONED"}<p class="refund-note">Hak refund pembeli lama tetap tersedia; tenggat belum dibatasi sebelum jadwal pengganti diumumkan.</p>

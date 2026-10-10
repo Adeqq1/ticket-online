@@ -3,6 +3,8 @@
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; background: var(--canvas); }
+.public-site main.route-loading { min-height: 100vh; }
+.public-site main.route-loading + .site-footer { visibility: hidden; }
 a { color: inherit; text-decoration: none; }
 button, input, select, output { font: inherit; }
 button { cursor: pointer; }

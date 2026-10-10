@@ -3,7 +3,16 @@
 .concert-detail .detail-poster { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--radius); background: var(--surface); }
 .concert-detail .detail-status { margin: 0 0 8px; color: var(--accent); font-size: 13px; font-weight: 700; }
 .concert-detail .detail-hero h1 { max-width: 660px; margin: 0 0 14px; font-size: clamp(40px, 6vw, 68px); line-height: 1; letter-spacing: -.07em; }
+.concert-detail .detail-hero h1, .concert-detail .detail-summary { overflow-wrap: anywhere; }
 .concert-detail .detail-summary { margin: 5px 0; color: color-mix(in srgb, var(--inverse-text) 85%, transparent); font-size: 16px; }
+.concert-detail .detail-actions { display: grid; gap: 8px; min-width: 0; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.concert-detail .detail-actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.concert-detail .detail-action { display: inline-flex; min-height: 44px; align-items: center; gap: 7px; border: 1px solid var(--control-line); border-radius: var(--radius); padding: 0 14px; background: transparent; color: var(--accent); font: inherit; font-size: 14px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.concert-detail .detail-action:disabled { opacity: .65; cursor: wait; }
+.concert-detail .detail-location-unavailable, .concert-detail .detail-share-feedback { margin: 0; color: var(--muted); font-size: 14px; }
+.concert-detail .detail-share-feedback[role="alert"] { color: var(--danger); }
+.concert-detail .detail-manual-link { display: grid; gap: 6px; min-width: 0; font-size: 14px; font-weight: 700; }
+.concert-detail .detail-manual-link input { width: 100%; min-height: 44px; border: 1px solid var(--control-line); border-radius: var(--radius); padding: 0 10px; background: var(--canvas); color: var(--ink); font-weight: 400; }
 .concert-detail .detail-notices { padding-top: 12px; }
 .concert-detail .detail-notices:empty { display: none; }
 .concert-detail .event-notice { margin: 0 0 8px; }
@@ -25,10 +34,7 @@
 .concert-detail .detail-info-content > :first-child { margin-top: 0; }
 .concert-detail .lineup-list, .concert-detail .terms-list { padding-left: 20px; }
 .concert-detail .lineup-list li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 18px; font-weight: 700; }
-.concert-detail .location-map { margin: 0; overflow: hidden; border-radius: var(--radius); background: var(--surface); }
-.concert-detail .location-map > div { position: relative; height: 240px; background: repeating-linear-gradient(25deg, transparent 0 45px, var(--line) 46px 50px, transparent 51px 95px), repeating-linear-gradient(120deg, transparent 0 55px, var(--line) 56px 60px, transparent 61px 105px); }
-.concert-detail .location-map b { position: absolute; top: 48%; left: 43%; padding: 9px; background: var(--accent); color: var(--accent-ink); font-size: 13px; }
-.concert-detail .location-map figcaption { padding: 14px; color: var(--muted); }
+.concert-detail .location-copy { overflow-wrap: anywhere; }.concert-detail .location-copy span { display: block; }
 .concert-detail .zone-details { max-width: 720px; margin-bottom: 10px; }
 .concert-detail .zone-details summary { width: fit-content; padding-right: 12px; border-radius: var(--radius); color: var(--accent); }
 .concert-detail .stage-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 720px; padding: 14px; border-radius: var(--radius); background: var(--surface); }

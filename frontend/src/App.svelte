@@ -1,46 +1,61 @@
 <script lang="ts">
+  import { onMount, type Component } from "svelte";
   import SiteFooter from "./layouts/SiteFooter.svelte";
   import SiteHeader from "./layouts/SiteHeader.svelte";
-  import ConcertCatalogPage from "./pages/public/ConcertCatalogPage.svelte";
-  import ConcertDetailPage from "./pages/public/ConcertDetailPage.svelte";
-  import CheckoutPage from "./pages/public/CheckoutPage.svelte";
-  import HomePage from "./pages/public/HomePage.svelte";
-  import TicketPage from "./pages/public/TicketPage.svelte";
-  import MyTicketsPage from "./pages/public/MyTicketsPage.svelte";
-  import GuidePage from "./pages/public/GuidePage.svelte";
-  import OrderPage from "./pages/public/OrderPage.svelte";
-  import TicketRecoveryPage from "./pages/public/TicketRecoveryPage.svelte";
-  import UnknownRoutePage from "./pages/public/UnknownRoutePage.svelte";
-  import AdminArea from "./layouts/AdminArea.svelte";
   import { matchRoute } from "./lib/route.ts";
+
   const route = $state(matchRoute(location.pathname));
   const isAdmin = route.name.startsWith("admin-");
+  let Page = $state<Component<any>>();
+  let pageProps = $state<Record<string, string>>({});
+  let pageError = $state(false);
+
+  async function loadPage() {
+    pageError = false;
+    Page = undefined;
+    pageProps = {};
+    try {
+      switch (route.name) {
+        case "home": Page = (await import("./pages/public/HomePage.svelte")).default; break;
+        case "concerts": Page = (await import("./pages/public/ConcertCatalogPage.svelte")).default; break;
+        case "concert-detail": Page = (await import("./pages/public/ConcertDetailPage.svelte")).default; pageProps = { id: route.id }; break;
+        case "checkout": Page = (await import("./pages/public/CheckoutPage.svelte")).default; pageProps = { id: route.id }; break;
+        case "ticket": Page = (await import("./pages/public/TicketPage.svelte")).default; pageProps = { id: route.id }; break;
+        case "my-tickets": Page = (await import("./pages/public/MyTicketsPage.svelte")).default; break;
+        case "ticket-recovery": Page = (await import("./pages/public/TicketRecoveryPage.svelte")).default; break;
+        case "order": Page = (await import("./pages/public/OrderPage.svelte")).default; pageProps = { id: route.id }; break;
+        case "guide": Page = (await import("./pages/public/GuidePage.svelte")).default; break;
+        case "admin-login": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "login" }; break;
+        case "admin-staff": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "staff" }; break;
+        case "admin-events": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "events" }; break;
+        case "admin-orders": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "orders" }; break;
+        case "admin-issues": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "issues" }; break;
+        case "admin-operations": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "operations" }; break;
+        case "admin-reports": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "reports" }; break;
+        case "admin-attendance-report": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "attendance" }; break;
+        case "admin-conversion-report": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "conversion" }; break;
+        case "admin-check-ins": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "history" }; break;
+        case "admin-scan": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "scan" }; break;
+        default: Page = (await import("./pages/public/UnknownRoutePage.svelte")).default;
+      }
+    } catch {
+      pageError = true;
+    }
+  }
+
+  onMount(() => { void loadPage(); });
 </script>
 
 <div class:public-site={!isAdmin}>
 {#if !isAdmin}<SiteHeader page={route.name === "home" ? "home" : route.name === "concerts" ? "concerts" : route.name === "my-tickets" ? "my-tickets" : route.name === "guide" ? "guide" : "other"} />{/if}
-<main id="konten" tabindex="-1" class:admin-main={isAdmin}>
-  {#if route.name === "home"}<HomePage />
-  {:else if route.name === "concerts"}<ConcertCatalogPage />
-  {:else if route.name === "concert-detail"}<ConcertDetailPage id={route.id} />
-  {:else if route.name === "checkout"}<CheckoutPage id={route.id} />
-  {:else if route.name === "ticket"}<TicketPage id={route.id} />
-  {:else if route.name === "my-tickets"}<MyTicketsPage />
-  {:else if route.name === "ticket-recovery"}<TicketRecoveryPage />
-  {:else if route.name === "order"}<OrderPage id={route.id} />
-  {:else if route.name === "guide"}<GuidePage />
-  {:else if route.name === "admin-login"}<AdminArea page="login" />
-  {:else if route.name === "admin-staff"}<AdminArea page="staff" />
-  {:else if route.name === "admin-events"}<AdminArea page="events" />
-  {:else if route.name === "admin-orders"}<AdminArea page="orders" />
-  {:else if route.name === "admin-issues"}<AdminArea page="issues" />
-  {:else if route.name === "admin-operations"}<AdminArea page="operations" />
-  {:else if route.name === "admin-reports"}<AdminArea page="reports" />
-  {:else if route.name === "admin-attendance-report"}<AdminArea page="attendance" />
-  {:else if route.name === "admin-conversion-report"}<AdminArea page="conversion" />
-  {:else if route.name === "admin-check-ins"}<AdminArea page="history" />
-  {:else if route.name === "admin-scan"}<AdminArea page="scan" />
-  {:else}<UnknownRoutePage />{/if}
+<main id="konten" tabindex="-1" class:admin-main={isAdmin} class:route-loading={!Page && !pageError}>
+  {#if Page}
+    <Page {...pageProps} />
+  {:else if pageError}
+    <section class="shell empty-state" role="alert"><p>Halaman belum dapat dimuat. Periksa koneksi internet lalu coba lagi.</p><button class="text-button" type="button" onclick={() => location.reload()}>Coba lagi</button></section>
+  {:else}
+    <p class="shell" role="status" aria-live="polite">Memuat halaman...</p>
+  {/if}
 </main>
 {#if !isAdmin}<SiteFooter />{/if}
 </div>
