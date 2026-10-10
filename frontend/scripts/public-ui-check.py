@@ -634,6 +634,7 @@ async def main():
                 await page.locator(".detail-info").filter(has_text="Lokasi").locator("summary").click()
                 assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Long concert and location names should wrap without horizontal overflow at 320px."
                 await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share-no-location", wait_until="domcontentloaded")
+                await page.locator(".detail-heading").wait_for(state="visible")
                 assert await page.locator(".detail-location-unavailable").is_visible() and await page.locator(".detail-actions-row .detail-action[href]").count() == 0, "Missing API location details should not create an empty map link."
 
                 await page.set_viewport_size({"width": 390, "height": 844})

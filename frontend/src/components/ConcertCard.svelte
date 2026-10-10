@@ -1,14 +1,14 @@
 <script lang="ts">
   import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
   import { eventStatus } from "../lib/event-changes.ts";
-  let { concert, variant = "catalog" }: { concert: Concert; variant?: "featured" | "catalog" } = $props();
+  let { concert, variant = "catalog", featuredPoster = false }: { concert: Concert; variant?: "featured" | "catalog"; featuredPoster?: boolean } = $props();
   const changedStatus = $derived(eventStatus(concert.currentEvent));
   const available = $derived(concert.ticketTiers.length > 0 && concert.status !== "Sold Out" && !concert.currentEvent?.salesPaused);
 </script>
 
 <article class:is-sold-out={!available} class="concert-card">
   <a class="concert-card-link" href={`/konser/${concert.id}`}>
-    <img class="concert-poster" src={concert.image} alt={`Poster konser ${concert.artist}`} width="900" height="1100" loading="lazy" onerror={(event) => event.currentTarget.classList.add("poster-unavailable")} />
+    <img class="concert-poster" src={concert.image} alt={`Poster konser ${concert.artist}`} width="900" height="1100" loading={featuredPoster ? "eager" : "lazy"} fetchpriority={featuredPoster ? "high" : "auto"} onerror={(event) => event.currentTarget.classList.add("poster-unavailable")} />
     <div class="concert-card-body">
       {#if changedStatus}<p class="concert-change">{changedStatus}</p>{/if}
       <p class="concert-meta">{eventDate(concert.currentEvent ? concert.currentEvent.startsAt : concert.startsAt)}{variant === "catalog" ? ` · ${concert.genre}` : ""}</p>

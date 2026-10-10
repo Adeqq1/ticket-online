@@ -110,7 +110,7 @@
       <button class="text-button reset-filters" type="button" onclick={reset}>Reset filter</button>
     </div>
     {#if !loading && !error}
-      <div class="concert-grid" aria-live="polite">{#each matches as concert (concert.id)}<ConcertCard {concert} />{/each}</div>
+      <div class="concert-grid" aria-live="polite">{#each matches as concert, index (concert.id)}<ConcertCard {concert} featuredPoster={index === 0} />{/each}</div>
       {#if !matches.length}<div class="catalog-empty"><p>Tidak ada konser yang cocok dengan filtermu.</p><button class="text-button" type="button" onclick={reset}>Reset filter</button></div>{/if}
     {/if}
   </section>
