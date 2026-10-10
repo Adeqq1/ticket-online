@@ -16,6 +16,7 @@
   let dateFrom = $state(shiftDate(today, -29));
   let dateTo = $state(today);
   let applied = $state<{ eventId?: string; dateFrom?: string; dateTo?: string }>({ dateFrom: shiftDate(today, -29), dateTo: today });
+  let lastRequested = $state<{ eventId?: string; dateFrom?: string; dateTo?: string } | null>(null);
   let data = $state<AdminSalesReport | null>(null);
   let eventOptions = $state<AdminSalesReport["filterOptions"]["events"]>([]);
   let loading = $state(true);
@@ -26,6 +27,8 @@
   let generation = 0;
 
   async function load(filters = applied) {
+    const requested = { ...filters };
+    lastRequested = requested;
     request?.abort();
     const controller = new AbortController();
     request = controller;
@@ -33,8 +36,8 @@
     loading = true;
     error = "";
     try {
-      const report = await getAdminSalesReport(accessToken, filters, controller.signal);
-      if (current === generation) { data = report; applied = filters; eventOptions = report.filterOptions.events; }
+      const report = await getAdminSalesReport(accessToken, requested, controller.signal);
+      if (current === generation) { data = report; applied = requested; eventOptions = report.filterOptions.events; }
     } catch (cause) {
       if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
@@ -49,6 +52,7 @@
     event.preventDefault();
     void load({ ...(eventId ? { eventId } : {}), dateFrom, dateTo });
   }
+  function retry() { if (lastRequested) void load(lastRequested); }
 
   async function exportCSV() {
     if (!data || exporting) return;
@@ -90,7 +94,7 @@
       <label>Sampai tanggal WIB<input type="date" bind:value={dateTo} required /></label>
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
     </form>
-    {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => void load()}>Coba lagi</button></p>{/if}
+    {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={retry}>Coba lagi</button></p>{/if}
     {#if exportError}<p class="staff-form-message staff-form-error" role="alert">{exportError}</p>{/if}
     {#if loading && !data}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan…</p>{/if}
     {#if data}

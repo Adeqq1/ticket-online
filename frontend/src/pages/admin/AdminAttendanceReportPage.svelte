@@ -10,6 +10,7 @@
   let gate = $state("");
   let gateOptions = $state<string[]>([]);
   let applied = $state<{ eventId: string; gate?: string } | null>(null);
+  let lastRequested = $state<{ kind: "events" } | { kind: "report"; filters: { eventId: string; gate?: string } } | null>(null);
   let data = $state<AdminAttendanceReport | null>(null);
   let loading = $state(true);
   let exporting = $state(false);
@@ -20,16 +21,18 @@
 
   async function load(filters = applied) {
     if (!filters) return;
+    const requested = { ...filters };
+    lastRequested = { kind: "report", filters: requested };
     request?.abort();
     const controller = new AbortController();
     request = controller;
     const current = ++generation;
     loading = true; error = "";
     try {
-      const report = await getAdminAttendanceReport(accessToken, filters, controller.signal);
+      const report = await getAdminAttendanceReport(accessToken, requested, controller.signal);
       if (current !== generation) return;
       data = report;
-      applied = filters;
+      applied = requested;
       gateOptions = report.filterOptions.gates;
     } catch (cause) {
       if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
@@ -42,6 +45,7 @@
   }
 
   async function initialize() {
+    lastRequested = { kind: "events" };
     try { events = await getAdminEvents(accessToken); }
     catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
@@ -54,9 +58,9 @@
     if (!eventId) { error = "Pilih event untuk membuka laporan kehadiran."; return; }
     void load({ eventId, ...(gate ? { gate } : {}) });
   }
-  function selectEvent(value: string) { generation++; request?.abort(); request = undefined; loading = false; eventId = value; gate = ""; gateOptions = []; error = ""; }
-  function reset() { generation++; request?.abort(); request = undefined; loading = false; eventId = ""; gate = ""; gateOptions = []; error = ""; }
-  function retry() { if (applied) void load(applied); else void initialize(); }
+  function selectEvent(value: string) { generation++; request?.abort(); request = undefined; loading = false; eventId = value; gate = ""; gateOptions = []; error = ""; lastRequested = null; }
+  function reset() { generation++; request?.abort(); request = undefined; loading = false; eventId = ""; gate = ""; gateOptions = []; error = ""; lastRequested = null; }
+  function retry() { if (lastRequested?.kind === "report") void load(lastRequested.filters); else if (lastRequested?.kind === "events") void initialize(); }
   async function exportCSV() {
     if (!data || exporting) return;
     exporting = true; exportError = "";

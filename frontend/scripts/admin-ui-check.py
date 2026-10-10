@@ -114,7 +114,8 @@ def body(path, mode, role):
     if endpoint == "/admin/email-jobs":
         job = {"id": "e" * 32, "kind": "TICKETS", "status": "FAILED", "reference": "TO-0123456789abcdef0123",
             "recipient": "nadia@example.test", "attempts": 2, "lastError": "SMTP belum merespons", "updatedAt": "2026-10-10T02:00:00Z", "supersededBy": None}
-        return 200, {"items": [] if empty else [job], "nextCursor": None}
+        other_job = {**job, "id": "g" * 32, "reference": "TO-9876543210fedcba9876", "recipient": "raka@example.test"}
+        return 200, {"items": [] if empty else [job, other_job], "nextCursor": None}
     if endpoint == f"/admin/email-jobs/{'e' * 32}":
         return 200, {"id": "e" * 32, "kind": "TICKETS", "status": "FAILED", "reference": "TO-0123456789abcdef0123",
             "recipient": "nadia@example.test", "attempts": 2, "lastError": "SMTP belum merespons", "updatedAt": "2026-10-10T02:00:00Z",
@@ -175,6 +176,7 @@ async def main():
     parser.add_argument("--output-dir", type=Path, help="Screenshot output directory; defaults to docs/phase29/screenshots")
     parser.add_argument("--phase", type=int, default=29, help="Phase number recorded in the manifest")
     parser.add_argument("--phase35", action="store_true", help="Capture tablet, landscape, reduced-height keyboard, and enlarged-text layouts")
+    parser.add_argument("--inject-pageerror", action="store_true", help="Inject a non-blocking browser exception to verify failure reporting")
     args = parser.parse_args()
     output = args.output_dir if args.output_dir and args.output_dir.is_absolute() else ROOT / args.output_dir if args.output_dir else OUTPUT
     output.mkdir(parents=True, exist_ok=True)
@@ -201,6 +203,8 @@ async def main():
                 modes = ("standard", "loading", "empty", "error") + (("rejected", "unknown-checkedin", "camera-exit") if name == "scanner" else ())
                 if args.phase35 and name == "scanner": modes += ("expired-camera", "concurrent")
                 if args.phase35 and role != "PUBLIC": modes += ("expired-session",)
+                if args.phase35 and name == "issues": modes += ("uncertain", "uncertain-note")
+                if args.phase35 and name in ("sales", "attendance", "conversion"): modes += ("retry-failed",)
                 if name == "conversion": modes += ("missing-data",)
                 if name == "operations": modes += ("stale",)
                 for mode in modes:
@@ -230,6 +234,24 @@ async def main():
                             return
                         if signature == ("POST", "/staff/check-ins"):
                             fixture_calls["POST /staff/check-ins"] = fixture_calls.get("POST /staff/check-ins", 0) + 1
+                        if name == "issues" and mode == "uncertain" and signature == ("POST", f"/admin/email-jobs/{'e' * 32}/retry"):
+                            fixture_calls["POST retry"] = fixture_calls.get("POST retry", 0) + 1
+                            await request.fulfill(status=503, json={"error": {"code": "SERVICE_UNAVAILABLE", "message": "Hasil retry belum diketahui."}})
+                            return
+                        if name == "issues" and mode == "uncertain-note" and signature == ("POST", "/admin/payment-cases/17/notes"):
+                            fixture_calls["POST note"] = fixture_calls.get("POST note", 0) + 1
+                            await request.fulfill(status=503, json={"error": {"code": "SERVICE_UNAVAILABLE", "message": "Hasil catatan belum diketahui."}})
+                            return
+                        if name == "issues" and mode == "uncertain-note" and signature == ("GET", "/admin/payment-cases/17"):
+                            fixture_calls["GET case detail"] = fixture_calls.get("GET case detail", 0) + 1
+                        report_endpoint = {"sales": "/admin/reports/sales", "conversion": "/admin/reports/conversion", "attendance": "/admin/reports/attendance"}.get(name)
+                        if report_endpoint and mode == "retry-failed" and signature == ("GET", report_endpoint):
+                            fixture_calls["report queries"] = fixture_calls.get("report queries", []) + [parsed.query]
+                            request_count = len(fixture_calls["report queries"])
+                            should_fail = request_count == 2 if name in ("sales", "conversion") else request_count == 1
+                            if should_fail:
+                                await request.fulfill(status=503, json={"error": {"code": "SERVICE_UNAVAILABLE", "message": "Cakupan laporan belum tersedia."}})
+                                return
                         if endpoint in ("/admin/reports/sales.csv", "/admin/reports/attendance.csv"):
                             observed_csv_queries.append({"endpoint": endpoint, "query": parsed.query})
                             await request.fulfill(status=200, body="laporan,fixture\n", headers={
@@ -247,6 +269,8 @@ async def main():
                         if name == "scanner" and mode == "concurrent" and signature == ("POST", "/staff/check-ins"):
                             await asyncio.sleep(0.7)
                         status, data = body(parsed.path + ("?" + parsed.query if parsed.query else ""), mode, role)
+                        if name == "issues" and mode == "uncertain-note" and endpoint == "/admin/payment-cases/17" and fixture_calls.get("GET case detail", 0) > 1:
+                            data["history"].append({"action": "NOTE", "actorName": "Admin Event", "createdAt": "2026-10-10T03:01:00Z", "data": {"note": "Catatan A"}})
                         if status == 204: await request.fulfill(status=status)
                         else: await request.fulfill(status=status, json=data)
 
@@ -257,6 +281,9 @@ async def main():
                     await page.locator("#konten").wait_for()
                     await page.wait_for_function("document.title !== 'Tiket Online'", timeout=15000)
                     await page.wait_for_timeout(80 if mode == "loading" else 400)
+                    if args.inject_pageerror and name == routes[0][0] and mode == "standard" and viewport == "desktop":
+                        await page.evaluate("setTimeout(() => { throw new Error('intentional pageerror fixture') }, 0)")
+                        await page.wait_for_timeout(50)
                     if mode == "expired-session":
                         await page.wait_for_url("**/admin/login")
                         await page.wait_for_load_state("domcontentloaded")
@@ -278,6 +305,61 @@ async def main():
                     if name == "issues" and mode == "standard":
                         await page.get_by_role("button", name="Detail", exact=True).first.click()
                         await page.get_by_role("heading", name="Kasus TO-0123456789abcdef0123").wait_for()
+                    if name == "issues" and mode == "uncertain":
+                        page.on("dialog", lambda dialog: dialog.accept())
+                        email_panel = page.locator(".checkin-history-panel").nth(1)
+                        await email_panel.get_by_role("button", name="Detail", exact=True).first.click()
+                        await page.get_by_role("heading", name="Email TO-0123456789abcdef0123").wait_for()
+                        await page.get_by_role("button", name="Kirim ulang email", exact=True).click()
+                        await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).wait_for()
+                        if fixture_calls.get("POST retry") != 1:
+                            raise AssertionError("uncertain retry fixture did not send exactly one POST")
+                        other_detail = email_panel.get_by_role("button", name="Detail", exact=True).nth(1)
+                        if await other_detail.is_enabled():
+                            raise AssertionError("another email detail remained navigable while retry result was uncertain")
+                        async with page.expect_response(lambda response: urlparse(response.url).path == f"/api/v1/admin/email-jobs/{'e' * 32}"):
+                            await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).click()
+                        await page.get_by_text("belum membuktikan hasil tindakan", exact=False).wait_for()
+                        if fixture_calls.get("POST retry") != 1:
+                            raise AssertionError("checking an uncertain email retry sent another POST")
+                    if name == "issues" and mode == "uncertain-note":
+                        await page.get_by_role("button", name="Detail", exact=True).first.click()
+                        await page.get_by_role("heading", name="Kasus TO-0123456789abcdef0123").wait_for()
+                        await page.get_by_label("Catatan admin").fill("  Catatan A  ")
+                        await page.get_by_role("button", name="Simpan catatan", exact=True).click()
+                        await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).wait_for()
+                        await page.get_by_label("Catatan admin").fill("Catatan B")
+                        async with page.expect_response(lambda response: urlparse(response.url).path == "/api/v1/admin/payment-cases/17"):
+                            await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).click()
+                        await page.get_by_text("Hasil tindakan terlihat pada detail terbaru.", exact=True).wait_for()
+                        if fixture_calls.get("POST note") != 1:
+                            raise AssertionError("checking an uncertain note sent another POST")
+                    if name in ("sales", "conversion", "attendance") and mode == "retry-failed":
+                        if name == "attendance":
+                            await page.get_by_label("Event wajib").select_option(EVENT["id"])
+                            await page.get_by_role("button", name="Terapkan", exact=True).click()
+                            await page.get_by_role("alert").wait_for()
+                            failed_query = fixture_calls["report queries"][-1]
+                            async with page.expect_response(lambda response: urlparse(response.url).path == "/api/v1/admin/reports/attendance" and urlparse(response.url).query == failed_query):
+                                await page.get_by_role("button", name="Coba lagi", exact=True).click()
+                            if fixture_calls["report queries"] != [failed_query, failed_query]:
+                                raise AssertionError(f"attendance retry changed its failed event/gate query: {fixture_calls['report queries']}")
+                        else:
+                            if name == "sales":
+                                await page.locator(".sales-report-filters select").first.select_option(EVENT["id"])
+                            else:
+                                await page.locator(".sales-report-filters select").nth(1).select_option("mobile")
+                            dates = page.locator("input[type=date]")
+                            await dates.nth(0).fill("2026-01-01")
+                            await dates.nth(1).fill("2026-01-31")
+                            await page.get_by_role("button", name="Terapkan", exact=True).click()
+                            await page.get_by_role("alert").wait_for()
+                            failed_query = fixture_calls["report queries"][-1]
+                            await page.locator("input[type=date]").first.fill("2026-02-01")
+                            async with page.expect_response(lambda response: urlparse(response.url).path == f"/api/v1/admin/reports/{name}" and urlparse(response.url).query == failed_query):
+                                await page.get_by_role("button", name="Coba lagi", exact=True).click()
+                            if fixture_calls["report queries"][-2:] != [failed_query, failed_query]:
+                                raise AssertionError(f"{name} retry changed its failed filter query: {fixture_calls['report queries']}")
                     mobile_order_list = None
                     if name == "orders" and mode == "standard" and viewport == "mobile":
                         search_input = page.locator("#order-search-form input").first
@@ -514,6 +596,8 @@ async def main():
                 context = await browser.new_context(viewport=size, timezone_id="Asia/Jakarta")
                 await context.add_init_script(SESSION_INIT)
                 page = await context.new_page()
+                page_errors = []
+                page.on("pageerror", lambda error: page_errors.append(str(error)))
 
                 async def denied_fixture(request):
                     if request.request.url.endswith("/staff/me"):
@@ -529,7 +613,10 @@ async def main():
                     unexpected.append({"route": route, "actual": urlparse(page.url).path, "mode": "role-denied", "viewport": viewport})
                 denied_path = f"{name}-role-denied-{viewport}.png"
                 await page.screenshot(path=str(output / denied_path), full_page=False)
-                captures.append({"route": route, "scenario": "role-denied", "role": "STAFF", "viewport": viewport, "files": [denied_path], "finalUrl": urlparse(page.url).path})
+                denied_capture = {"route": route, "scenario": "role-denied", "role": "STAFF", "viewport": viewport, "files": [denied_path], "finalUrl": urlparse(page.url).path}
+                if page_errors:
+                    denied_capture["pageErrors"] = page_errors
+                captures.append(denied_capture)
                 await context.close()
         await browser.close()
 
@@ -546,6 +633,8 @@ async def main():
         raise AssertionError(f"Unexpected redirects: {unexpected}")
     if unhandled_api:
         raise AssertionError(f"API requests missing a fixture: {unhandled_api}")
+    if manifest["pageErrors"]:
+        raise AssertionError(f"Browser runtime errors: {manifest['pageErrors']}")
 
 
 asyncio.run(main())

@@ -9,15 +9,17 @@
   function shiftDate(value: string, days: number) { const date = new Date(`${value}T12:00:00+07:00`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
   const today = todayWIB();
   let eventId = $state(""); let device = $state(""); let dateFrom = $state(shiftDate(today, -29)); let dateTo = $state(today);
-  let applied = $state({ eventId: "", device: "", dateFrom: shiftDate(today, -29), dateTo: today });
+  let applied = $state({ eventId: "", device: "", dateFrom: shiftDate(today, -29), dateTo: today }); let lastRequested = $state<typeof applied | null>(null);
   let report = $state<ConversionReport | null>(null); let eventOptions = $state<Array<{ eventId?: string; eventName?: string }>>([]); let loading = $state(true); let error = $state(""); let request: AbortController | undefined; let generation = 0;
   async function load(filters = applied) {
+    const requested = { ...filters }; lastRequested = requested;
     request?.abort(); const controller = new AbortController(); request = controller; const current = ++generation; loading = true; error = "";
-    try { const value = await getAdminConversionReport(accessToken, filters, controller.signal); if (current === generation) { report = value; applied = filters; eventOptions = [...new Map([...eventOptions, ...value.byEvent].map((item) => [item.eventId, item])).values()]; } }
+    try { const value = await getAdminConversionReport(accessToken, requested, controller.signal); if (current === generation) { report = value; applied = requested; eventOptions = [...new Map([...eventOptions, ...value.byEvent].map((item) => [item.eventId, item])).values()]; } }
     catch (cause) { if (current !== generation || cause instanceof DOMException && cause.name === "AbortError") return; if (cause instanceof ApiError && cause.status === 401) onUnauthorized(); else error = cause instanceof ApiError ? cause.message : "Laporan belum dapat dimuat. Periksa koneksi lalu coba lagi."; }
     finally { if (current === generation) { loading = false; request = undefined; } }
   }
   function search(event: SubmitEvent) { event.preventDefault(); void load({ eventId, device, dateFrom, dateTo }); }
+  function retry() { if (lastRequested) void load(lastRequested); }
   function count(value: number) { return value.toLocaleString("id-ID"); }
   function rate(value: number, previous: number) { return previous ? `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(value / previous * 100)}%` : "Belum dapat dihitung"; }
   function losses(row: ConversionBreakdown) { return [row.lost.detailToReservation, row.lost.reservationToOrder, row.lost.orderToPayment, row.lost.paymentToSuccess]; }
@@ -48,7 +50,7 @@
       <label>Dari tanggal WIB<input type="date" bind:value={dateFrom} required /></label><label>Sampai tanggal WIB<input type="date" bind:value={dateTo} required /></label>
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button></div>
     </form>
-    {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => void load()}>Coba lagi</button></p>{/if}
+    {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={retry}>Coba lagi</button></p>{/if}
     {#if loading && !report}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan…</p>{/if}
     {#if report}
       <p class="sales-period">Cohort {report.period.dateFrom} sampai {report.period.dateTo} WIB · Jendela {report.period.observationHours} jam <span>Data diperbarui {new Date(report.dataUpdatedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" })} WIB</span></p>
