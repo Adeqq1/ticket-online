@@ -22,6 +22,7 @@ BASE_URL = "http://127.0.0.1:5173"
 ORDER_ID = "0123456789abcdef0123456789abcdef"
 RESERVATION_ID = "abcdef0123456789abcdef0123456789"
 TICKET_ID = "0123456789abcdefabcdef0123456789"
+SECOND_TICKET_ID = "11111111111111111111111111111111"
 TOKEN = "t" * 43
 EVENT_START = "2027-08-24T19:30:00+07:00"
 EXPIRY = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
@@ -61,6 +62,10 @@ def ticket():
         "eventAddress": "Jl. Musik Raya, Jakarta", "eventStartsAt": EVENT_START,
         "tierName": "Festival", "gate": "Gate B", "issuedAt": "2026-10-01T10:00:00Z",
     }
+
+
+def second_ticket():
+    return {**ticket(), "id": SECOND_TICKET_ID, "code": "ET-11111111111111111111111111111111", "attendeeName": "Raka Pembeli"}
 
 
 def order(status="PAID", payment_status="SUCCEEDED", event_state="SCHEDULED", refund_state=None, refund_deadline="2027-08-30T23:59:00+07:00"):
@@ -137,6 +142,8 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
     if endpoint.startswith("/api/v1/orders/") and endpoint.endswith("/tickets"):
         if scenario == "phase23-ticket-error":
             return 503, {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Daftar tiket belum dapat dimuat."}}
+        if scenario == "phase27-partial-tickets":
+            return 200, {"tickets": [ticket(), second_ticket()]}
         return 200, {"tickets": [ticket()]}
     if endpoint.startswith("/api/v1/orders/"):
         status = {"pending": "PENDING", "cancelled": "CANCELLED", "expired": "EXPIRED", "refund-pending": "REFUND_PENDING", "refund-unknown": "REFUND_PENDING", "refund-manual": "REFUND_PENDING", "refund-failed": "REFUND_PENDING", "refunded": "REFUNDED"}.get(state, "PAID")
@@ -145,6 +152,11 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
         refund_state = {"refund-unknown": "UNKNOWN", "refund-manual": "MANUAL_REQUIRED", "refund-failed": "FAILED"}.get(state)
         refund_deadline = None if state == "no-deadline" else "2020-08-30T23:59:00+07:00" if state == "past-deadline" else "2027-08-30T23:59:00+07:00"
         result = order(status, payment_status, event_state, refund_state, refund_deadline)
+        if scenario == "phase27-partial-tickets":
+            result["subtotal"] = 550000
+            result["total"] = 555000
+            result["items"] = [{"tierId": "festival", "name": "Festival", "quantity": 2, "unitPrice": 275000, "lineTotal": 550000}]
+            result["attendees"] = [{"tierId": "festival", "ticketNumber": 1, "name": "Nadia Pembeli"}, {"tierId": "festival", "ticketNumber": 2, "name": "Raka Pembeli"}]
         if scenario == "phase23-refund-eligible":
             result = order("REFUND_PENDING" if refund_requested else "PAID", "SUCCEEDED", "POSTPONED", "PROCESSING" if refund_requested else None)
         if scenario == "phase23-refund-eligible" and refund_requested:
@@ -158,8 +170,8 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
         if scenario == "phase23-refund-unknown":
             result = order("PAID", "SUCCEEDED", "RESCHEDULED")
         return 200, result
-    if endpoint == "/api/v1/tickets/" + TICKET_ID:
-        result = ticket()
+    if endpoint in ("/api/v1/tickets/" + TICKET_ID, "/api/v1/tickets/" + SECOND_TICKET_ID):
+        result = ticket() if endpoint.endswith(TICKET_ID) else second_ticket()
         if state == "changed":
             result["currentEvent"] = event("POSTPONED")["currentEvent"]
         if state == "inactive":
@@ -276,6 +288,21 @@ async def main():
                 url = urlparse(route.request.url)
                 page_params = dict(parse_qsl(urlparse(page.url).query))
                 scenario = page_params.get("scenario", "standard")
+                if scenario == "phase27-partial-tickets" and url.path.startswith("/api/v1/orders/") and url.path.endswith("/tickets"):
+                    request_count = getattr(api, "phase27_ticket_requests", 0) + 1
+                    api.phase27_ticket_requests = request_count
+                    if request_count == 1:
+                        await route.fulfill(status=503, content_type="application/json", body=json.dumps({"error": {"code": "SERVICE_UNAVAILABLE", "message": "Daftar tiket belum dapat dimuat."}}))
+                        return
+                    tickets = [ticket()] if request_count == 2 else [ticket(), second_ticket()]
+                    await route.fulfill(status=200, content_type="application/json", body=json.dumps({"tickets": tickets}))
+                    return
+                if scenario == "phase27-detail-retry" and url.path == "/api/v1/events/nusa-malam":
+                    request_count = getattr(api, "phase27_detail_requests", 0) + 1
+                    api.phase27_detail_requests = request_count
+                    if request_count == 1:
+                        await route.fulfill(status=503, content_type="application/json", body=json.dumps({"error": {"code": "SERVICE_UNAVAILABLE", "message": "Layanan sedang tidak tersedia."}}))
+                        return
                 if url.path.endswith("/refund-request") and route.request.method == "POST":
                     api.refund_post_count = getattr(api, "refund_post_count", 0) + 1
                     if scenario == "phase23-refund-eligible":
@@ -362,6 +389,46 @@ async def main():
                 await page.goto(f"{BASE_URL}/pesanan/{ORDER_ID}?scenario={scenario}", wait_until="domcontentloaded")
                 await page.wait_for_timeout(350)
                 captures.append(await capture(page, f"{viewport_name}-pesanan-{label}", f"{viewport_name}, pesanan {label}"))
+            if viewport_name == "mobile":
+                await page.goto(f"{BASE_URL}/pesanan/{ORDER_ID}?scenario=phase27-partial-tickets", wait_until="domcontentloaded")
+                await page.locator(".order-ticket-section").get_by_role("button", name="Muat ulang tiket").wait_for()
+                assert await page.locator(".my-order-card").count() == 0, "The first ticket-list error should leave the order's ticket list empty."
+                await page.locator(".order-ticket-section").get_by_role("button", name="Muat ulang tiket").click()
+                await page.locator(".my-order-card").wait_for()
+                assert await page.locator(".my-order-card").count() == 1, "A partial retry should keep its successfully loaded ticket visible."
+                assert await page.locator(".order-ticket-section").get_by_role("alert").is_visible(), "A partial retry should expose its error beside the loaded ticket."
+                assert await page.locator(".order-ticket-section").get_by_role("button", name="Muat ulang tiket").is_visible(), "A partial retry should remain available."
+                await page.locator(".order-ticket-section").get_by_role("button", name="Muat ulang tiket").click()
+                await page.wait_for_function("document.querySelectorAll('.my-order-card').length === 2")
+                assert await page.locator(".order-ticket-section").get_by_role("alert").count() == 0, "A complete retry should clear the ticket-list error."
+                assert await page.locator(".order-ticket-section").get_by_role("button", name="Muat ulang tiket").count() == 0, "A complete retry should remove the reload action."
+                await page.locator(".my-order-card").first.get_by_role("link", name="Buka e-ticket").click()
+                await page.wait_for_url(f"**/tiket/{TICKET_ID}")
+                for width in (1440, 390):
+                    await page.set_viewport_size({"width": width, "height": 844})
+                    api.phase27_detail_requests = 0
+                    await page.goto(f"{BASE_URL}/konser/nusa-malam?scenario=phase27-detail-retry", wait_until="domcontentloaded")
+                    await page.get_by_role("button", name="Coba lagi").wait_for()
+                    await page.get_by_role("button", name="Coba lagi").click()
+                    await page.get_by_role("heading", name="Nusa Malam").wait_for()
+                    details = page.locator(".zone-details")
+                    expected_open = width >= 768
+                    assert await details.evaluate("element => element.open") == expected_open, f"Detail retry should initialize the area panel at {width}px."
+                    if width == 1440:
+                        await details.locator("summary").click()
+                        await page.get_by_role("button", name="Tambah tiket VIP A").click()
+                        assert not await details.evaluate("element => element.open"), "Changing ticket quantity should not reopen a manually closed desktop area panel."
+                        await page.set_viewport_size({"width": 390, "height": 844})
+                        await page.wait_for_function("!document.querySelector('.zone-details').open")
+                    else:
+                        await details.locator("summary").click()
+                        await page.get_by_role("button", name="Tambah tiket VIP A").click()
+                        assert await details.evaluate("element => element.open"), "Changing ticket quantity should not close a manually opened mobile area panel."
+                        await page.wait_for_function("""() => {const root=document.documentElement,cart=document.querySelector('.mobile-cart');return parseInt(root.style.getPropertyValue('--detail-mobile-cart-height'))===Math.ceil(cart.getBoundingClientRect().height)&&Boolean(root.style.scrollPaddingBottom)}""")
+                        await page.locator(".mobile-cart").evaluate("element => element.style.fontSize = '24px'")
+                        await page.wait_for_function("""() => parseInt(document.documentElement.style.getPropertyValue('--detail-mobile-cart-height'))===Math.ceil(document.querySelector('.mobile-cart').getBoundingClientRect().height)""")
+                        assert await page.evaluate("document.documentElement.style.scrollPaddingBottom.length > 0"), "Mobile cart measurement should install scroll padding after detail retry."
+                        await page.locator(".mobile-cart").evaluate("element => element.style.fontSize = ''")
             for state in ("changed", "inactive"):
                 await page.goto(f"{BASE_URL}/tiket/{TICKET_ID}?snapshot={state}", wait_until="domcontentloaded")
                 await page.wait_for_timeout(350)
@@ -393,6 +460,16 @@ async def main():
                     assert await page.get_by_text("Biaya admin", exact=True).is_visible(), "The admin fee should be visible before order confirmation."
                     assert await page.evaluate("document.activeElement?.id === 'confirmation-title'"), "The final checkout step should receive keyboard focus."
                     assert await page.locator(".skip-link").evaluate("element => getComputedStyle(element).top === '-64px'"), "The skip link should remain hidden unless it has keyboard focus."
+                    assert await page.locator(".order-summary").evaluate("summary => Boolean(summary.compareDocumentPosition(document.querySelector('.checkout-panel')) & Node.DOCUMENT_POSITION_FOLLOWING)"), "The mobile reading and tab order should place the cost summary before checkout confirmation."
+                    if viewport_name == "desktop":
+                        desktop_columns = await page.evaluate("""() => {const summary=document.querySelector('.order-summary').getBoundingClientRect(),panel=document.querySelector('.checkout-panel').getBoundingClientRect();return summary.left>panel.left&&Math.abs(summary.top-panel.top)<2}""")
+                        assert desktop_columns, "The checkout summary should remain in the right desktop column."
+                    else:
+                        for width in (320, 360, 390):
+                            await page.set_viewport_size({"width": width, "height": 844})
+                            positions = await page.evaluate("""() => {const costs=document.querySelector('.summary-breakdown').getBoundingClientRect(),terms=document.querySelector('.terms-trigger').getBoundingClientRect(),button=document.querySelector('.step-actions').getBoundingClientRect();return{costsBottom:costs.bottom,termsTop:terms.top,buttonTop:button.top}}""")
+                            assert positions["costsBottom"] <= positions["termsTop"] <= positions["buttonTop"], f"Mobile cost details should precede approval and payment at {width}px: {positions}."
+                        await page.set_viewport_size({"width": 390, "height": 844})
                 captures.append(await capture(page, f"{viewport_name}-checkout-{label}", f"{viewport_name}, checkout langkah {step}"))
             if viewport_name == "mobile":
                 await page.goto(BASE_URL + "/checkout/nusa-malam?festival=1", wait_until="domcontentloaded")
@@ -475,6 +552,7 @@ async def main():
                 await page.goto(BASE_URL + "/?scenario=phase21-search", wait_until="domcontentloaded")
                 await page.locator(".concert-card").first.wait_for()
                 assert await page.locator(".concert-card").count() == 4, "The home page should initially show four events."
+                assert await page.locator(".results-count").inner_text() == "5 konser ditemukan, menampilkan 4 pertama", "The home result count should describe all matches while showing only four cards."
                 await page.locator("#event-query").fill("Panggung Terakhir")
                 await page.locator("#event-query").press("Enter")
                 assert await page.get_by_role("heading", name="Panggung Terakhir").count() == 1, "Home search should find events beyond the first four."
@@ -568,12 +646,12 @@ async def main():
             contrast_failures = [check for check in responsive_checks if check.get("mode", "").startswith("contrast-") and any(value is None or value < (3 if key == "control" else 4.5) for key, value in check.items() if key != "mode")]
             target_failures = [check for check in responsive_checks if check.get("smallTargetCount", 0)]
             input_failures = [check for check in responsive_checks if check.get("smallInputs")]
-            zoom_overflow = [check for check in responsive_checks if check.get("mode") == "text-zoom" and (check["document"] > check["viewport"] or check["body"] > check["viewport"])]
+            responsive_overflow = [check for check in responsive_checks if check.get("mode") in ("landscape", "text-zoom") and (check["document"] > check["viewport"] or check["body"] > check["viewport"])]
             assert not overflow, f"Responsive matrix overflow: {overflow}"
             assert not contrast_failures, f"Public token contrast fell below WCAG thresholds: {contrast_failures}"
             assert not target_failures, f"Public touch targets fell below 44px: {target_failures}"
             assert not input_failures, f"Public input text fell below 16px: {input_failures}"
-            assert not zoom_overflow, f"Public pages overflow at 200% text size: {zoom_overflow}"
+            assert not responsive_overflow, f"Public pages overflow in responsive mode: {responsive_overflow}"
     manifest = {"captureMode": MODE, "phase25": args.phase25, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit, "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844", "checkpoint": "360x800", "narrow": "320x740", "phase25": [320, 360, 390, 768, 1024, 1440, "844x390 landscape", "200% text simulation"]}, "api": "Responses are intercepted and generated from the current OpenAPI contract; no live buyer data is used.", "photoFixtures": "Existing Picsum URLs are served from docs/phase20/fixtures for repeatable captures.", "captures": captures, "layoutChecks": layout_checks, "responsiveChecks": responsive_checks, "isolationChecks": isolation_checks}
     OUTPUT.mkdir(parents=True, exist_ok=True)
     index = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"

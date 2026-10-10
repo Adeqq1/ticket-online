@@ -1,7 +1,7 @@
 <script lang="ts">
   import EventNotice from "../../components/EventNotice.svelte";
   import { canBuy, eventStatus } from "../../lib/event-changes.ts";
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import { getEvent, ApiError } from "../../lib/api.ts";
   import { eventDate, formatRupiah, parseQuantities, type Concert } from "../../lib/concerts.ts";
   import NotFoundPanel from "../../components/NotFoundPanel.svelte";
@@ -10,8 +10,11 @@
   import { cartTotal, changeQuantity, quantityParams, ticketCount, type DetailState } from "../../lib/cart.ts";
   import { recordConversion, trackConversionActivity } from "../../lib/conversion.ts";
   let { id }: { id: string } = $props();
+  let isDesktop = $state(false);
   let zoneMapDetails: HTMLDetailsElement | undefined = $state();
   let mobileCart: HTMLDivElement | undefined = $state();
+  let cartObserver: ResizeObserver | undefined = $state();
+  let cartRootStyle: CSSStyleDeclaration | undefined;
   let concertData: Concert | undefined = $state();
   let loading: boolean = $state(true);
   let error: string = $state("");
@@ -25,6 +28,21 @@
   const total = $derived(concertData ? cartTotal(concertData, detailState.quantities) : 0);
   const selected = $derived(concertData?.ticketTiers.filter((tier) => detailState.quantities[tier.id]) ?? []);
   const saleOpen = $derived(Boolean(concertData && concertData.status !== "Sold Out" && canBuy(concertData.currentEvent)));
+  $effect(() => {
+    const details = zoneMapDetails;
+    if (details) details.open = isDesktop;
+  });
+  $effect(() => {
+    const cart = mobileCart;
+    const observer = cartObserver;
+    const rootStyle = cartRootStyle;
+    if (!cart || !observer || !rootStyle) return;
+    observer.observe(cart);
+    const height = Math.ceil(cart.getBoundingClientRect().height);
+    rootStyle.setProperty("--detail-mobile-cart-height", `${height}px`);
+    rootStyle.scrollPaddingBottom = "calc(var(--detail-mobile-cart-height, 0px) + 16px)";
+    return () => observer.unobserve(cart);
+  });
   function adjust(tierId: string, delta: -1 | 1) { if (concertData) detailState = changeQuantity(concertData, detailState, tierId, delta); }
   function selectZone(zoneId: string, event: MouseEvent | KeyboardEvent) {
     detailState.selectedZoneId = zoneId;
@@ -47,25 +65,20 @@
     const controller = new AbortController();
     const stopTracking = trackConversionActivity(id);
     const desktop = window.matchMedia("(min-width: 768px)");
-    const syncZoneMap = () => { if (zoneMapDetails) zoneMapDetails.open = desktop.matches; };
+    const syncViewport = () => { isDesktop = desktop.matches; };
     const rootStyle = document.documentElement.style;
     const previousScrollPadding = rootStyle.scrollPaddingBottom;
     const previousCartHeight = rootStyle.getPropertyValue("--detail-mobile-cart-height");
-    const resizeObserver = new ResizeObserver(() => {
-      if (mobileCart) rootStyle.setProperty("--detail-mobile-cart-height", `${Math.ceil(mobileCart.getBoundingClientRect().height)}px`);
+    cartRootStyle = rootStyle;
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) rootStyle.setProperty("--detail-mobile-cart-height", `${Math.ceil(entry.target.getBoundingClientRect().height)}px`);
     });
-    desktop.addEventListener("change", syncZoneMap);
-    void load(controller.signal).then(async () => {
-      await tick();
-      if (controller.signal.aborted) return;
-      syncZoneMap();
-      if (mobileCart) {
-        resizeObserver.observe(mobileCart);
-        rootStyle.scrollPaddingBottom = "calc(var(--detail-mobile-cart-height, 0px) + 16px)";
-      }
-    });
+    cartObserver = resizeObserver;
+    syncViewport();
+    desktop.addEventListener("change", syncViewport);
+    void load(controller.signal);
     return () => {
-      controller.abort(); stopTracking(); desktop.removeEventListener("change", syncZoneMap); resizeObserver.disconnect();
+      controller.abort(); stopTracking(); desktop.removeEventListener("change", syncViewport); cartObserver = undefined; resizeObserver.disconnect(); cartRootStyle = undefined;
       rootStyle.scrollPaddingBottom = previousScrollPadding;
       if (previousCartHeight) rootStyle.setProperty("--detail-mobile-cart-height", previousCartHeight); else rootStyle.removeProperty("--detail-mobile-cart-height");
     };

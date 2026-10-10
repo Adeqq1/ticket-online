@@ -61,7 +61,7 @@
         const saved = saveOrderTicketAccess(access, result.detail.accessExpiresAt, result.tickets.map((ticket) => ticket.id));
         ticketAccessError = saved ? "" : "Akses tiket belum tersimpan. Kode tiket terlihat selama halaman ini terbuka, tetapi tautan e-ticket memerlukan penyimpanan browser.";
       }
-      if (result.error) error = result.error.message;
+      if (result.error && !result.detail) error = result.error.message;
       return Boolean(result.detail);
     } catch (cause) {
       if (!controller.signal.aborted) error = cause instanceof Error ? cause.message : "Pesanan belum dapat dimuat.";
@@ -222,9 +222,10 @@
           <li><article class="my-order-card"><div><b>{ticket.attendeeName}</b><p>{ticket.tierName} · Gate {ticket.gate} · {ticket.code}</p>{#if detail.status === "REFUND_PENDING" || detail.status === "REFUNDED"}<small class="ticket-inactive">Tiket tidak dapat digunakan selama pengembalian dana.</small>{:else if detail.currentEvent?.status === "CANCELLED"}<small class="ticket-inactive">Acara dibatalkan; tiket tidak berlaku untuk masuk.</small>{:else if detail.currentEvent?.salesPaused}<small>Tiket dipertahankan sampai informasi acara tersedia.</small>{/if}</div>{#if persistent}<a class="button button-secondary" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Buka e-ticket</a>{:else}<span>Kode tiket tersedia selama halaman ini terbuka.</span>{/if}</article></li>
         {/each}
       </ul>
-      {:else if detail.status === "PAID"}<p>{ticketError || "Tiket belum dimuat."}</p><button class="button button-secondary" type="button" disabled={paymentBusy} onclick={reloadTickets}>{paymentBusy ? "Memuat…" : "Muat ulang tiket"}</button>
-      {:else if detail.status === "PENDING"}<p>Tiket akan tersedia setelah pembayaran dikonfirmasi.</p>
-      {:else}<p>Tidak ada tiket yang dapat digunakan untuk pesanan ini.</p>{/if}
+      {/if}
+      {#if detail.status === "PAID" && (!tickets.length || ticketError)}<p role="alert">{ticketError || "Tiket belum dimuat."}</p><button class="button button-secondary" type="button" disabled={paymentBusy} onclick={reloadTickets}>{paymentBusy ? "Memuat…" : "Muat ulang tiket"}</button>
+      {:else if detail.status === "PENDING" && !tickets.length}<p>Tiket akan tersedia setelah pembayaran dikonfirmasi.</p>
+      {:else if detail.status !== "PAID" && detail.status !== "PENDING" && !tickets.length}<p>Tidak ada tiket yang dapat digunakan untuk pesanan ini.</p>{/if}
       {#if ticketAccessError}<p class="legacy-ticket-note" role="status">{ticketAccessError}</p>{/if}
       {#if detail.status === "PAID" && detail.currentEvent?.startsAt !== null && !detail.refundRight?.requested}
         <div class="order-resend"><h3>Kirim ulang email</h3><p>Email tiket dikirim ke alamat pembeli yang tersimpan pada pesanan.</p><button class="button" type="button" disabled={sending} aria-busy={sending} onclick={resend}>{sending ? "Menjadwalkan..." : "Kirim ulang email"}</button><p role="status" aria-live="polite">{resendMessage}</p><p class="form-error" aria-live="polite">{resendError}</p></div>
