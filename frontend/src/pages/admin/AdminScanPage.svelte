@@ -85,7 +85,7 @@
   <a class="skip-link" href="#scan-content">Lewati ke scanner</a>
   <header class="scan-topbar">
     <a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a>
-    <div class="scan-live"><span class="scan-live-dot" aria-hidden="true"></span><span class="scan-live-state">Sistem aktif <i>•</i></span><strong>{assignment?.gate ?? "Pilih gate"}</strong><button class="staff-text-button" type="button" disabled={scan.busy || scan.statusChecking || loggingOut} onclick={onLogout}>Keluar</button></div>
+    <div class="scan-live"><span class="scan-live-dot" aria-hidden="true"></span><span class="scan-live-state">{sessionReady ? "Sesi aktif" : "Memeriksa sesi"}</span><span class="scan-staff-name">{staff.name}</span><span class="scan-assignment-name">{assignment ? `${eventNames[assignment.eventId] ?? assignment.eventId} · ${assignment.gate}` : "Pilih event dan gate"}</span><button class="staff-text-button" type="button" disabled={scan.busy || scan.statusChecking || loggingOut} onclick={onLogout}>Keluar</button></div>
   </header>
 
   <main id="scan-content" class="scan-content">

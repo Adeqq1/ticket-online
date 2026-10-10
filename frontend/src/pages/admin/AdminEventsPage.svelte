@@ -1,6 +1,7 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import EventChangePanel from "../../components/admin/EventChangePanel.svelte";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { ApiError, createAdminEvent, createAdminTier, createAdminZone, getAdminEvents, updateAdminEvent, updateAdminTier, updateAdminZone, type AdminEventInput, type AdminApiEvent, type AdminTierInput, type PublicationStatus } from "../../lib/api.ts";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
@@ -44,7 +45,12 @@
     tierSelected = ""; tierDraft = { id: "", name: "", zoneId: event.zones[0]?.id ?? "", price: 0, capacity: 0, maxPerOrder: 1, benefit: "", gate: "", seating: "free-standing" };
     error = ""; notice = "";
   }
-  function startNew() { selectedId = ""; draft = emptyEvent(); lineupText = ""; error = ""; notice = ""; }
+  async function startNew() {
+    selectedId = ""; draft = emptyEvent(); lineupText = ""; error = ""; notice = "";
+    await tick();
+    document.getElementById("event-form")?.scrollIntoView({ block: "start" });
+    document.querySelector<HTMLInputElement>("#event-form input")?.focus({ preventScroll: true });
+  }
 
   async function load() {
     request?.abort(); const controller = new AbortController(); request = controller; const current = ++generation; loading = true; error = "";
@@ -83,13 +89,7 @@
 
 <svelte:head><title>Kelola Konser | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#event-admin-content">Lewati ke pengelolaan konser</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut || saving} onclick={onLogout}>Keluar</button></header>
-  <main id="event-admin-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">KATALOG EVENT <span>•</span> ADMIN</p><h1>Kelola konser.</h1><p>Atur informasi, jadwal, lineup, poster, dan publikasi konser.</p></div><button class="staff-secondary-button" type="button" disabled={saving} onclick={startNew}>Tambah konser</button></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a aria-current="page" href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Laporan</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
-
+  <AdminLayout page="events" contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title="Kelola konser." description="Atur informasi, jadwal, lineup, poster, dan publikasi konser." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={{ label: "Tambah konser", onclick: startNew, disabled: saving }}>
     <div class="staff-admin-grid event-admin-grid">
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
         <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="event-list-title">Daftar konser</h2></div><span class="staff-muted">{visible.length} konser</span></div>
@@ -104,7 +104,7 @@
         <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="event-editor-title">{selectedId ? draft.artist : "Konser baru"}</h2></div>{#if selectedId}<span class={`event-publication event-${draft.publicationStatus.toLowerCase()}`}>{draft.publicationStatus}</span>{/if}</div>
         {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
         {#if notice}<p class="staff-form-message event-save-notice" role="status">{notice}</p>{/if}
-        <form class="staff-form event-admin-form" onsubmit={save} aria-busy={saving}>
+        <form id="event-form" class="staff-form event-admin-form" onsubmit={save} aria-busy={saving}>
           {#if !selectedId}<label>ID URL konser<input bind:value={draft.id} pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="64" placeholder="nama-konser" required disabled={saving} /><small>Huruf kecil, angka, dan tanda hubung.</small></label>{/if}
           <label>Nama konser / artis<input bind:value={draft.artist} minlength="2" maxlength="160" required disabled={saving} /></label>
           <div class="event-form-row"><label>Genre<select bind:value={draft.genre} disabled={saving}><option>Rock</option><option>Pop</option><option>Indie</option></select></label><label>Label penjualan<select bind:value={draft.status} disabled={saving}><option>Early Bird</option><option>Presale</option><option>Sold Out</option></select></label></div>
@@ -151,5 +151,4 @@
       </section>
     </div>
     <footer class="scan-footer"><span>Tiket Online · Admin tools</span><span>Pengelolaan informasi dan publikasi konser</span></footer>
-  </main>
-</div>
+</AdminLayout>

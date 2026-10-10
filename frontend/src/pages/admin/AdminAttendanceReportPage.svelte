@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, exportAdminAttendanceReportCSV, getAdminAttendanceReport, getAdminEvents, saveAdminReportCSV, type AdminAttendanceReport, type AdminApiEvent } from "../../lib/api.ts";
 
@@ -69,7 +70,7 @@
   function number(value: number) { return value.toLocaleString("id-ID"); }
   function rate(value: number | null) { return value === null ? "—" : `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(value)}%`; }
   function localTime(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" }) + " WIB"; }
-  function hour(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", hour: "2-digit", minute: "2-digit", hour12: false }) + " WIB"; }
+  function hour(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" }) + " WIB"; }
   function gateName(value: string | null) { return value || "Gate tidak diketahui"; }
 
   onMount(() => { void initialize(); });
@@ -77,12 +78,7 @@
 </script>
 
 <svelte:head><title>Laporan kehadiran | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#attendance-report-content">Lewati ke laporan</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="attendance-report-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">LAPORAN EVENT <span>•</span> ADMIN</p><h1>Kehadiran dan tiket.</h1><p>Kondisi inventori dan tiket saat ini; kehadiran dihitung dari tiket masuk yang berhasil di-scan.</p></div><div class="report-actions"><button class="staff-secondary-button" type="button" onclick={() => void load()} disabled={loading || !applied}>Muat ulang</button><button class="staff-secondary-button" type="button" onclick={exportCSV} disabled={loading || exporting || !data}>{exporting ? "Menyiapkan CSV…" : "Ekspor CSV"}</button></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Penjualan dan refund</a><a aria-current="page" href="/admin/reports/attendance">Kehadiran</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+  <AdminLayout page="attendance" contentId="attendance-report-content" skipLabel="Lewati ke laporan" kicker="LAPORAN EVENT • ADMIN" title="Kehadiran dan tiket." description="Kondisi inventori dan tiket saat ini; kehadiran dihitung dari tiket masuk yang berhasil di-scan." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: exporting ? "Menyiapkan CSV…" : "Ekspor CSV", onclick: exportCSV, disabled: loading || exporting || !data }} secondaryAction={{ label: "Muat ulang", onclick: () => void load(), disabled: loading || !applied }}>
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="attendance-filter-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="attendance-filter-title">Filter laporan</h2></div></div>
       <form class="history-filter-form" onsubmit={search} aria-busy={loading}>
@@ -115,5 +111,4 @@
       <p class="staff-muted">Kehadiran menunjukkan kondisi terkini, bukan rekonstruksi historis. Scan gagal dan scan ulang tidak dihitung sebagai check-in berhasil.</p>
     {:else if !error}<p class="staff-muted" role="status">Pilih event untuk menampilkan laporan kehadiran.</p>{/if}
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Laporan kondisi tiket dan kehadiran</span></footer>
-  </main>
-</div>
+</AdminLayout>

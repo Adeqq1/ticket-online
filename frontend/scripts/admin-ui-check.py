@@ -1,4 +1,4 @@
-"""Capture the Phase 29 admin/staff baseline using local API fixtures.
+"""Capture admin/staff UI states using local API fixtures.
 
 Run from frontend/: python3 scripts/admin-ui-check.py
 Requires the Vite app at http://127.0.0.1:5173, Playwright, and Google Chrome.
@@ -141,9 +141,12 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
     parser.add_argument("--only", help="Capture a single route key for debugging, e.g. events")
+    parser.add_argument("--output-dir", type=Path, help="Screenshot output directory; defaults to docs/phase29/screenshots")
+    parser.add_argument("--phase", type=int, default=29, help="Phase number recorded in the manifest")
     args = parser.parse_args()
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    for previous in OUTPUT.glob("*.png"):
+    output = args.output_dir if args.output_dir and args.output_dir.is_absolute() else ROOT / args.output_dir if args.output_dir else OUTPUT
+    output.mkdir(parents=True, exist_ok=True)
+    for previous in output.glob("*.png"):
         previous.unlink()
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True).stdout.strip()
     captures, unexpected, observed_api, unhandled_api = [], [], set(), []
@@ -220,7 +223,7 @@ async def main():
                         await page.evaluate("top => window.scrollTo(0, top)", top)
                         await page.wait_for_timeout(80)
                         path = f"{base}.png" if len(tops) == 1 else f"{base}-view-{index + 1:02d}.png"
-                        await page.screenshot(path=str(OUTPUT / path), full_page=False, animations="disabled", timeout=10000)
+                        await page.screenshot(path=str(output / path), full_page=False, animations="disabled", timeout=10000)
                         paths.append(path)
                     current_url = urlparse(page.url)
                     if mode == "standard" and name not in ("login", "scanner") and current_url.path != route:
@@ -240,18 +243,58 @@ async def main():
                             textFontSizes: [...new Set(text.map(el=>parseFloat(getComputedStyle(el).fontSize)).filter(Number.isFinite))].sort((a,b)=>a-b),
                             undersizedTargets: controls.filter(el=>el.width<44||el.height<44),
                             liveRegionCount: document.querySelectorAll('[role=status],[role=alert],[aria-live]').length,
+                            overflowElements: [...document.querySelectorAll('body *')].filter(el=>{const r=el.getBoundingClientRect();return r.right>innerWidth+1||r.left < -1}).slice(0,12).map(el=>({tag:el.tagName,id:el.id,classes:typeof el.className==='string'?el.className:'',parents:[el.parentElement?.tagName,el.parentElement?.className,el.parentElement?.parentElement?.className],left:Math.round(el.getBoundingClientRect().left),right:Math.round(el.getBoundingClientRect().right)})),
                             viewportWidth: innerWidth,documentWidth: document.documentElement.scrollWidth,
                             overflow: document.documentElement.scrollWidth>innerWidth
                           };
                         }""")
+                        action = page.locator(".admin-page-heading .admin-heading-actions > button").first
+                        if name not in ("login", "scanner"):
+                            if not await action.count():
+                                raise AssertionError(f"admin heading action missing on {route}")
+                            action_info = await action.evaluate("button => ({label:button.innerText.trim(),type:button.type,formId:button.form?.id||'',disabled:button.disabled})")
+                            if action_info["formId"] and not await page.locator(f"#{action_info['formId']}").count():
+                                raise AssertionError(f"heading action points to a missing form on {route}")
+                            capture["audit"]["primaryAction"] = action_info
                         await page.keyboard.press("Tab")
                         capture["audit"]["firstTabFocus"] = await page.evaluate("""() => ({tag:document.activeElement?.tagName,id:document.activeElement?.id||'',label:document.activeElement?.getAttribute('aria-label')||document.activeElement?.innerText?.trim()||''})""")
                         if viewport == "mobile":
+                            if role == "ADMIN":
+                                menu_button = page.get_by_role("button", name="Menu", exact=True)
+                                await menu_button.focus()
+                                await page.keyboard.press("Enter")
+                                dialog = page.locator("#admin-mobile-menu")
+                                if not await dialog.evaluate("dialog => dialog.open"):
+                                    raise AssertionError(f"mobile admin menu did not open on {route}")
+                                close_button = dialog.get_by_role("button", name="Tutup", exact=True)
+                                if not await close_button.evaluate("button => button === document.activeElement"):
+                                    raise AssertionError(f"mobile menu focus did not move to close button on {route}")
+                                current_links = dialog.locator('a[aria-current="page"]')
+                                if await current_links.count() != 1:
+                                    raise AssertionError(f"mobile menu needs one active destination on {route}")
+                                await dialog.get_by_role("link").last.focus()
+                                await page.keyboard.press("Tab")
+                                focus_trapped = await dialog.evaluate("dialog => dialog.contains(document.activeElement)")
+                                if not focus_trapped:
+                                    active = await page.evaluate("() => document.activeElement?.outerHTML")
+                                    raise AssertionError(f"mobile menu focus escaped its dialog on {route}: {active}")
+                                await page.keyboard.press("Escape")
+                                focus_restored = await menu_button.evaluate("button => button === document.activeElement")
+                                if not focus_restored:
+                                    raise AssertionError(f"mobile menu did not restore focus on {route}")
+                                await page.keyboard.press("Enter")
+                                await page.set_viewport_size({"width": 1024, "height": size["height"]})
+                                await page.wait_for_function("!document.querySelector('#admin-mobile-menu').open")
+                                desktop_focus_restored = await page.locator(".admin-topbar .scan-brand").evaluate("brand => brand === document.activeElement")
+                                if not desktop_focus_restored:
+                                    raise AssertionError(f"desktop resize left focus on a hidden control on {route}")
+                                await page.set_viewport_size(size)
+                                capture["audit"]["mobileMenu"] = {"oneActiveDestination": True, "focusEntered": True, "focusTrapped": True, "escapeCloses": True, "focusRestored": True, "desktopResizeCloses": True}
                             await page.set_viewport_size({"width": 320, "height": 740})
                             await page.evaluate("window.scrollTo(0,0)")
                             capture["audit"]["narrow320"] = await page.evaluate("""() => ({viewportWidth:innerWidth,documentWidth:document.documentElement.scrollWidth,overflow:document.documentElement.scrollWidth>innerWidth})""")
                             narrow_path = f"{name}-320px.png"
-                            await page.screenshot(path=str(OUTPUT / narrow_path), full_page=False, animations="disabled")
+                            await page.screenshot(path=str(output / narrow_path), full_page=False, animations="disabled")
                             capture["files"].append(narrow_path)
                     if page_errors:
                         capture["pageErrors"] = page_errors
@@ -279,19 +322,19 @@ async def main():
                 if urlparse(page.url).path != "/admin/scan":
                     unexpected.append({"route": route, "actual": urlparse(page.url).path, "mode": "role-denied", "viewport": viewport})
                 denied_path = f"{name}-role-denied-{viewport}.png"
-                await page.screenshot(path=str(OUTPUT / denied_path), full_page=False)
+                await page.screenshot(path=str(output / denied_path), full_page=False)
                 captures.append({"route": route, "scenario": "role-denied", "role": "STAFF", "viewport": viewport, "files": [denied_path], "finalUrl": urlparse(page.url).path})
                 await context.close()
         await browser.close()
 
-    manifest = {"phase": 29, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit,
+    manifest = {"phase": args.phase, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit,
         "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844"},
         "theme": "dark", "timezone": "Asia/Jakarta", "api": "All API requests are intercepted; responses use local fixtures and unmapped requests fail the capture.",
         "apiRequests": sorted(observed_api), "unhandledApiRequests": unhandled_api,
         "pageErrors": [{"route": c["route"], "scenario": c["scenario"], "viewport": c["viewport"], "errors": c["pageErrors"]} for c in captures if c.get("pageErrors")],
         "captures": captures, "unexpectedRedirects": unexpected}
-    (OUTPUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-    print(f"Captured {len(captures)} admin/staff screenshots in {OUTPUT}")
+    (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+    print(f"Captured {len(captures)} admin/staff screenshots in {output}")
     if unexpected:
         raise AssertionError(f"Unexpected redirects: {unexpected}")
     if unhandled_api:

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, getAdminCheckInHistory, type CheckInHistoryEvent, type CheckInHistoryFilter, type CheckInHistoryItem } from "../../lib/api.ts";
 
@@ -69,16 +70,10 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#checkin-history-content">Lewati ke riwayat check-in</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut || loading} onclick={onLogout}>Keluar</button></header>
-  <main id="checkin-history-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> AUDIT</p><h1>Riwayat check-in.</h1><p>Periksa hasil scan yang tercatat server beserta petugas dan waktu masuk.</p></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Laporan</a><a href="/admin/staff">Kelola petugas</a><a aria-current="page" href="/admin/check-ins">Riwayat check-in</a></nav>
-
+  <AdminLayout page="history" contentId="checkin-history-content" skipLabel="Lewati ke riwayat check-in" kicker="OPERASIONAL EVENT • AUDIT" title="Riwayat check-in." description="Periksa hasil scan yang tercatat server beserta petugas dan waktu masuk." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Cari", form: "checkin-search-form", disabled: loading }}>
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="history-filters-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="history-filters-title">Filter riwayat</h2></div></div>
-      <form class="history-filter-form" onsubmit={search} aria-busy={loading}>
+      <form id="checkin-search-form" class="history-filter-form" onsubmit={search} aria-busy={loading}>
         <label>Event<select value={eventId} onchange={(event) => selectEvent(event.currentTarget.value)} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
         <label>Gate<select bind:value={gate} disabled={loading || !gates.length}><option value="">Semua gate</option>{#each gates as item (item)}<option value={item}>{item}</option>{/each}</select></label>
         <label>Kode tiket<input bind:value={query} maxlength="35" placeholder="Cari sebagian kode ET-…" disabled={loading} /></label>
@@ -96,5 +91,4 @@
       {/if}
     </section>
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Riwayat hasil check-in server</span></footer>
-  </main>
-</div>
+</AdminLayout>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, getAdminConversionReport, type ConversionBreakdown, type ConversionReport } from "../../lib/api.ts";
 
@@ -24,12 +25,7 @@
 </script>
 
 <svelte:head><title>Konversi | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#conversion-content">Lewati ke laporan</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="conversion-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">LAPORAN PERJALANAN <span>•</span> ADMIN</p><h1>Konversi pembeli.</h1><p>Tahapan mengikuti perjalanan anonim per tab dan event. Periode memakai tanggal WIB; hasil dianggap matang setelah 24 jam.</p></div><button class="staff-secondary-button" type="button" onclick={() => void load()} disabled={loading}>Muat ulang</button></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Penjualan dan refund</a><a href="/admin/reports/attendance">Kehadiran</a><a aria-current="page" href="/admin/reports/conversion">Konversi</a><a href="/admin/staff">Kelola petugas</a></nav>
+  <AdminLayout page="conversion" contentId="conversion-content" skipLabel="Lewati ke laporan" kicker="LAPORAN PERJALANAN • ADMIN" title="Konversi pembeli." description="Tahapan mengikuti perjalanan anonim per tab dan event. Periode memakai tanggal WIB; hasil dianggap matang setelah 24 jam." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Muat ulang", onclick: () => void load(), disabled: loading }}>
     <form class="history-filter-form sales-report-filters" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each eventOptions as event (event.eventId)}<option value={event.eventId}>{event.eventName}</option>{/each}</select></label>
       <label>Perangkat<select bind:value={device}><option value="">Semua perangkat</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option><option value="unknown">Tidak diketahui</option></select></label>
@@ -56,5 +52,4 @@
         <div class="history-table-wrap"><table class="history-table sales-table"><thead><tr><th>Perangkat</th><th>Detail</th><th>Reservasi</th><th>Order</th><th>Bayar mulai</th><th>Berhasil</th></tr></thead><tbody>{#each report.byDevice as row (row.device)}<tr><td>{row.device === "mobile" ? "Mobile" : row.device === "desktop" ? "Desktop" : "Tidak diketahui"}</td><td>{count(row.matured.detail)}</td><td>{count(row.matured.reservation)}</td><td>{count(row.matured.order)}</td><td>{count(row.matured.paymentStarted)}</td><td>{count(row.matured.paymentSucceeded)}</td></tr>{:else}<tr><td colspan="6">Belum ada data perangkat.</td></tr>{/each}</tbody></table></div>
       </section>
     {/if}
-  </main>
-</div>
+</AdminLayout>

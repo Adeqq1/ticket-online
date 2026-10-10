@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { wibDateTime } from "../../lib/event-changes.ts";
   import { onDestroy, onMount, tick } from "svelte";
   import { ApiError, getAdminOrder, getAdminOrders, completeManualRefund, requestAdminRefund, type AdminOrder, type AdminOrderDetail, type AdminOrderFilter, type AdminOrderPage, type OrderStatus } from "../../lib/api.ts";
@@ -123,15 +124,10 @@
 
 <svelte:head><title>Pesanan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#order-admin-content">Lewati ke pengelolaan pesanan</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="order-admin-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMIN</p><h1>Pengelolaan pesanan.</h1><p>Telusuri pembayaran dan status tiket pesanan.</p></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a aria-current="page" href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Laporan</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+  <AdminLayout page="orders" contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title="Pengelolaan pesanan." description="Telusuri pembayaran dan status tiket pesanan." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Cari", form: "order-search-form", disabled: loading }}>
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="order-filter-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="order-filter-title">Cari pesanan</h2></div></div>
-      <form class="order-filter-form" onsubmit={search} aria-busy={loading}>
+      <form id="order-search-form" class="order-filter-form" onsubmit={search} aria-busy={loading}>
         <label>Reference<input bind:value={query} maxlength="32" placeholder="Cari reference pesanan" disabled={loading} /></label>
         <label>Event<select bind:value={eventId} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
         <label>Status<select bind:value={status} disabled={loading}><option value="">Semua status</option><option value="PENDING">Menunggu pembayaran</option><option value="PAID">Lunas</option><option value="CANCELLED">Dibatalkan</option><option value="EXPIRED">Kedaluwarsa</option><option value="REFUND_PENDING">Refund diproses</option><option value="REFUNDED">Refund berhasil</option></select></label>
@@ -185,5 +181,4 @@
       {/if}
       {/if}
     </section>{/if}
-  </main>
-</div>
+</AdminLayout>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, exportAdminSalesReportCSV, getAdminSalesReport, saveAdminReportCSV, type AdminSalesAmounts, type AdminSalesReport } from "../../lib/api.ts";
   import { salesChartPaths } from "../../lib/admin-sales-chart.ts";
@@ -82,12 +83,7 @@
 </script>
 
 <svelte:head><title>Laporan penjualan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#reports-content">Lewati ke laporan</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="reports-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">LAPORAN KEUANGAN <span>•</span> ADMIN</p><h1>Penjualan dan refund.</h1><p>Pembayaran dihitung dari waktu lunas, refund dari waktu penyelesaian. Penerimaan setelah refund belum memperhitungkan biaya provider.</p></div><div class="report-actions"><button class="staff-secondary-button" type="button" onclick={() => void load()} disabled={loading}>Muat ulang</button><button class="staff-secondary-button" type="button" onclick={exportCSV} disabled={loading || exporting || !data}>{exporting ? "Menyiapkan CSV…" : "Ekspor CSV"}</button></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a aria-current="page" href="/admin/reports">Penjualan dan refund</a><a href="/admin/reports/attendance">Kehadiran</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+  <AdminLayout page="reports" contentId="reports-content" skipLabel="Lewati ke laporan" kicker="LAPORAN KEUANGAN • ADMIN" title="Penjualan dan refund." description="Pembayaran dihitung dari waktu lunas, refund dari waktu penyelesaian. Penerimaan setelah refund belum memperhitungkan biaya provider." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: exporting ? "Menyiapkan CSV…" : "Ekspor CSV", onclick: exportCSV, disabled: loading || exporting || !data }} secondaryAction={{ label: "Muat ulang", onclick: () => void load(), disabled: loading }}>
     <form class="history-filter-form sales-report-filters" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each eventOptions as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
       <label>Dari tanggal WIB<input type="date" bind:value={dateFrom} required /></label>
@@ -112,5 +108,4 @@
         {#if data.summary.successfulTransactions === 0 && data.summary.refundAmount === 0}<p class="staff-muted" role="status">Belum ada pembayaran atau refund berhasil pada periode ini.</p>{/if}
       </section>
     {/if}
-  </main>
-</div>
+</AdminLayout>

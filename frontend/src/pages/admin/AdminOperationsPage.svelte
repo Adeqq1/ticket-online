@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, getAdminOperations, type AdminOperations } from "../../lib/api.ts";
 
@@ -16,12 +17,7 @@
 </script>
 
 <svelte:head><title>Status operasional | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#operations-content">Lewati ke status operasional</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="operations-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMIN</p><h1>Status operasional.</h1><p>Antrean dan worker diperbarui setiap menit.</p></div><button class="staff-secondary-button" type="button" onclick={load} disabled={loading}>Muat ulang</button></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a aria-current="page" href="/admin/operations">Operasional</a><a href="/admin/reports">Laporan</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+  <AdminLayout page="operations" contentId="operations-content" skipLabel="Lewati ke status operasional" kicker="OPERASIONAL EVENT • ADMIN" title="Status operasional." description="Antrean dan worker diperbarui setiap menit." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Muat ulang", onclick: load, disabled: loading }}>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={load}>Coba lagi</button></p>{/if}
     {#if loading}<p class="staff-muted" role="status">Memuat status…</p>{:else if data}
       <section class="staff-admin-panel checkin-history-panel"><div class="staff-panel-heading"><div><span class="panel-index">01</span><h2>Kondisi sistem</h2></div><span class="staff-muted">Diperbarui {time(data.collectedAt)}</span></div>
@@ -32,5 +28,4 @@
         <div class="history-table-wrap"><table class="history-table"><thead><tr><th>Worker</th><th>Status</th><th>Batch terakhir</th><th>Berhasil terakhir</th><th>Gagal beruntun</th></tr></thead><tbody>{#each data.workers as worker (worker.name)}<tr><td>{worker.name}</td><td>{worker.running ? "Memproses" : "Menunggu"}</td><td>{time(worker.lastFinishedAt)}</td><td>{time(worker.lastSuccessAt)}</td><td>{worker.consecutiveFailures}</td></tr>{/each}</tbody></table></div>
       </section>
     {/if}
-  </main>
-</div>
+</AdminLayout>

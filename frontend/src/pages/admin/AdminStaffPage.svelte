@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onMount } from "svelte";
   import StaffAssignmentsEditor from "../../components/admin/StaffAssignmentsEditor.svelte";
   import { ApiError, createStaff, getAdminEvents, listStaff, resetStaffPassword, updateStaff, replaceStaffAssignments, type Staff, type StaffAssignment } from "../../lib/api.ts";
@@ -105,13 +106,7 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#staff-admin-content">Lewati ke pengelolaan petugas</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={saving || loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="staff-admin-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMINISTRASI</p><h1>Kelola petugas.</h1><p>Atur akses tim pada event dan gate yang ditugaskan.</p></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Laporan</a><a aria-current="page" href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
-
+  <AdminLayout page="staff" contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title="Kelola petugas." description="Atur akses tim pada event dan gate yang ditugaskan." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={{ label: "Buat akun petugas", form: "staff-create-form", disabled: saving || loadingEvents || Boolean(eventsError) }}>
     {#if notice}<p class="staff-form-message staff-form-success" role="status">{notice}</p>{/if}
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
 
@@ -128,7 +123,7 @@
 
       <section class="staff-admin-panel" aria-labelledby="staff-create-title">
         <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="staff-create-title">Tambah petugas</h2></div></div>
-        <form class="staff-form" onsubmit={create} aria-busy={saving}>
+        <form id="staff-create-form" class="staff-form" onsubmit={create} aria-busy={saving}>
           <label>Nama<input bind:value={newName} autocomplete="name" minlength="2" maxlength="80" required disabled={saving} /></label>
           <label>Email<input bind:value={newEmail} type="email" autocomplete="email" maxlength="254" required disabled={saving} /></label>
           <label>Password awal<input bind:value={newPassword} type="password" autocomplete="new-password" minlength="12" maxlength="128" required disabled={saving} /><small>Minimal 12 karakter; sesi lama akan dicabut saat password diganti.</small></label>
@@ -162,5 +157,4 @@
       </div>
     </section>{/if}
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Pengaturan akun dan akses event</span></footer>
-  </main>
-</div>
+</AdminLayout>

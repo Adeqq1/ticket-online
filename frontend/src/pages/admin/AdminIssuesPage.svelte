@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onMount } from "svelte";
   import { ApiError, addAdminPaymentCaseNote, getAdminEmailJob, getAdminEmailJobs, getAdminPaymentCase, getAdminPaymentCases, recheckAdminPaymentCase, resolveAdminPaymentCase, retryAdminEmailJob, type AdminEmailDetail, type AdminEmailJob, type AdminPaymentCase, type AdminPaymentCaseDetail } from "../../lib/api.ts";
   import { createRequestVersion } from "../../lib/request-version.ts";
@@ -65,12 +66,7 @@
 </script>
 
 <svelte:head><title>Penanganan masalah | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#issues-content">Lewati ke penanganan masalah</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="issues-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">OPERASIONAL EVENT <span>•</span> ADMIN</p><h1>Penanganan masalah.</h1><p>Periksa pembayaran terlambat dan email yang gagal dikirim.</p></div><button class="staff-secondary-button" type="button" onclick={load} disabled={loading || busy}>Muat ulang</button></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a aria-current="page" href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Laporan</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+  <AdminLayout page="issues" contentId="issues-content" skipLabel="Lewati ke penanganan masalah" kicker="OPERASIONAL EVENT • ADMIN" title="Penanganan masalah." description="Periksa pembayaran terlambat dan email yang gagal dikirim." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Muat ulang", onclick: load, disabled: loading || busy }}>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}{#if message}<p class="staff-muted" role="status">{message}</p>{/if}
     {#if loading}<p class="staff-muted" role="status">Memuat antrean…</p>{:else}<div class="order-detail-grid">
       <section class="staff-admin-panel checkin-history-panel"><div class="staff-panel-heading"><div><span class="panel-index">01</span><h2>Rekonsiliasi pembayaran</h2></div></div>
@@ -92,5 +88,4 @@
       {#if selectedEmail.canRetry}<button class="scan-submit" type="button" disabled={busy || detailLoading} onclick={() => act("retry")}>Kirim ulang email</button>{:else}<p class="staff-muted">{selectedEmail.retryReason || "Job tidak dapat dikirim ulang."}</p>{/if}
       <ul class="order-detail-list">{#each selectedEmail.history as entry, i (`${entry.action}-${entry.createdAt}-${i}`)}<li><strong>{entry.action} · {entry.actorName}</strong><span>{time(entry.createdAt)} · {JSON.stringify(entry.data)}</span></li>{/each}</ul>
     </section>{/if}
-  </main>
-</div>
+</AdminLayout>
