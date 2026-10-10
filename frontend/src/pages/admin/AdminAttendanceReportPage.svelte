@@ -1,6 +1,8 @@
 <script lang="ts">
+  import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, exportAdminAttendanceReportCSV, getAdminAttendanceReport, getAdminEvents, saveAdminReportCSV, type AdminAttendanceReport, type AdminApiEvent } from "../../lib/api.ts";
+  import AdminReportDetails from "../../components/admin/AdminReportDetails.svelte";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let events = $state<AdminApiEvent[]>([]);
@@ -8,6 +10,7 @@
   let gate = $state("");
   let gateOptions = $state<string[]>([]);
   let applied = $state<{ eventId: string; gate?: string } | null>(null);
+  let lastRequested = $state<{ kind: "events" } | { kind: "report"; filters: { eventId: string; gate?: string } } | null>(null);
   let data = $state<AdminAttendanceReport | null>(null);
   let loading = $state(true);
   let exporting = $state(false);
@@ -18,15 +21,18 @@
 
   async function load(filters = applied) {
     if (!filters) return;
+    const requested = { ...filters };
+    lastRequested = { kind: "report", filters: requested };
     request?.abort();
     const controller = new AbortController();
     request = controller;
     const current = ++generation;
-    loading = true; error = ""; data = null;
+    loading = true; error = "";
     try {
-      const report = await getAdminAttendanceReport(accessToken, filters, controller.signal);
+      const report = await getAdminAttendanceReport(accessToken, requested, controller.signal);
       if (current !== generation) return;
       data = report;
+      applied = requested;
       gateOptions = report.filterOptions.gates;
     } catch (cause) {
       if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
@@ -39,6 +45,7 @@
   }
 
   async function initialize() {
+    lastRequested = { kind: "events" };
     try { events = await getAdminEvents(accessToken); }
     catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
@@ -49,12 +56,11 @@
   function search(event: SubmitEvent) {
     event.preventDefault();
     if (!eventId) { error = "Pilih event untuk membuka laporan kehadiran."; return; }
-    applied = { eventId, ...(gate ? { gate } : {}) };
-    void load(applied);
+    void load({ eventId, ...(gate ? { gate } : {}) });
   }
-  function selectEvent(value: string) { eventId = value; gate = ""; gateOptions = []; data = null; applied = null; }
-  function reset() { eventId = ""; gate = ""; gateOptions = []; data = null; applied = null; error = ""; }
-  function retry() { if (applied) void load(applied); else void initialize(); }
+  function selectEvent(value: string) { generation++; request?.abort(); request = undefined; loading = false; eventId = value; gate = ""; gateOptions = []; error = ""; lastRequested = null; }
+  function reset() { generation++; request?.abort(); request = undefined; loading = false; eventId = ""; gate = ""; gateOptions = []; error = ""; lastRequested = null; }
+  function retry() { if (lastRequested?.kind === "report") void load(lastRequested.filters); else if (lastRequested?.kind === "events") void initialize(); }
   async function exportCSV() {
     if (!data || exporting) return;
     exporting = true; exportError = "";
@@ -67,22 +73,18 @@
     } finally { exporting = false; }
   }
   function number(value: number) { return value.toLocaleString("id-ID"); }
-  function rate(value: number | null) { return value === null ? "—" : `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(value)}%`; }
+  function rate(value: number | null) { return value === null ? "Belum tersedia" : `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(value)}%`; }
   function localTime(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" }) + " WIB"; }
-  function hour(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", hour: "2-digit", minute: "2-digit", hour12: false }) + " WIB"; }
+  function hour(value: string) { return new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "short" }) + " WIB"; }
   function gateName(value: string | null) { return value || "Gate tidak diketahui"; }
+  const draftChanged = $derived(Boolean(data && (eventId !== applied?.eventId || gate !== (applied?.gate ?? ""))));
 
   onMount(() => { void initialize(); });
   onDestroy(() => { generation++; request?.abort(); });
 </script>
 
 <svelte:head><title>Laporan kehadiran | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-<div class="scan-shell staff-admin-shell">
-  <a class="skip-link" href="#attendance-report-content">Lewati ke laporan</a>
-  <header class="scan-topbar"><a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a><span class="staff-login-label">ADMINISTRATOR</span><button class="staff-text-button" type="button" disabled={loggingOut} onclick={onLogout}>Keluar</button></header>
-  <main id="attendance-report-content" class="staff-admin-content">
-    <div class="staff-admin-heading"><div><p class="scan-kicker">LAPORAN EVENT <span>•</span> ADMIN</p><h1>Kehadiran dan tiket.</h1><p>Kondisi inventori dan tiket saat ini; kehadiran dihitung dari tiket masuk yang berhasil di-scan.</p></div><div class="report-actions"><button class="staff-secondary-button" type="button" onclick={() => void load()} disabled={loading || !applied}>Muat ulang</button><button class="staff-secondary-button" type="button" onclick={exportCSV} disabled={loading || exporting || !data}>{exporting ? "Menyiapkan CSV…" : "Ekspor CSV"}</button></div></div>
-    <nav class="admin-tool-nav" aria-label="Administrasi event"><a href="/admin/events">Konser</a><a href="/admin/orders">Pesanan</a><a href="/admin/issues">Masalah</a><a href="/admin/operations">Operasional</a><a href="/admin/reports">Penjualan dan refund</a><a aria-current="page" href="/admin/reports/attendance">Kehadiran</a><a href="/admin/staff">Kelola petugas</a><a href="/admin/check-ins">Riwayat check-in</a></nav>
+  <AdminLayout page="attendance" contentId="attendance-report-content" skipLabel="Lewati ke laporan" kicker="LAPORAN EVENT • ADMIN" title="Kehadiran dan tiket." description="Kondisi inventori dan tiket saat ini; kehadiran dihitung dari tiket masuk yang berhasil di-scan." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Muat ulang", onclick: () => void load(), disabled: loading || !applied }}>
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="attendance-filter-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="attendance-filter-title">Filter laporan</h2></div></div>
       <form class="history-filter-form" onsubmit={search} aria-busy={loading}>
@@ -93,27 +95,38 @@
     </section>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={retry}>Coba lagi</button></p>{/if}
     {#if exportError}<p class="staff-form-message staff-form-error" role="alert">{exportError}</p>{/if}
-    {#if loading}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan kehadiran…</p>
-    {:else if data}
-      <p class="sales-period">{data.event.name} · kondisi terkini <span>Data diperbarui {localTime(data.dataUpdatedAt)}</span></p>
-      <section class="sales-metrics" aria-label="Ringkasan kehadiran">
-        <article class="sales-metric"><h2>Kapasitas</h2><p>{number(data.summary.capacity)}</p><small>{number(data.summary.available)} stok tersedia</small></article>
-        <article class="sales-metric"><h2>Tiket diterbitkan</h2><p>{number(data.summary.issued)}</p><small>Semua status order</small></article>
+    {#if loading && !data}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan kehadiran…</p>{/if}
+    {#if data}
+      <p class="sales-period">{data.event.name}{data.gate ? ` · ${data.gate}` : " · semua gate"} <span>Data diperbarui {localTime(data.dataUpdatedAt)}</span></p>
+      {#if draftChanged}<p class="report-refresh-note" role="status">Filter berubah. Terapkan untuk memperbarui laporan; ekspor masih memakai event dan gate di atas.</p>{/if}
+      {#if loading}<p class="report-refresh-note" role="status" aria-live="polite">Memperbarui laporan…</p>{:else if error}<p class="report-refresh-note" role="status">Pembaruan gagal. Snapshot terakhir tetap ditampilkan.</p>{/if}
+      <p class="report-definition">Inventori, tiket, dan check-in menunjukkan kondisi snapshot. Jumlah check-in menyimpan riwayat; persentase memakai check-in pada tiket yang masih berhak masuk. {#if data.summary.attendanceRate === null}Persentase belum tersedia karena belum ada tiket yang berhak masuk.{/if}</p>
+      <section class="sales-metrics attendance-primary-metrics" aria-label="Ringkasan kehadiran">
+        <article class="sales-metric"><h2>Sudah check-in</h2><p>{number(data.summary.checkedIn)}</p><small>Catatan check-in historis</small></article>
         <article class="sales-metric"><h2>Berhak masuk</h2><p>{number(data.summary.eligible)}</p><small>Order lunas dan snapshot valid</small></article>
-        <article class="sales-metric"><h2>Tertahan karena refund</h2><p>{number(data.summary.heldForRefund)}</p><small>Kondisi saat laporan dimuat</small></article>
-        <article class="sales-metric"><h2>Sudah check-in</h2><p>{number(data.summary.checkedIn)}</p><small>{rate(data.summary.attendanceRate)} dari yang berhak masuk</small></article>
+        <article class="sales-metric"><h2>Kehadiran</h2><p>{rate(data.summary.attendanceRate)}</p><small>Dari tiket yang berhak masuk</small></article>
       </section>
-      <section class="staff-admin-panel checkin-history-panel"><div class="staff-panel-heading"><div><span class="panel-index">02</span><h2>Rincian per kategori</h2></div></div>
-        <div class="history-table-wrap"><table class="history-table sales-table"><thead><tr><th>Kategori</th><th>Kapasitas</th><th>Stok tersedia</th><th>Diterbitkan</th><th>Berhak masuk</th><th>Tertahan refund</th><th>Check-in</th><th>Kehadiran</th></tr></thead><tbody>{#each data.byCategory as item (item.id)}<tr><td>{item.name}</td><td>{number(item.capacity)}</td><td>{number(item.available)}</td><td>{number(item.issued)}</td><td>{number(item.eligible)}</td><td>{number(item.heldForRefund)}</td><td>{number(item.checkedIn)}</td><td>{rate(item.attendanceRate)}</td></tr>{:else}<tr><td colspan="8">Belum ada tiket pada event ini.</td></tr>{/each}</tbody></table></div>
-      </section>
-      <section class="staff-admin-panel checkin-history-panel"><div class="staff-panel-heading"><div><span class="panel-index">03</span><h2>Rincian per gate</h2></div></div>
-        <div class="history-table-wrap"><table class="history-table sales-table"><thead><tr><th>Gate</th><th>Kapasitas</th><th>Stok tersedia</th><th>Diterbitkan</th><th>Berhak masuk</th><th>Tertahan refund</th><th>Check-in</th><th>Kehadiran</th></tr></thead><tbody>{#each data.byGate as item (item.gate ?? "unknown")}<tr><td>{gateName(item.gate)}</td><td>{number(item.capacity)}</td><td>{number(item.available)}</td><td>{number(item.issued)}</td><td>{number(item.eligible)}</td><td>{number(item.heldForRefund)}</td><td>{number(item.checkedIn)}</td><td>{rate(item.attendanceRate)}</td></tr>{:else}<tr><td colspan="8">Belum ada gate pada event ini.</td></tr>{/each}</tbody></table></div>
-      </section>
-      <section class="staff-admin-panel checkin-history-panel"><div class="staff-panel-heading"><div><span class="panel-index">04</span><h2>Check-in per jam</h2></div></div>
-        <div class="history-table-wrap"><table class="history-table sales-table"><thead><tr><th>Jam WIB</th><th>Check-in berhasil</th></tr></thead><tbody>{#each data.hourly as item (item.hour)}<tr><td><time datetime={item.hour}>{hour(item.hour)}</time></td><td>{number(item.checkedIn)}</td></tr>{:else}<tr><td colspan="2">Belum ada check-in berhasil untuk filter ini.</td></tr>{/each}</tbody></table></div>
-      </section>
+      <AdminReportDetails title="Kapasitas dan tiket">
+        <section class="sales-metrics attendance-secondary-metrics" aria-label="Kapasitas dan tiket">
+          <article class="sales-metric"><h2>Kapasitas</h2><p>{number(data.summary.capacity)}</p><small>{number(data.summary.available)} stok tersedia</small></article>
+          <article class="sales-metric"><h2>Tiket diterbitkan</h2><p>{number(data.summary.issued)}</p><small>Semua status order</small></article>
+          <article class="sales-metric"><h2>Tertahan karena refund</h2><p>{number(data.summary.heldForRefund)}</p><small>Kondisi saat laporan dimuat</small></article>
+        </section>
+      </AdminReportDetails>
+      <AdminReportDetails title="Rincian per kategori">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="history-table-wrap" tabindex="0" role="region" aria-label="Rincian kehadiran per kategori"><table class="history-table sales-table"><thead><tr><th>Kategori</th><th>Kapasitas</th><th>Stok tersedia</th><th>Diterbitkan</th><th>Berhak masuk</th><th>Tertahan refund</th><th>Check-in</th><th>Kehadiran</th></tr></thead><tbody>{#each data.byCategory as item (item.id)}<tr><td>{item.name}</td><td>{number(item.capacity)}</td><td>{number(item.available)}</td><td>{number(item.issued)}</td><td>{number(item.eligible)}</td><td>{number(item.heldForRefund)}</td><td>{number(item.checkedIn)}</td><td>{rate(item.attendanceRate)}</td></tr>{:else}<tr><td colspan="8">Belum ada tiket pada event ini.</td></tr>{/each}</tbody></table></div>
+      </AdminReportDetails>
+      <AdminReportDetails title="Rincian per gate">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="history-table-wrap" tabindex="0" role="region" aria-label="Rincian kehadiran per gate"><table class="history-table sales-table"><thead><tr><th>Gate</th><th>Kapasitas</th><th>Stok tersedia</th><th>Diterbitkan</th><th>Berhak masuk</th><th>Tertahan refund</th><th>Check-in</th><th>Kehadiran</th></tr></thead><tbody>{#each data.byGate as item (item.gate ?? "unknown")}<tr><td>{gateName(item.gate)}</td><td>{number(item.capacity)}</td><td>{number(item.available)}</td><td>{number(item.issued)}</td><td>{number(item.eligible)}</td><td>{number(item.heldForRefund)}</td><td>{number(item.checkedIn)}</td><td>{rate(item.attendanceRate)}</td></tr>{:else}<tr><td colspan="8">Belum ada gate pada event ini.</td></tr>{/each}</tbody></table></div>
+      </AdminReportDetails>
+      <AdminReportDetails title="Check-in per jam">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="history-table-wrap" tabindex="0" role="region" aria-label="Check-in per jam"><table class="history-table sales-table"><thead><tr><th>Jam WIB</th><th>Check-in berhasil</th></tr></thead><tbody>{#each data.hourly as item (item.hour)}<tr><td><time datetime={item.hour}>{hour(item.hour)}</time></td><td>{number(item.checkedIn)}</td></tr>{:else}<tr><td colspan="2">Belum ada check-in berhasil untuk filter ini.</td></tr>{/each}</tbody></table></div>
+      </AdminReportDetails>
+      <div class="report-export"><button class="scan-submit staff-submit" type="button" onclick={exportCSV} disabled={loading || exporting}>{exporting ? "Menyiapkan CSV…" : "Ekspor CSV"}</button></div>
       <p class="staff-muted">Kehadiran menunjukkan kondisi terkini, bukan rekonstruksi historis. Scan gagal dan scan ulang tidak dihitung sebagai check-in berhasil.</p>
     {:else if !error}<p class="staff-muted" role="status">Pilih event untuk menampilkan laporan kehadiran.</p>{/if}
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Laporan kondisi tiket dan kehadiran</span></footer>
-  </main>
-</div>
+</AdminLayout>

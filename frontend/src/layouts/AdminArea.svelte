@@ -27,6 +27,7 @@
 
   function login() {
     clearStaffSession();
+    staff = null;
     location.replace("/admin/login");
   }
 
