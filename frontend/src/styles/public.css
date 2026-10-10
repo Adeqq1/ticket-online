@@ -34,8 +34,18 @@
 .public-site :where(button, input, select, textarea, output) { font: inherit; }
 .public-site :where(a, button, input, select, summary) { -webkit-tap-highlight-color: transparent; }
 .public-site :where(:focus-visible) { outline-color: var(--accent); }
+.public-site input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), .public-site select, .public-site textarea { font-size: 16px; }
+.public-site .button-small { min-height: 44px; }
+.public-site :where(.wordmark) { min-height: 44px; padding-block: 7px; margin-block: -7px; }
+.public-site .wordmark { padding-inline: 7px; margin-inline: -7px; }
+.public-site input[type="range"] { min-height: 44px; }
+.public-site :where(.nav-links a, .footer-links a, .text-button, .back-link, .catalog-link, .my-ticket-reference, .my-ticket-action) { min-height: 44px; align-items: center; }
+.public-site :where(.nav-links a, .footer-links a, .catalog-link, .my-ticket-reference, .my-ticket-action) { display: inline-flex; }
+.public-site :where(.text-button, .back-link) { display: inline-flex; }
 .public-site :where(.shell) { width: min(100% - 40px, 1280px); }
 .public-site :where(.button) { border-radius: var(--radius); transition-duration: 180ms; }
+.public-site .button { white-space: normal; }
+.public-site h1 { overflow-wrap: anywhere; }
 .public-site :where(.wordmark) { font-family: Arial, Helvetica, sans-serif; }
 .public-site :where(.my-tickets-heading h1) { overflow-wrap: anywhere; }
 

@@ -174,7 +174,7 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
     return 200, {}
 
 
-async def capture(page, name, description):
+async def capture(page, name, description, full_page=True):
     OUTPUT.mkdir(parents=True, exist_ok=True)
     await page.evaluate("""async () => {
       const images = [...document.images];
@@ -190,22 +190,68 @@ async def capture(page, name, description):
             font-family:Arial,Helvetica,sans-serif!important; }
         """)
     filename = f"{MODE}-{name}.png"
-    await page.screenshot(path=str(OUTPUT / filename), full_page=True, animations="disabled")
+    await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations="disabled")
     return {"file": filename, "capture": description, "title": await page.title()}
 
 
+async def capture_admin(browser, suffix):
+    token = "s" * 43
+    admin = {"id": "admin-fixture", "name": "Admin Uji", "email": "admin@example.test", "role": "ADMIN", "active": True, "assignments": []}
+    staff = {"id": "staff-fixture", "name": "Petugas Uji", "email": "staff@example.test", "role": "STAFF", "active": True, "assignments": [{"eventId": "fixture-event", "gate": "Gate A"}]}
+    for viewport_name, viewport in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
+        login_context = await browser.new_context(viewport=viewport, device_scale_factor=1)
+        login_page = await login_context.new_page()
+        await login_page.goto(f"{BASE_URL}/admin/login", wait_until="domcontentloaded")
+        await login_page.wait_for_timeout(250)
+        await login_page.screenshot(path=str(OUTPUT / f"admin-{suffix}-{viewport_name}-login.png"), full_page=True, animations="disabled")
+        await login_context.close()
+
+        context = await browser.new_context(viewport=viewport, device_scale_factor=1)
+        await context.add_init_script(f"sessionStorage.setItem('ticket-online:staff-session', JSON.stringify({json.dumps({'accessToken': token, 'expiresAt': '2099-01-01T00:00:00.000Z'})}));")
+        page = await context.new_page()
+
+        async def admin_api(route):
+            path = urlparse(route.request.url).path
+            if path.endswith("/staff/me"):
+                payload = {"staff": staff if "/admin/scan" in page.url else admin}
+            elif path.endswith("/admin/staff"):
+                payload = {"staff": []}
+            elif path.endswith("/events"):
+                payload = {"events": []}
+            else:
+                payload = {}
+            await route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+
+        await context.route("**/api/v1/**", admin_api)
+        for route, slug in (("/admin/staff", "staff"), ("/admin/scan", "scan")):
+            await page.goto(f"{BASE_URL}{route}", wait_until="domcontentloaded")
+            await page.wait_for_timeout(350)
+            await page.screenshot(path=str(OUTPUT / f"admin-{suffix}-{viewport_name}-{slug}.png"), full_page=True, animations="disabled")
+        await context.close()
+
+
 async def main():
-    global MODE, OUTPUT
+    global MODE, OUTPUT, BASE_URL
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--current", action="store_true", help="Capture with the current UI instead of baseline tokens.")
+    parser.add_argument("--phase25", action="store_true", help="Run the responsive, text-zoom, target-size, and contrast matrix.")
+    parser.add_argument("--admin-before", action="store_true", help="Capture login, staff, and scanner screens before public fixes.")
+    parser.add_argument("--admin-after", action="store_true", help="Capture login, staff, and scanner screens after public fixes.")
     parser.add_argument("--output-dir", type=Path, help="Write captures to a directory separate from the Phase 20 baseline.")
+    parser.add_argument("--base-url", default=BASE_URL, help="Use a running local UI server at this URL.")
     args = parser.parse_args()
+    BASE_URL = args.base_url.rstrip("/")
     MODE = "current" if args.current else "baseline"
+    if args.admin_before:
+        MODE = "admin-before"
+    elif args.admin_after:
+        MODE = "admin-after"
     if args.output_dir:
         OUTPUT = args.output_dir if args.output_dir.is_absolute() else ROOT / args.output_dir
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
     captures = []
     layout_checks = []
+    responsive_checks = []
     isolation_checks = []
     routes = [
         ("home", "/", "beranda"), ("catalog", "/konser", "katalog"),
@@ -218,6 +264,11 @@ async def main():
     ]
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        if args.admin_before or args.admin_after:
+            await capture_admin(browser, "before" if args.admin_before else "after")
+            await browser.close()
+            print(f"Captured six admin comparison screenshots in {OUTPUT}")
+            return
         for viewport_name, viewport in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
             context = await browser.new_context(viewport=viewport, device_scale_factor=1)
 
@@ -461,17 +512,47 @@ async def main():
                 assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "The catalog should not overflow at 360px."
                 captures.append(await capture(page, "mobile360-katalog", "mobile 360×800, katalog"))
 
-                await page.set_viewport_size({"width": 320, "height": 740})
-                for route_name, url, label in routes:
-                    await page.goto(BASE_URL + url, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(100)
-                    metrics = await page.evaluate("({viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth, font: getComputedStyle(document.querySelector('.public-site')).fontFamily})")
-                    layout_checks.append({"route": label, **metrics})
+                widths = (320, 360, 390, 768, 1024, 1440) if args.phase25 else (320,)
+                for width in widths:
+                    await page.set_viewport_size({"width": width, "height": 740 if width <= 390 else 900})
+                    for route_name, url, label in routes:
+                        await page.goto(BASE_URL + url, wait_until="domcontentloaded")
+                        await page.wait_for_timeout(100)
+                        metrics = await page.evaluate("""() => ({viewport:innerWidth,document:document.documentElement.scrollWidth,body:document.body.scrollWidth,font:getComputedStyle(document.querySelector('.public-site')).fontFamily,targets:[...document.querySelectorAll('.public-site button:not(:disabled),.public-site a,.public-site summary,.public-site select,.public-site input:not([type=hidden]):not([type=checkbox]):not([type=radio]),.public-site textarea,[role=button]')].filter(el=>el.getClientRects().length).map(el=>{const r=el.getBoundingClientRect();return{name:(el.getAttribute('aria-label')||el.innerText||el.getAttribute('type')||el.tagName).trim().slice(0,42),tag:el.tagName,classes:el.className,width:Math.round(r.width),height:Math.round(r.height),font:parseFloat(getComputedStyle(el).fontSize)}}),images:[...document.querySelectorAll('.public-site .concert-poster,.public-site .detail-poster')].map(el=>({width:el.getAttribute('width'),height:el.getAttribute('height'),loading:el.getAttribute('loading'),fetchpriority:el.getAttribute('fetchpriority')}))})""")
+                        layout_checks.append({"route": label, **metrics})
+                        if args.phase25 and width <= 390:
+                            small = [target for target in metrics["targets"] if target["width"] < 44 or target["height"] < 44]
+                            small_inputs = [target for target in metrics["targets"] if target["font"] < 16 and target["tag"] in ("INPUT", "SELECT", "TEXTAREA")]
+                            responsive_checks.append({"route": label, "width": width, "smallTargets": small[:15], "smallTargetCount": len(small), "smallInputs": small_inputs, "imageDimensionsMissing": [img for img in metrics["images"] if not img["width"] or not img["height"]]})
+                        if args.phase25:
+                            await capture(page, f"phase25-{width}-{label}", f"Phase 25, viewport {width}px, {label}")
+
+                if args.phase25:
+                    for width, height, mode in ((844, 390, "landscape"), (390, 844, "text-zoom")):
+                        await page.set_viewport_size({"width": width, "height": height})
+                        for route_name, url, label in routes:
+                            await page.goto(BASE_URL + url, wait_until="domcontentloaded")
+                            await page.wait_for_timeout(100)
+                            if mode == "text-zoom":
+                                await page.evaluate("""() => { const elements=[...document.querySelectorAll('.public-site *')]; const sizes=elements.map(el=>el.getClientRects().length?parseFloat(getComputedStyle(el).fontSize):0); elements.forEach((el,index)=>{if(sizes[index])el.style.setProperty('font-size',`${sizes[index]*2}px`,'important')}); }""")
+                            metrics = await page.evaluate("""() => ({viewport:innerWidth,document:document.documentElement.scrollWidth,body:document.body.scrollWidth,offenders:[...document.querySelectorAll('.public-site *')].map(el=>{const r=el.getBoundingClientRect();return{tag:el.tagName,classes:typeof el.className==='string'?el.className:'',text:(el.innerText||'').slice(0,50),right:Math.round(r.right),width:Math.round(r.width),scroll:el.scrollWidth,client:el.clientWidth}}).filter(el=>el.right>innerWidth||el.scroll>el.client+2).sort((a,b)=>b.right-a.right).slice(0,12)})""")
+                            responsive_checks.append({"route": label, "mode": mode, **metrics})
+                            if label in ("beranda", "detail-konser", "checkout-data", "pesanan", "tiket-saya", "e-ticket", "pemulihan"):
+                                await capture(page, f"phase25-{mode}-{label}", f"Phase 25, {mode}, {label}", full_page=mode != "text-zoom")
+                    for scheme in ("light", "dark"):
+                        await page.emulate_media(color_scheme=scheme)
+                        await page.goto(BASE_URL + "/", wait_until="domcontentloaded")
+                        ratios = await page.evaluate("""() => {const root=document.querySelector('.public-site'),s=getComputedStyle(root);const rgb=v=>{const a=v.match(/[\\d.]+/g)?.map(Number);return a?.length>=3?a.slice(0,3).map(n=>{n/=255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4}):null};const color=n=>{const e=document.createElement('span');e.style.color=`var(${n})`;root.append(e);const value=getComputedStyle(e).color;e.remove();return value};const contrast=(a,b)=>{a=rgb(color(a));b=rgb(color(b));if(!a||!b)return null;const lum=x=>.2126*x[0]+.7152*x[1]+.0722*x[2];const q=[lum(a),lum(b)].sort((x,y)=>y-x);return Number(((q[0]+.05)/(q[1]+.05)).toFixed(2))};return{canvas:contrast('--ink','--canvas'),muted:contrast('--muted','--canvas'),surface:contrast('--ink','--surface'),accent:contrast('--accent-ink','--accent'),control:contrast('--control-line','--surface')}}""")
+                        responsive_checks.append({"mode": f"contrast-{scheme}", **ratios})
                 await page.goto(BASE_URL + "/panduan", wait_until="domcontentloaded")
                 await page.evaluate("document.fonts.ready")
                 isolation_checks.append(await page.evaluate("""() => ({kind:'public-font', loaded:document.fonts.check('400 16px Manrope'), family:getComputedStyle(document.querySelector('.public-site')).fontFamily})"""))
                 await page.emulate_media(color_scheme="dark")
                 isolation_checks.append(await page.evaluate("""() => ({kind:'dark-mode', accent:getComputedStyle(document.querySelector('.public-site')).getPropertyValue('--accent').trim()})"""))
+                await page.emulate_media(reduced_motion="reduce")
+                reduced_motion = await page.evaluate("""() => {const style=getComputedStyle(document.querySelector('.public-site'));const durations=[style.transitionDuration,style.animationDuration].flatMap(value=>value.split(',')).map(value=>parseFloat(value));return{kind:'reduced-motion',durations}}""")
+                isolation_checks.append(reduced_motion)
+                assert all(duration <= 0.001 for duration in reduced_motion["durations"]), f"Reduced motion should shorten public transitions and animations: {reduced_motion}"
                 await page.goto(BASE_URL + "/admin/login", wait_until="domcontentloaded")
                 isolation_checks.append(await page.evaluate("""() => ({kind:'admin-isolation', publicWrapper:Boolean(document.querySelector('.public-site')), font:getComputedStyle(document.body).fontFamily, adminMain:Boolean(document.querySelector('.admin-main'))})"""))
             await context.close()
@@ -482,7 +563,18 @@ async def main():
         assert any(check.get("kind") == "public-font" and check["loaded"] for check in isolation_checks), "The locally hosted Manrope font did not load."
         assert any(check.get("kind") == "dark-mode" and check["accent"] == "#769dff" for check in isolation_checks), "The public dark-mode accent token is missing."
         assert any(check.get("kind") == "admin-isolation" and not check["publicWrapper"] and check["adminMain"] for check in isolation_checks), "Admin was included in the public visual wrapper."
-    manifest = {"captureMode": MODE, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit, "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844", "checkpoint": "360x800", "narrow": "320x740"}, "api": "Responses are intercepted and generated from the current OpenAPI contract; no live buyer data is used.", "photoFixtures": "Existing Picsum URLs are served from docs/phase20/fixtures for repeatable captures.", "captures": captures, "layoutChecks": layout_checks, "isolationChecks": isolation_checks}
+        if args.phase25:
+            overflow = [check for check in layout_checks if check["document"] > check["viewport"] or check["body"] > check["viewport"]]
+            contrast_failures = [check for check in responsive_checks if check.get("mode", "").startswith("contrast-") and any(value is None or value < (3 if key == "control" else 4.5) for key, value in check.items() if key != "mode")]
+            target_failures = [check for check in responsive_checks if check.get("smallTargetCount", 0)]
+            input_failures = [check for check in responsive_checks if check.get("smallInputs")]
+            zoom_overflow = [check for check in responsive_checks if check.get("mode") == "text-zoom" and (check["document"] > check["viewport"] or check["body"] > check["viewport"])]
+            assert not overflow, f"Responsive matrix overflow: {overflow}"
+            assert not contrast_failures, f"Public token contrast fell below WCAG thresholds: {contrast_failures}"
+            assert not target_failures, f"Public touch targets fell below 44px: {target_failures}"
+            assert not input_failures, f"Public input text fell below 16px: {input_failures}"
+            assert not zoom_overflow, f"Public pages overflow at 200% text size: {zoom_overflow}"
+    manifest = {"captureMode": MODE, "phase25": args.phase25, "capturedAt": datetime.now(timezone.utc).isoformat(), "sourceCommit": commit, "tool": "Python Playwright, Google Chrome", "viewports": {"desktop": "1440x900", "mobile": "390x844", "checkpoint": "360x800", "narrow": "320x740", "phase25": [320, 360, 390, 768, 1024, 1440, "844x390 landscape", "200% text simulation"]}, "api": "Responses are intercepted and generated from the current OpenAPI contract; no live buyer data is used.", "photoFixtures": "Existing Picsum URLs are served from docs/phase20/fixtures for repeatable captures.", "captures": captures, "layoutChecks": layout_checks, "responsiveChecks": responsive_checks, "isolationChecks": isolation_checks}
     OUTPUT.mkdir(parents=True, exist_ok=True)
     index = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
     (OUTPUT / f"index-{MODE}.json").write_text(index)

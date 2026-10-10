@@ -85,7 +85,8 @@
   .order-heading .order-reference { overflow-wrap: anywhere; }
   .my-tickets > .recovery-panel { margin-top: 12px; padding: 16px; }
   .my-tickets > .order-breakdown { padding-block: 8px; }
-  .order-breakdown > summary { min-height: 48px; }
+  .order-breakdown > summary { min-height: 48px; flex-wrap: wrap; justify-content: flex-start; }
+  .order-breakdown > summary strong { white-space: normal; overflow-wrap: anywhere; }
   .order-payment-deadline { padding: 10px 12px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .order-payment-deadline.reservation-warning { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
   .order-resend .button { width: 100%; }

@@ -25,13 +25,15 @@
   .guide-hero { grid-template-columns: 1fr; gap: 24px; padding-block: 52px 28px; }
   .guide-hero h1 { font-size: clamp(44px, 13vw, 64px); }
   .guide-intro { margin: 0; font-size: 16px; }
-  .guide-index { grid-template-columns: 1fr 1fr; }
-  .guide-index a { min-height: 58px; }
+  .guide-index { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .guide-index a { min-width: 0; min-height: 58px; overflow-wrap: anywhere; }
   .guide-index a + a { padding-left: 14px; }
   .guide-index a:nth-child(3) { padding-left: 0; border-left: 0; }
   .guide-content { padding-top: 8px; padding-bottom: 56px; }
   .guide-section { grid-template-columns: 1fr; gap: 18px; padding-block: 32px; }
-  .guide-section-heading { gap: 14px; }
-  .guide-section-heading h2 { font-size: 36px; }
+  .guide-section-heading { min-width: 0; gap: 14px; }
+  .guide-section-heading h2 { min-width: 0; max-width: none; flex: 1; font-size: 36px; overflow-wrap: anywhere; }
+  .guide-section > * { min-width: 0; }
+  .accordion-trigger { min-width: 0; overflow-wrap: anywhere; }
   .accordion-panel { padding-right: 24px; }
 }
