@@ -18,7 +18,12 @@ export type PaymentMethod = "QRIS" | "VIRTUAL_ACCOUNT" | "GOPAY";
 export type PaymentStatus = "PENDING" | "FAILED" | "SUCCEEDED";
 export type OrderAttendeeInput = { tierId: string; names: string[] };
 export type CreateOrderRequest = { buyer: Buyer; attendees: OrderAttendeeInput[]; voucherCode?: string };
-export type OrderBase = { id: string; reference: string; reservationId: string; status: OrderStatus; expiresAt: string; subtotal: number; adminFee: number; discount: number; total: number; items: OrderItem[] };
+export type VoucherSnapshot = { code: string; kind: "PERCENT" | "FIXED"; value: number };
+export type CheckoutQuote = { subtotal: number; adminFee: number; discount: number; total: number; voucher: VoucherSnapshot | null };
+export type PricingSettings = { adminFee: number; revision: number };
+export type Voucher = VoucherSnapshot & { startsAt: string; endsAt: string; active: boolean; eventId: string; minimumSubtotal: number; quota: number; revision: number };
+export type PricingData = { settings: PricingSettings; vouchers: Array<Voucher & { usage: { held: number; consumed: number; released: number } }>; history: Array<{ actor: string; objectId: string; before: unknown; after: unknown; createdAt: string }> };
+export type OrderBase = { id: string; reference: string; reservationId: string; status: OrderStatus; expiresAt: string; subtotal: number; adminFee: number; discount: number; total: number; items: OrderItem[]; voucher?: VoucherSnapshot | null };
 export type OrderResponse = OrderBase & { accessToken: string; accessExpiresAt: string | null };
 export type OrderDetail = OrderBase & { buyer: Buyer; attendees: Array<{ tierId: string; ticketNumber: number; name: string }>; payment: PaymentSummary | null; createdAt: string; updatedAt: string; eventStartsAt: string; accessExpiresAt: string | null; currentEvent?: EventState; refundRight?: { requested: boolean; deadline: string | null } | null; refund?: { status: string; amount: number } | null };
 export type PaymentSummary = { id: string; method: PaymentMethod; amount: number; status: PaymentStatus; paidAt?: string };
@@ -44,7 +49,7 @@ export type CheckInHistoryFilter = { eventId?: string; gate?: string; q?: string
 export type AdminOrder = { id: string; reference: string; status: OrderStatus; eventId: string; eventName: string; buyerName: string; createdAt: string; ticketCount: number; total: number };
 export type AdminOrderItem = { tierId: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
 export type AdminOrderTicket = { id: string; code: string; attendeeName: string; tierName: string; gate: string; status: "CHECKED_IN" | "NOT_CHECKED_IN"; checkedInAt: string | null; checkedInBy: string | null };
-export type AdminOrderDetail = AdminOrder & { buyer: { name: string; email: string; phone: string; identityMasked: string }; subtotal: number; adminFee: number; discount: number; expiresAt: string; items: AdminOrderItem[]; payment: { method: PaymentMethod; amount: number; status: PaymentStatus; paidAt: string | null } | null; tickets: AdminOrderTicket[]; currentEvent?: EventState; refund?: { status: string; amount: number; reason: string; manualReference: string; manualPaidAt: string | null } | null };
+export type AdminOrderDetail = AdminOrder & { voucher?: VoucherSnapshot | null; buyer: { name: string; email: string; phone: string; identityMasked: string }; subtotal: number; adminFee: number; discount: number; expiresAt: string; items: AdminOrderItem[]; payment: { method: PaymentMethod; amount: number; status: PaymentStatus; paidAt: string | null } | null; tickets: AdminOrderTicket[]; currentEvent?: EventState; refund?: { status: string; amount: number; reason: string; manualReference: string; manualPaidAt: string | null } | null };
 export type AdminOrderFilter = { q?: string; eventId?: string; status?: OrderStatus; dateFrom?: string; dateTo?: string; cursor?: string };
 export type AdminOrderPage = { items: AdminOrder[]; nextCursor: string | null; filterOptions: { events: Array<{ id: string; name: string }> } };
 export type AdminIssueAudit = { action: string; actorName: string; createdAt: string; data: Record<string, unknown> };
@@ -174,6 +179,15 @@ export function getAdminOrders(accessToken: string, filters: AdminOrderFilter = 
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
   return request<AdminOrderPage>(`/api/v1/admin/orders${query.size ? `?${query}` : ""}`, signal, { headers: privateHeaders(accessToken) });
+}
+
+export function getAdminPricing(token: string, signal?: AbortSignal) { return request<PricingData>("/api/v1/admin/pricing", signal, { headers: privateHeaders(token) }); }
+export function saveAdminFee(token: string, settings: PricingSettings) { return request<PricingSettings>("/api/v1/admin/pricing", undefined, { method: "PUT", headers: { ...privateHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(settings) }); }
+export function saveAdminVoucher(token: string, voucher: Voucher, creating: boolean) { return request<Voucher>(`/api/v1/admin/vouchers${creating ? "" : "/" + encodeURIComponent(voucher.code)}`, undefined, { method: creating ? "POST" : "PUT", headers: { ...privateHeaders(token), "Content-Type": "application/json" }, body: JSON.stringify(voucher) }); }
+export async function quoteCheckout(id: string, key: string, voucherCode = "", signal?: AbortSignal) {
+  const q = await request<CheckoutQuote>(`/api/v1/reservations/${encodeURIComponent(id)}/quote`, signal, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body: JSON.stringify({ voucherCode }) });
+  if (!q || ![q.subtotal, q.adminFee, q.discount, q.total].every((v) => Number.isSafeInteger(v) && v >= 0) || q.subtotal === 0 || q.total === 0 || q.discount > q.subtotal || q.total !== q.subtotal + q.adminFee - q.discount || (voucherCode ? q.voucher?.code !== voucherCode || !Number.isSafeInteger(q.voucher.value) || q.voucher.value <= 0 || q.voucher.value > 1_000_000_000 || !["PERCENT", "FIXED"].includes(q.voucher.kind) || (q.voucher.kind === "PERCENT" && q.voucher.value > 100) : q.voucher !== null || q.discount !== 0)) throw new ApiError("Rincian biaya dari server tidak valid.", 0, "INVALID_RESPONSE");
+  return q;
 }
 
 export function getAdminOrder(accessToken: string, orderId: string, signal?: AbortSignal) {

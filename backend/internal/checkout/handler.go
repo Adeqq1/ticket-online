@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/conversion"
+	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 )
 
@@ -36,6 +36,34 @@ func NewHandlerWithAccess(repository *Repository, logger *slog.Logger, access *o
 		h.conversion = metrics[0]
 	}
 	return h
+}
+
+func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	id, key := r.PathValue("reservationID"), strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if !validID(id) || len(key) < 16 || len(key) > 100 {
+		writeError(w, 400, "INVALID_REQUEST", "Reservasi atau kunci akses tidak valid")
+		return
+	}
+	var input struct {
+		VoucherCode string `json:"voucherCode"`
+	}
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&input); err != nil {
+		writeError(w, 400, "INVALID_JSON", "Data JSON tidak valid")
+		return
+	}
+	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
+		writeError(w, 400, "INVALID_JSON", "Data JSON tidak valid")
+		return
+	}
+	q, err := h.repository.Quote(r.Context(), id, key, input.VoucherCode)
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	writeJSON(w, 200, q)
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +179,7 @@ func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error
 	case errors.Is(err, ErrInvalidRequest):
 		writeError(w, http.StatusUnprocessableEntity, "INVALID_REQUEST", "Data checkout tidak valid")
 	case errors.Is(err, ErrInvalidVoucher):
-		writeError(w, http.StatusUnprocessableEntity, "INVALID_VOUCHER", "Kode voucher tidak valid")
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_VOUCHER", "Voucher tidak tersedia, tidak sesuai pembelian, atau kuota habis. Periksa masa berlaku dan syaratnya.")
 	case errors.Is(err, ErrReservationNotFound):
 		writeError(w, http.StatusNotFound, "RESERVATION_NOT_FOUND", "Reservasi tidak ditemukan")
 	case errors.Is(err, ErrReservationExpired):

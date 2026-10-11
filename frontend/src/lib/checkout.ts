@@ -2,7 +2,6 @@ import { parseCheckoutQuantities, type Concert, type TicketTier } from "./concer
 
 export type CheckoutLine = { tier: TicketTier; quantity: number };
 export type Buyer = { name: string; email: string; phone: string; identity: string };
-export const ADMIN_FEE = 7_500;
 
 export function checkoutLines(concert: Concert, params: URLSearchParams): CheckoutLine[] {
   const quantities = parseCheckoutQuantities(concert, params);
@@ -14,10 +13,6 @@ export function checkoutLines(concert: Concert, params: URLSearchParams): Checko
 
 export function orderSubtotal(lines: CheckoutLine[]) {
   return lines.reduce((total, { tier, quantity }) => total + tier.price * quantity, 0);
-}
-
-export function voucherDiscount(subtotal: number, code: string) {
-  return code.trim().toUpperCase() === "HEMAT10" ? Math.floor(subtotal * .1) : 0;
 }
 
 export function isValidEmail(value: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }

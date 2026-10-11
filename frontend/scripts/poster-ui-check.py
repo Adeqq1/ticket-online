@@ -39,7 +39,7 @@ async def check(browser, base, width):
     poster = base + "/api/v1/media/posters/" + "2" * 64 + ".jpg"
     calls = {"upload": 0, "save": 0}
     created = []
-    state = {"upload_status": 201, "save_status": 503, "hold": None}
+    state = {"upload_status": 201, "save_status": 503, "hold": None, "offline": False}
 
     async def api(route):
         path = urlparse(route.request.url).path
@@ -50,6 +50,9 @@ async def check(browser, base, width):
             calls["upload"] += 1
             assert route.request.headers.get("authorization") == "Bearer " + fixtures.TOKEN
             assert "multipart/form-data; boundary=" in route.request.headers["content-type"]
+            if state["offline"]:
+                await route.abort("internetdisconnected")
+                return
             hold = state["hold"]
             if hold:
                 await hold.wait()
@@ -96,6 +99,13 @@ async def check(browser, base, width):
     await expect(page.get_by_role("alert").filter(has_text="Upload gagal")).to_be_visible()
     await expect(save).to_be_disabled()
     assert event["image"].endswith("1" * 64 + ".jpg") and calls["save"] == 0
+    state["offline"] = True
+    await page.get_by_role("button", name="Coba lagi", exact=True).click()
+    await expect(page.get_by_role("alert").filter(has_text="Tidak dapat terhubung ke server")).to_be_visible()
+    await expect(save).to_be_disabled()
+    await expect(page.locator(".poster-preview img")).to_have_attribute("src", re.compile("^blob:"))
+    assert event["image"].endswith("1" * 64 + ".jpg") and calls["save"] == 0
+    state["offline"] = False
     state["upload_status"] = 201
     await page.get_by_role("button", name="Coba lagi", exact=True).click()
     await expect(page.get_by_text("Poster terunggah. Simpan perubahan konser untuk menerapkannya.", exact=True)).to_be_visible()
@@ -191,7 +201,7 @@ async def check(browser, base, width):
         await expect(image).to_have_js_property("naturalWidth", 900)
     assert not errors, errors
     await context.close()
-    print(f"PASS {width}px: picker, preview, retry, save failure, stale upload, URL, cleanup, public pages")
+    print(f"PASS {width}px: picker, preview, disconnected upload, retry, save failure, stale upload, URL, cleanup, public pages")
 
 
 async def main():

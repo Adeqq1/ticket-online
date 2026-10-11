@@ -72,7 +72,7 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 	if err != nil || replay {
 		t.Fatalf("first checkout = (%+v, %v, %v)", first, replay, err)
 	}
-	if first.Subtotal != price*2 || first.AdminFee != adminFee || first.Discount != first.Subtotal/10 || first.Total != first.Subtotal+adminFee-first.Discount {
+	if first.Subtotal != price*2 || first.AdminFee != 7500 || first.Discount != first.Subtotal/10 || first.Total != first.Subtotal+first.AdminFee-first.Discount {
 		t.Fatalf("server totals are incorrect: %+v", first)
 	}
 	deadline, err := time.Parse(time.RFC3339Nano, first.ExpiresAt)

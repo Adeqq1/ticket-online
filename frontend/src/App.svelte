@@ -27,6 +27,7 @@
         case "guide": Page = (await import("./pages/public/GuidePage.svelte")).default; break;
         case "admin-login": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "login" }; break;
         case "admin-staff": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "staff" }; break;
+        case "admin-pricing": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "pricing" }; break;
         case "admin-events": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "events" }; break;
         case "admin-orders": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "orders" }; break;
         case "admin-issues": Page = (await import("./layouts/AdminArea.svelte")).default; pageProps = { page: "issues" }; break;

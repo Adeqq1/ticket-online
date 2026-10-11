@@ -15,6 +15,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
+	"github.com/Adeqq1/ticket-online/backend/internal/pricing"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
 )
 
@@ -104,8 +105,9 @@ type Refund struct {
 	ManualPaidAt    *string `json:"manualPaidAt"`
 }
 type Detail struct {
-	CurrentEvent eventstate.State `json:"currentEvent"`
-	Refund       *Refund          `json:"refund"`
+	Voucher      *pricing.Snapshot `json:"voucher"`
+	CurrentEvent eventstate.State  `json:"currentEvent"`
+	Refund       *Refund           `json:"refund"`
 	Order
 	Buyer struct {
 		Name           string `json:"name"`
@@ -326,6 +328,10 @@ func (s *Service) Detail(r *http.Request, token, id string) (Detail, error) {
 		return detail, fmt.Errorf("read admin order: %w", err)
 	}
 	detail.Buyer.IdentityMasked = maskIdentity(identity)
+	detail.Voucher, err = pricing.LoadSnapshot(r.Context(), tx, id)
+	if err != nil {
+		return detail, err
+	}
 	detail.CreatedAt, detail.ExpiresAt = detail.CreatedAt.UTC(), detail.ExpiresAt.UTC()
 	detail.Items = make([]OrderItem, 0)
 	rows, err := tx.QueryContext(r.Context(), `SELECT tt.slug, oi.tier_name, oi.quantity, oi.unit_price, oi.line_total

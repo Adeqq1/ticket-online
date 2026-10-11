@@ -35,6 +35,136 @@ tags:
   - name: Admin Pesanan
     description: Detail dan refund penuh order oleh ADMIN. Refund otomatis memakai QRIS/GoPay terverifikasi; keputusan acara menyediakan antrean manual untuk transaksi yang tidak mendukung otomatis.
 paths:
+  /api/v1/admin/pricing:
+    get:
+      operationId: getAdminPricing
+      tags: [Admin Pesanan]
+      summary: Biaya admin, daftar voucher, penggunaan dan 100 perubahan terakhir (ADMIN)
+      security: [{StaffSessionToken: []}]
+      responses:
+        '200':
+          description: Pengaturan database dan audit; Cache-Control no-store.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminPricing'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    put:
+      operationId: updateAdminFee
+      tags: [Admin Pesanan]
+      summary: Ubah nominal biaya admin tetap per order baru (ADMIN)
+      security: [{StaffSessionToken: []}]
+      description: Nominal rupiah 0–1.000.000.000. Wajib menyertakan revision dari GET terakhir. Update dan audit pelaku/sebelum/sesudah atomik; order lama tidak dihitung ulang.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PricingSettings'}
+      responses:
+        '200':
+          description: Tersimpan; revision bertambah satu.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PricingSettings'}
+        '400': {$ref: '#/components/responses/InvalidJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {description: PRICING_CONFLICT; revision sudah berubah, muat ulang sebelum menyimpan.}
+        '422': {description: INVALID_REQUEST; nominal atau revision tidak valid.}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/vouchers:
+    post:
+      operationId: createAdminVoucher
+      tags: [Admin Pesanan]
+      summary: Buat voucher (ADMIN)
+      security: [{StaffSessionToken: []}]
+      description: Kode dinormalisasi ke huruf besar dan tidak dapat diganti. Cakupan satu event atau semua event bila eventId kosong. revision awal 0. Daftar dan penggunaan tersedia melalui GET admin/pricing. Tidak ada hapus permanen; gunakan active=false.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Voucher'}
+      responses:
+        '201':
+          description: Voucher dan audit tersimpan; revision 1.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Voucher'}
+        '400': {$ref: '#/components/responses/InvalidJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409': {description: PRICING_CONFLICT; kode sudah ada.}
+        '422': {description: INVALID_REQUEST; format/nilai/periode/kuota/cakupan tidak valid.}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/admin/vouchers/{code}:
+    put:
+      operationId: updateAdminVoucher
+      tags: [Admin Pesanan]
+      summary: Ubah aturan atau nonaktifkan voucher (ADMIN)
+      security: [{StaffSessionToken: []}]
+      description: Body lengkap beserta revision terbaru. Kode body harus sama dengan kode path canonical. Kuota tidak boleh lebih kecil dari held+consumed. Perubahan hanya berlaku pada order baru; snapshot order lama tetap.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,31}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Voucher'}
+      responses:
+        '200':
+          description: Voucher dan audit tersimpan; revision bertambah satu.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Voucher'}
+        '400': {$ref: '#/components/responses/InvalidJSON'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '404': {description: NOT_FOUND; kode belum ada.}
+        '409': {description: PRICING_CONFLICT; revision berubah atau kuota di bawah penggunaan.}
+        '422': {description: INVALID_REQUEST; aturan tidak valid.}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/reservations/{reservationID}/quote:
+    post:
+      operationId: quoteCheckout
+      tags: [Checkout]
+      summary: Pratinjau biaya dan validasi voucher dari reservasi aktif
+      description: >-
+        Akses memakai Idempotency-Key milik reservasi. Subtotal selalu dibaca dari database, tanpa nominal dari browser.
+        Pratinjau tidak menahan kuota. Checkout mengunci voucher dan memvalidasi ulang dalam transaksi pembuatan order.
+        Satu voucher per order; diskon persen dibulatkan ke bawah ke rupiah, nominal tetap dibatasi subtotal tiket.
+        Biaya admin tidak didiskon. Total harus positif. Masa berlaku termasuk awal dan tidak termasuk akhir.
+        Order PENDING menahan satu kuota sampai status EXPIRED/CANCELLED setelah rekonsiliasi selesai.
+        Pembayaran gagal yang masih dapat diulang tetap menahan kuota. Pembayaran yang berhasil menerbitkan tiket
+        memakai kuota permanen, termasuk sesudah refund. Pembayaran terlambat untuk order yang sudah dilepas
+        mengikuti rekonsiliasi/refund existing dan tidak mendapat tiket atau memakai kembali kuota.
+      parameters:
+        - {$ref: '#/components/parameters/ReservationID'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                voucherCode: {type: string, maxLength: 32, description: Kosong berarti tanpa voucher; trim dan huruf besar diterapkan backend.}
+      responses:
+        '200':
+          description: Estimasi saja; Cache-Control no-store.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CheckoutQuote'}
+        '400': {$ref: '#/components/responses/InvalidJSON'}
+        '401': {description: RESERVATION_ACCESS_DENIED; kunci reservasi tidak cocok.}
+        '404': {description: RESERVATION_NOT_FOUND.}
+        '410': {description: RESERVATION_EXPIRED; reservasi tidak aktif atau sudah berakhir.}
+        '422': {description: INVALID_VOUCHER; nonaktif, belum/akhir berlaku, tidak sesuai event/minimum, kuota habis atau total nol.}
+        '500': {$ref: '#/components/responses/InternalError'}
   /api/v1/admin/posters:
     post:
       operationId: uploadAdminPoster
@@ -2206,6 +2336,79 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/Error'}
   schemas:
+    PricingSettings:
+      type: object
+      additionalProperties: false
+      required: [adminFee, revision]
+      properties:
+        adminFee: {type: integer, minimum: 0, maximum: 1000000000, description: Nominal tetap rupiah per order baru; nilai awal migrasi 7500.}
+        revision: {type: integer, minimum: 1, description: Revision yang dibaca dari server; konflik menghasilkan 409.}
+    VoucherSnapshot:
+      type: object
+      required: [code, kind, value]
+      properties:
+        code: {type: string}
+        kind: {type: string, enum: [PERCENT, FIXED]}
+        value: {type: integer, minimum: 1, maximum: 1000000000}
+    Voucher:
+      allOf: [{$ref: '#/components/schemas/VoucherFields'}]
+      unevaluatedProperties: false
+    VoucherFields:
+      type: object
+      required: [code, kind, value, startsAt, endsAt, active, eventId, minimumSubtotal, quota, revision]
+      properties:
+        code: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{1,31}$', description: Dinormalisasi huruf besar; kode tidak dapat diganti setelah dibuat.}
+        kind: {type: string, enum: [PERCENT, FIXED]}
+        value: {type: integer, minimum: 1, maximum: 1000000000, description: PERCENT maksimal 100; FIXED nominal rupiah.}
+        startsAt: {type: string, format: date-time, description: RFC3339 dengan zona waktu; termasuk awal.}
+        endsAt: {type: string, format: date-time, description: Harus sesudah startsAt; tidak termasuk akhir.}
+        active: {type: boolean}
+        eventId: {type: string, maxLength: 64, description: Kosong untuk semua konser; selain itu harus ID konser existing.}
+        minimumSubtotal: {type: integer, minimum: 0, maximum: 1000000000000}
+        quota: {type: integer, minimum: 1, maximum: 1000000000, description: Jumlah order; minimal held+consumed saat diubah.}
+        revision: {type: integer, minimum: 0, description: 0 saat create; revision terbaru saat update.}
+    CheckoutQuote:
+      type: object
+      required: [subtotal, adminFee, discount, total, voucher]
+      properties:
+        subtotal: {type: integer, minimum: 1}
+        adminFee: {type: integer, minimum: 0}
+        discount: {type: integer, minimum: 0, description: Rupiah dibulatkan ke bawah; tidak melebihi subtotal.}
+        total: {type: integer, minimum: 1, description: subtotal + adminFee - discount.}
+        voucher:
+          oneOf: [{$ref: '#/components/schemas/VoucherSnapshot'}, {type: 'null'}]
+    AdminPricing:
+      type: object
+      required: [settings, vouchers, history]
+      properties:
+        settings: {$ref: '#/components/schemas/PricingSettings'}
+        vouchers:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/VoucherFields'}
+              - type: object
+                required: [usage]
+                properties:
+                  usage:
+                    type: object
+                    required: [held, consumed, released]
+                    properties:
+                      held: {type: integer, minimum: 0}
+                      consumed: {type: integer, minimum: 0, description: Tetap dipakai setelah refund.}
+                      released: {type: integer, minimum: 0}
+        history:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [actor, objectId, before, after, createdAt]
+            properties:
+              actor: {type: string}
+              objectId: {type: string}
+              before: {description: Snapshot pengaturan sebelum perubahan atau null saat create.}
+              after: {description: Snapshot pengaturan sesudah perubahan.}
+              createdAt: {type: string, format: date-time}
     AdminOperations:
       type: object
       required: [collectedAt, api5xxLast5m, failedEmailJobs, oldestPendingEmailSeconds, openPaymentCases, openRefunds, workers, alerts]
@@ -2485,6 +2688,8 @@ components:
         - type: object
           required: [buyer, subtotal, adminFee, discount, expiresAt, items, payment, tickets]
           properties:
+            voucher:
+              oneOf: [{$ref: '#/components/schemas/VoucherSnapshot'}, {type: 'null'}]
             currentEvent: {$ref: '#/components/schemas/EventState'}
             refund:
               oneOf: [{$ref: '#/components/schemas/AdminRefund'}, {type: 'null'}]
@@ -2845,7 +3050,7 @@ components:
                 type: array
                 minItems: 1
                 items: {type: string, minLength: 2, maxLength: 80}
-        voucherCode: {type: string, description: Hanya HEMAT10 yang didukung; tidak dikirim berarti tanpa diskon.}
+        voucherCode: {type: string, maxLength: 32, description: Kode voucher database; divalidasi dan kuota ditahan atomik saat checkout. Tidak dikirim berarti tanpa diskon.}
     OrderItem:
       type: object
       required: [tierId, name, quantity, unitPrice, lineTotal]
@@ -2859,13 +3064,15 @@ components:
       type: object
       required: [id, reference, reservationId, status, expiresAt, subtotal, adminFee, discount, total, items]
       properties:
+        voucher:
+          oneOf: [{$ref: '#/components/schemas/VoucherSnapshot'}, {type: 'null'}]
         id: {type: string, pattern: '^[0-9a-f]{32}$'}
         reference: {type: string}
         reservationId: {type: string, pattern: '^[0-9a-f]{32}$'}
         status: {type: string, enum: [PENDING, PAID, CANCELLED, EXPIRED, REFUND_PENDING, REFUNDED]}
         expiresAt: {type: string, format: date-time, description: Deadline pembayaran order.}
         subtotal: {type: integer, minimum: 0}
-        adminFee: {type: integer, minimum: 0, description: Biaya admin rupiah yang ditetapkan server.}
+        adminFee: {type: integer, minimum: 0, description: Snapshot biaya admin database saat order dibuat; perubahan pengaturan tidak mengubah order ini.}
         discount: {type: integer, minimum: 0}
         total: {type: integer, minimum: 0}
         items:

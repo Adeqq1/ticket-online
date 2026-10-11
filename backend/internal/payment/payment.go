@@ -246,6 +246,9 @@ func (r *Repository) Simulate(ctx context.Context, orderID string, request Reque
 }
 
 func issueAndLoadTickets(ctx context.Context, tx *sql.Tx, orderID string) ([]Ticket, error) {
+	if _, err := tx.ExecContext(ctx, "UPDATE order_vouchers SET consumed=TRUE WHERE order_id=?", orderID); err != nil {
+		return nil, err
+	}
 	var expected, existing uint64
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE order_id = ?", orderID).Scan(&expected); err != nil {
 		return nil, fmt.Errorf("count ordered tickets: %w", err)
