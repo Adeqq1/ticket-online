@@ -33,11 +33,10 @@
   let manualResult = $state<HTMLParagraphElement>();
   let uncertainRefund = $state(false);
   let uncertainManual = $state(false);
-  let lastDetailTrigger: HTMLElement | null = null;
   let detailHeading: HTMLElement | undefined = $state();
 
   async function finishManual() {
-    if (!selected || refundBusy || !manualConfirmed) return;
+    if (!selected || refundBusy || uncertainManual || !manualConfirmed) return;
     const id = selected.id;
     if (!window.confirm(`Konfirmasi pencatatan refund ${money(selected.refund?.amount ?? selected.total)} untuk ${selected.reference}? Tindakan ini mencatat bukti transfer yang sudah berhasil dan tidak mengirim uang.`)) return;
     refundBusy = true; refundMessage = "";
@@ -76,7 +75,7 @@
       const result = await getAdminOrders(accessToken, { ...value, ...(more && nextCursor ? { cursor: nextCursor } : {}) }, controller.signal);
       if (current !== generation) return;
       events = result.filterOptions.events;
-      items = more ? [...items, ...result.items] : result.items;
+      items = more ? [...new Map([...items, ...result.items].map(item => [item.id, item])).values()] : result.items;
       nextCursor = result.nextCursor;
     } catch (cause) {
       if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
@@ -89,10 +88,9 @@
   function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); closeDetail(); void load(applied); }
   function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; closeDetail(); void load(applied); }
 
-  async function closeDetail() { detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; await tick(); lastDetailTrigger?.focus(); }
+  async function closeDetail() { const id = selectedId; detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; await tick(); (document.getElementById(`order-detail-${id}`) ?? document.getElementById("order-results-title"))?.focus(); }
 
   async function openDetail(id: string) {
-    if (selectedId !== id) lastDetailTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     detailRequest?.abort();
     const controller = new AbortController(); detailRequest = controller;
     const current = ++detailGeneration;
@@ -154,11 +152,11 @@
 
 <svelte:head><title>Pesanan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-  <AdminLayout page="orders" contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title="Pengelolaan pesanan." description="Telusuri pembayaran dan status tiket pesanan." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Cari", form: "order-search-form", disabled: loading }}>
+  <AdminLayout page="orders" contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title="Pengelolaan pesanan." description="Telusuri pembayaran dan status tiket pesanan." onLogout={onLogout} loggingOut={loggingOut}>
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="order-filter-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="order-filter-title">Cari pesanan</h2></div></div>
       <form id="order-search-form" class="order-filter-form" onsubmit={search} aria-busy={loading}>
-        <label>Reference<input bind:value={query} maxlength="32" placeholder="Cari reference pesanan" disabled={loading} /></label>
+        <label>Nomor pesanan<input bind:value={query} maxlength="32" placeholder="Cari nomor pesanan" disabled={loading} /></label>
         <label>Event<select bind:value={eventId} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
         <label>Status<select bind:value={status} disabled={loading}><option value="">Semua status</option><option value="PENDING">Menunggu pembayaran</option><option value="PAID">Lunas</option><option value="CANCELLED">Dibatalkan</option><option value="EXPIRED">Kedaluwarsa</option><option value="REFUND_PENDING">Refund diproses</option><option value="REFUNDED">Refund berhasil</option></select></label>
         <label>Dibuat sejak (WIB)<input type="date" bind:value={dateFrom} disabled={loading} /></label>
@@ -168,11 +166,12 @@
     </section>
     <div class:has-selected={selectedId} class="order-workspace">
     <section class="staff-admin-panel checkin-history-panel order-list-panel" aria-labelledby="order-results-title">
-      <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="order-results-title">Daftar pesanan</h2></div><button class="staff-text-button" type="button" onclick={() => load(applied)} disabled={loading}>Muat ulang</button></div>
+      <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="order-results-title" tabindex="-1">Daftar pesanan</h2></div><button class="staff-text-button" type="button" onclick={() => load(applied)} disabled={loading}>Muat ulang</button></div>
+      <p class="staff-muted" role="status" aria-live="polite">{items.length} pesanan dimuat</p>
       {#if loading}<p class="staff-muted" role="status">Memuat pesanan…</p>
       {:else if error && !items.length}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => load(applied)}>Coba lagi</button></p>
       {:else if !items.length}<p class="staff-muted" role="status">Belum ada pesanan yang cocok.</p>
-      {:else}<div class="history-table-wrap"><table class="history-table"><caption class="visually-hidden">Daftar pesanan terbaru</caption><thead><tr><th scope="col">Reference</th><th scope="col">Event</th><th scope="col">Pembeli</th><th scope="col">Dibuat (WIB)</th><th scope="col">Tiket</th><th scope="col">Total</th><th scope="col">Status</th><th scope="col">Detail</th></tr></thead><tbody>{#each items as item (item.id)}<tr><td data-label="Reference"><code>{item.reference}</code><small>{item.eventName} · {item.buyerName}</small></td><td data-label="Event">{item.eventName}</td><td data-label="Pembeli">{item.buyerName}</td><td data-label="Dibuat (WIB)"><time datetime={item.createdAt}>{localTime(item.createdAt)}</time></td><td data-label="Tiket">{item.ticketCount}</td><td data-label="Total">{money(item.total)}</td><td data-label="Status">{statusLabel(item.status)}</td><td data-label="Detail"><button class="staff-text-button" type="button" aria-label={`Buka pesanan ${item.reference}`} aria-expanded={selectedId === item.id} onclick={() => selectedId === item.id ? closeDetail() : openDetail(item.id)}>Lihat</button></td></tr>{/each}</tbody></table></div>
+      {:else}<div class="history-table-wrap"><table class="history-table"><caption class="visually-hidden">Daftar pesanan terbaru</caption><thead><tr><th scope="col">Nomor pesanan</th><th scope="col">Pembeli</th><th scope="col">Konser</th><th scope="col">Total</th><th scope="col">Status</th><th scope="col">Tanggal (WIB)</th><th scope="col">Aksi</th></tr></thead><tbody>{#each items as item (item.id)}<tr><td data-label="Nomor pesanan"><code>{item.reference}</code></td><td data-label="Pembeli">{item.buyerName}</td><td data-label="Konser">{item.eventName}</td><td data-label="Total">{money(item.total)}</td><td data-label="Status"><span class="admin-order-status" class:is-paid={item.status === "PAID"} class:is-expired={item.status === "EXPIRED"}>Status: {statusLabel(item.status)}</span></td><td data-label="Tanggal (WIB)"><time datetime={item.createdAt}>{localTime(item.createdAt)}</time></td><td data-label="Aksi"><button id={`order-detail-${item.id}`} class="staff-text-button" type="button" aria-label={`Lihat detail pesanan ${item.reference}`} aria-expanded={selectedId === item.id} onclick={() => openDetail(item.id)}>Lihat detail</button></td></tr>{/each}</tbody></table></div>
         {#if nextCursor}<button class="staff-secondary-button order-load-more" type="button" disabled={loadingMore} onclick={() => load(applied, true)}>{loadingMore ? "Memuat…" : "Muat berikutnya"}</button>{/if}
       {/if}
       {#if error && items.length}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
@@ -181,7 +180,7 @@
       {#if detailLoading}<p class="staff-muted" role="status">Memuat detail pesanan…</p>
       {:else if detailError}<p class="staff-form-message staff-form-error" role="alert">{detailError} <button class="staff-text-button" type="button" onclick={() => openDetail(selectedId)}>Coba lagi</button></p>
       {:else if selected}<div class="order-detail-grid">
-        <div><h3>Pesanan</h3><dl><dt>Reference</dt><dd>{selected.reference}</dd><dt>Event</dt><dd>{selected.eventName}</dd><dt>Status</dt><dd>{statusLabel(selected.status)}</dd><dt>Dibuat</dt><dd>{localTime(selected.createdAt)}</dd><dt>Batas pembayaran</dt><dd>{localTime(selected.expiresAt)}</dd></dl></div>
+        <div><h3>Pesanan</h3><dl><dt>Nomor pesanan</dt><dd>{selected.reference}</dd><dt>Event</dt><dd>{selected.eventName}</dd><dt>Status</dt><dd><span class="admin-order-status" class:is-paid={selected.status === "PAID"} class:is-expired={selected.status === "EXPIRED"}>Status: {statusLabel(selected.status)}</span></dd><dt>Dibuat</dt><dd>{localTime(selected.createdAt)}</dd><dt>Batas pembayaran</dt><dd>{localTime(selected.expiresAt)}</dd></dl></div>
         <div><h3>Pembeli</h3><dl><dt>Nama</dt><dd>{selected.buyer.name}</dd><dt>Email</dt><dd><a href={`mailto:${selected.buyer.email}`}>{selected.buyer.email}</a></dd><dt>Telepon</dt><dd>{selected.buyer.phone}</dd><dt>Identitas</dt><dd>{selected.buyer.identityMasked}</dd></dl></div>
         <div><h3>Rincian biaya</h3><dl><dt>Subtotal</dt><dd>{money(selected.subtotal)}</dd><dt>Biaya admin</dt><dd>{money(selected.adminFee)}</dd><dt>Voucher</dt><dd>{selected.voucher ? `${selected.voucher.code} (${selected.voucher.kind === "PERCENT" ? selected.voucher.value + "%" : money(selected.voucher.value)})` : "Tanpa voucher"}</dd><dt>Diskon</dt><dd>−{money(selected.discount)}</dd><dt>Total</dt><dd><strong>{money(selected.total)}</strong></dd></dl><h3>Pembayaran</h3>{#if selected.payment}<dl><dt>Metode</dt><dd>{selected.payment.method}</dd><dt>Jumlah</dt><dd>{money(selected.payment.amount)}</dd><dt>Status</dt><dd>{paymentStatusLabel(selected.payment.status)}</dd><dt>Dibayar</dt><dd>{selected.payment.paidAt ? localTime(selected.payment.paidAt) : "Belum dibayar"}</dd></dl>{:else}<p class="staff-muted">Belum ada pembayaran.</p>{/if}</div>
         <div><h3>Kategori tiket</h3><ul class="order-detail-list">{#each selected.items as item (`${item.tierId}-${item.name}`)}<li><strong>{item.name}</strong><span>{item.quantity} × {money(item.unitPrice)} = {money(item.lineTotal)}</span></li>{/each}</ul><h3>E-ticket dan check-in</h3>{#if selected.tickets.length}<ul class="order-detail-list">{#each selected.tickets as ticket (ticket.id)}<li><strong>{ticket.attendeeName} · {ticket.tierName}</strong><code>{ticket.code}</code><span>{ticket.gate} · {ticket.status === "CHECKED_IN" ? `Check-in ${ticket.checkedInAt ? localTime(ticket.checkedInAt) : "berhasil"}${ticket.checkedInBy ? ` · ${ticket.checkedInBy}` : ""}` : "Belum check-in"}</span></li>{/each}</ul>{:else}<p class="staff-muted">E-ticket belum diterbitkan.</p>{/if}</div>

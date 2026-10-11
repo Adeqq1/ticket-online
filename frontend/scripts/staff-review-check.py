@@ -129,7 +129,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
     submit = panel.get_by_role("button", name="Buat akun petugas", exact=True)
     cancel = panel.get_by_role("button", name="Batal", exact=True)
     manage = page.locator(f"#staff-manage-{people[0]['id']}")
-    output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase47-50/workflow"))
+    output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase51-55/staff"))
     output.mkdir(parents=True, exist_ok=True)
 
     async def draft():
@@ -318,7 +318,7 @@ async def verify_management_flow(page, admin, width, base_url):
     rows = [admin, *[dict(id=f"{index:032x}", name=name, email=name.lower().replace(" ", ".") + "@operasional-konser.example.test", role="STAFF", active=index % 3 != 0,
                          assignments=[] if index % 4 == 0 else [dict(eventId="musik", gate="Gate A")] if index % 2 else [dict(eventId="teater", gate="Gate Utama")]) for index, name in enumerate(names, 1)]]
     rows[1]["assignments"] = [dict(eventId="musik", gate=f"Gate {letter}") for letter in "ABCDEFG"]
-    output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase47-50/workflow"))
+    output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase51-55/staff"))
     (output / f"fixture20-{width}.json").write_text(json.dumps(dict(staff=rows, events=events), indent=2))
     mutations, errors, audits = [], [], []
     reads = 0
@@ -395,6 +395,8 @@ async def verify_management_flow(page, admin, width, base_url):
     await badge.hover()
     assert await badge.evaluate("b => [getComputedStyle(b).backgroundColor, getComputedStyle(b).color]") == before
     await capture("list")
+    if width == 1440:
+        assert await page.get_by_role("button", name="Kelola", exact=False).first.evaluate("button => button.getBoundingClientRect().top >= 0 && button.getBoundingClientRect().bottom <= innerHeight"), "A STAFF manage button must be visible before scrolling"
     await page.screenshot(path=str(output / f"roster20-full-list-{width}.png"), full_page=True)
     summary = page.locator(f"#staff-account-{rows[1]['id']} summary")
     await expect(page.locator(f"#staff-account-{rows[1]['id']} details span").last).not_to_be_visible()
@@ -410,7 +412,12 @@ async def verify_management_flow(page, admin, width, base_url):
     await page.get_by_role("combobox", name="Status akun", exact=True).select_option("active")
     await page.get_by_role("combobox", name="Event penugasan", exact=True).select_option("musik")
     await expect(page.locator(".staff-list li")).to_have_count(1)
-    await page.get_by_label("Tanpa penugasan", exact=True).check()
+    await page.get_by_label("Hanya akun tanpa penugasan", exact=True).check()
+    if width <= 600:
+        await page.get_by_role("button", name="Filter lainnya (3 aktif)", exact=True).click()
+        await expect(page.get_by_role("combobox", name="Status akun")).not_to_be_visible()
+        await expect(search).to_be_visible()
+        await page.get_by_role("button", name="Filter lainnya (3 aktif)", exact=True).click()
     await expect(page.locator(".staff-filter-results")).to_contain_text("0 dari 20 akun")
     await capture("empty-search")
     assert reads == initial_reads, "Filtering must use existing list data without API requests"
@@ -729,4 +736,5 @@ async def main():
         await browser.close()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

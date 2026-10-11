@@ -11,6 +11,8 @@
   --admin-active-bg: #2b4939;
   --admin-active-text: #b8dfc6;
   --admin-neutral-bg: #38453f;
+  --admin-warning-bg: #493d28;
+  --admin-warning-text: #f1d29a;
   --scan-bg: var(--admin-canvas);
   --scan-panel: var(--admin-card);
   --scan-line: var(--admin-border);

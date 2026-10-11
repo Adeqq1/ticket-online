@@ -35,6 +35,7 @@
   let showFilters = $state(false);
   let filteredStaff = $derived(filterStaff(staff, filters));
   let filtersActive = $derived(Boolean(filters.query.trim() || filters.status !== "all" || filters.eventId || filters.unassigned));
+  let activeFilterCount = $derived(Number(filters.status !== "all") + Number(Boolean(filters.eventId)) + Number(filters.unassigned));
   let filterEventIds = $derived([...new Set([...events.map((item) => item.id), ...staff.flatMap((person) => person.assignments.map((item) => item.eventId))])]);
   let uncertain = $state<Record<string, { profile?: { name: string; active: boolean }; assignments?: StaffAssignment[]; password?: boolean }>>({});
   let selectedUncertain = $derived(uncertain[selectedId]);
@@ -249,11 +250,11 @@
         <p class="staff-list-help">Pilih Kelola untuk mengubah profil, penugasan event/gate, atau status akun petugas.</p>
         <div class="staff-form staff-list-filters" role="search" aria-label="Cari dan filter akun">
           <label>Cari nama atau email<input id="staff-search" type="search" bind:value={filters.query} autocomplete="off" /></label>
-          <button class="staff-secondary-button staff-filter-toggle" type="button" aria-expanded={showFilters} aria-controls="staff-extra-filters" onclick={() => { showFilters = !showFilters; }}>Filter lainnya</button>
+          <button class="staff-secondary-button staff-filter-toggle" type="button" aria-expanded={showFilters} aria-controls="staff-extra-filters" onclick={() => { showFilters = !showFilters; }}>Filter lainnya{activeFilterCount ? ` (${activeFilterCount} aktif)` : ""}</button>
           <div id="staff-extra-filters" class="staff-extra-filters" class:is-open={showFilters}>
             <label>Status akun<select bind:value={filters.status}><option value="all">Semua</option><option value="active">Aktif</option><option value="inactive">Nonaktif</option></select></label>
             <label>Event penugasan<select bind:value={filters.eventId}><option value="">Semua event</option>{#each filterEventIds as id}<option value={id}>{events.find((item) => item.id === id)?.artist ?? `Event ${id}`}</option>{/each}</select></label>
-            <label class="staff-checkbox"><input type="checkbox" bind:checked={filters.unassigned} /><span>Tanpa penugasan</span></label>
+            <label class="staff-checkbox"><input type="checkbox" bind:checked={filters.unassigned} /><span>Hanya akun tanpa penugasan</span></label>
           </div>
         </div>
         <div class="staff-filter-results"><p class="staff-list-help" role="status" aria-live="polite" aria-atomic="true">{filteredStaff.length} dari {staff.length} akun</p>{#if filtersActive}<button class="staff-text-button" type="button" onclick={resetFilters}>Reset filter</button>{/if}</div>
@@ -339,13 +340,15 @@
   .staff-list-identity details span { display: block; margin-top: 4px; }
   .staff-list-identity summary { min-height: 44px; padding-block: 12px; color: var(--scan-text); font-size: 14px; line-height: 1.5; cursor: pointer; }
   .staff-list-identity summary:focus-visible { outline: 3px solid var(--scan-lime); outline-offset: 3px; }
-  .staff-list-filters { margin: 0 0 12px; }
-  .staff-extra-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .staff-list-filters { grid-template-columns: minmax(180px, 1.3fr) minmax(130px, .8fr) minmax(160px, 1fr); align-items: end; gap: 12px; margin: 0 0 8px; }
+  .has-panel .staff-list-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .has-panel .staff-list-filters > label { grid-column: 1 / -1; }
+  .staff-extra-filters { display: contents; }
   .staff-extra-filters label { display: grid; gap: 8px; min-width: 0; color: var(--scan-muted); }
   .staff-extra-filters select { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--admin-control-border); border-radius: 0; }
   .staff-extra-filters .staff-checkbox { grid-column: 1 / -1; }
   .staff-filter-toggle { display: none; }
-  .staff-filter-results { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .staff-filter-results { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; margin-bottom: 8px; }
   .staff-filter-results p { margin: 0; }
   .staff-account-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
   .staff-role { color: var(--admin-secondary); font-size: 14px; }
@@ -373,7 +376,8 @@
     .staff-list-identity { grid-column: 1 / -1; }
     .staff-list li > button { justify-self: end; }
     .staff-filter-toggle { display: inline-flex; justify-content: center; }
-    .staff-extra-filters { grid-template-columns: minmax(0, 1fr); }
+    .staff-list-filters, .has-panel .staff-list-filters { grid-template-columns: minmax(0, 1fr); }
+    .staff-extra-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .staff-extra-filters:not(.is-open) { display: none; }
   }
 </style>

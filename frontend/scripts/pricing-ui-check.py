@@ -6,6 +6,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import asyncio
+import json
 from copy import deepcopy
 from importlib.util import spec_from_file_location, module_from_spec
 from pathlib import Path
@@ -23,6 +24,7 @@ def fixture(name, filename):
 
 admin = fixture("admin_fixture", "admin-ui-check.py")
 public = fixture("public_fixture", "public-ui-check.py")
+staff_audit = fixture("staff_audit", "staff-review-check.py").STYLE_AUDIT
 
 
 async def check(browser, base, width):
@@ -32,7 +34,7 @@ async def check(browser, base, width):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     state = {"settings": {"adminFee": 7500, "revision": 1}, "vouchers": [], "history": []}
-    mode = {"save": 503, "hold": None, "role": "ADMIN", "quote": 200, "changed": False}
+    mode = {"save": 422, "hold": None, "role": "ADMIN", "quote": 200, "changed": False}
     saves = []
 
     async def api(route):
@@ -103,19 +105,19 @@ async def check(browser, base, width):
     assert len(saves) == 2 and state["settings"]["adminFee"] == 9000
     await page.get_by_label("Kode voucher", exact=True).fill("dummy50")
     await page.get_by_label("Jenis diskon").select_option("FIXED")
-    await page.get_by_label("Nilai diskon", exact=True).fill("50000")
+    await page.get_by_label("Nilai diskon (Rp)", exact=True).fill("50000")
     await page.get_by_label("Cakupan konser").select_option("nusa-malam")
     await page.get_by_label("Minimum subtotal tiket (Rp)", exact=True).fill("100000")
     await page.get_by_label("Kuota order", exact=True).fill("5")
     await page.get_by_label("Voucher aktif", exact=True).check()
     page.once("dialog", lambda d: d.accept())
-    await page.get_by_role("button", name="Simpan voucher", exact=True).click()
+    await page.get_by_role("button", name="Buat voucher", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
     await expect(page.get_by_label("Kode voucher", exact=True)).to_have_attribute("readonly", "")
     await expect(page.locator(".voucher-list")).to_contain_text("Ditahan 1 · Dipakai 2 · Dilepas 1 · Kuota 5")
     await page.get_by_label("Voucher aktif", exact=True).uncheck()
     page.once("dialog", lambda d: d.accept())
-    await page.get_by_role("button", name="Simpan voucher", exact=True).click()
+    await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
     await expect(page.locator(".voucher-list")).to_contain_text("Nonaktif")
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "admin overflow"
     assert await page.get_by_role("button", name="Voucher baru", exact=True).evaluate("el => el.getBoundingClientRect().height >= 44")
@@ -232,14 +234,135 @@ async def check_recovery(browser, base, width, scenario):
     print(f"PASS {width}px {scenario}: original order/payload/key retained, payment starts once after review")
 
 
+async def check_loading(browser, base, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
+    await context.add_init_script(admin.SESSION_INIT)
+    page = await context.new_page()
+    errors, saves = [], []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    state = {"settings": {"adminFee": 7500, "revision": 1}, "vouchers": [], "history": []}
+    mode = {"read": 503, "catalog": 503, "save": "success"}
+    output = Path("/tmp/phase51-55/pricing")
+    output.mkdir(parents=True, exist_ok=True)
+
+    async def api(route):
+        path = urlparse(route.request.url).path
+        if path.endswith("/staff/me"): await route.fulfill(json={"staff": admin.ADMIN})
+        elif path.endswith("/admin/events"):
+            await route.fulfill(status=mode["catalog"], json={"events": [admin.EVENT]} if mode["catalog"] == 200 else {"error": {"message": "Katalog gagal"}})
+        elif route.request.method == "GET":
+            await route.fulfill(status=mode["read"], json=state if mode["read"] == 200 else {"error": {"message": "Route not found"}})
+        else:
+            payload = route.request.post_data_json
+            saves.append(payload)
+            if mode["save"] == "conflict":
+                await route.fulfill(status=409, json={"error": {"code": "PRICING_CONFLICT", "message": "Revisi berubah. Muat ulang dan periksa data terbaru."}})
+                return
+            if path.endswith("/admin/pricing"): state["settings"] = {**payload, "revision": state["settings"]["revision"] + 1}
+            else:
+                assert "usage" not in payload
+                state["vouchers"] = [{**payload, "revision": payload["revision"] + 1 if route.request.method == "PUT" else 0, "usage": {"held": 0, "consumed": 0, "released": 0}}]
+            if mode["save"] == "lost": await route.abort("connectionreset")
+            elif mode["save"] == "refresh-failed":
+                mode["read"] = 503
+                await route.fulfill(json=state["settings"])
+            else: await route.fulfill(json=state["settings"] if path.endswith("/admin/pricing") else {k: v for k, v in state["vouchers"][0].items() if k != "usage"})
+
+    await page.route("**/api/v1/**", api)
+    await page.goto(base + "/admin/pricing")
+    await expect(page.get_by_text("Pengaturan biaya dan voucher gagal dimuat. Coba lagi.", exact=False)).to_be_visible()
+    await expect(page.locator("form")).to_have_count(0)
+    assert not saves
+    await page.screenshot(path=str(output / f"initial-error-{width}.png"), full_page=True)
+    mode["read"] = 200
+    await page.get_by_role("button", name="Coba lagi", exact=True).click()
+    fee = page.get_by_label("Nominal tetap (Rp)", exact=True)
+    await expect(fee).to_have_value("7500")
+    await expect(page.get_by_role("button", name="Buat voucher", exact=True)).to_be_disabled()
+    await fee.fill("9000")
+    await expect(page.get_by_role("button", name="Simpan biaya admin", exact=True)).to_be_enabled()
+    await page.screenshot(path=str(output / f"catalog-error-{width}.png"), full_page=True)
+    mode["catalog"] = 200
+    await page.get_by_role("button", name="Coba lagi katalog", exact=True).click()
+    await expect(page.get_by_role("button", name="Buat voucher", exact=True)).to_be_enabled()
+    sample = page.get_by_label("Subtotal tiket untuk pratinjau (Rp)")
+    await sample.fill("123456"); await sample.press("Tab")
+    await expect(sample).to_have_value("123.456")
+    await sample.fill("12.34"); await sample.press("Tab")
+    await expect(sample).to_have_attribute("aria-invalid", "true")
+    await expect(page.get_by_role("button", name="Simpan biaya admin", exact=True)).to_be_disabled()
+    await sample.fill("100000"); await sample.press("Tab")
+    mode["read"] = 503
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(page.get_by_text("Pembaruan data biaya dan voucher gagal.", exact=False)).to_be_visible()
+    await expect(fee).to_have_value("9000")
+    assert not saves
+    mode["read"] = 200
+    await page.get_by_role("button", name="Coba lagi", exact=True).click()
+    await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_enabled()
+    mode["save"] = "conflict"
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await expect(page.get_by_role("alert")).to_contain_text("Penyimpanan ditolak")
+    await expect(fee).to_have_value("9000")
+    mode["save"] = "refresh-failed"
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await expect(page.get_by_role("status").filter(has_text="Biaya admin tersimpan")).to_be_visible()
+    await expect(page.get_by_text("Pembaruan data biaya dan voucher gagal.", exact=False)).to_be_visible()
+    mode["read"] = 200
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_enabled()
+    await fee.fill("9500")
+    mode["save"] = "lost"
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await expect(page.get_by_role("alert")).to_contain_text("belum pasti")
+    count = len(saves)
+    await page.locator("form").first.dispatch_event("submit")
+    assert len(saves) == count
+    await page.get_by_role("button", name="Periksa hasil simpan", exact=True).click()
+    await expect(page.get_by_role("status").filter(has_text="Biaya admin sesuai")).to_be_visible()
+    await expect(fee).to_be_enabled()
+    await page.get_by_label("Kode voucher", exact=True).fill("LOST50")
+    await page.get_by_label("Nilai diskon (%)", exact=True).fill("15")
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Buat voucher", exact=True).click()
+    await expect(page.get_by_role("alert")).to_contain_text("belum pasti")
+    count = len(saves)
+    await page.locator("form").nth(1).dispatch_event("submit")
+    assert len(saves) == count
+    await page.get_by_role("button", name="Periksa hasil simpan", exact=True).click()
+    await expect(page.get_by_role("status").filter(has_text="Voucher sesuai")).to_be_visible()
+    mode["save"] = "success"
+    await page.get_by_label("Voucher aktif", exact=True).check()
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
+    await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
+    assert not errors and await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), errors
+    await page.screenshot(path=str(output / f"saved-{width}.png"), full_page=True)
+    await page.evaluate("""() => {
+      const elements = [...document.querySelectorAll('.admin-layout *')];
+      const sizes = elements.map(el => getComputedStyle(el).fontSize);
+      elements.forEach((el, i) => el.style.fontSize = parseFloat(sizes[i]) * 2 + 'px');
+    }""")
+    audit = await page.evaluate(staff_audit)
+    assert not audit["failures"] and not audit["overflow"], (width, audit)
+    await page.screenshot(path=str(output / f"text200-{width}.png"), full_page=True)
+    (output / f"checks-{width}.json").write_text(json.dumps({"automated": True, "fixture": True, "width": width, "saves": len(saves), "browserErrors": errors, "text200Audit": audit}))
+    await context.close()
+    print(f"PASS {width}: initial/partial/refresh failures, formatting, revision conflict, saved success, unknown fee/voucher verification")
+
+
 async def main():
     base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5175"
     async with async_playwright() as p:
         browser = await p.chromium.launch(channel="chrome", headless=True)
         try:
-            for width in (1440, 390):
+            for width in (1440, 320, 390, 768):
+                await check_loading(browser, base, width)
                 await check(browser, base, width)
-                for scenario in ("same-quote", "auto-replay", "manual-replay"):
+                for scenario in (("same-quote", "auto-replay", "manual-replay") if width in (1440, 390) else ()):
                     await check_recovery(browser, base, width, scenario)
         finally:
             await browser.close()

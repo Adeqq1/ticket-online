@@ -8,11 +8,13 @@ import asyncio
 import json
 import re
 import subprocess
+from copy import deepcopy
+from runpy import run_path
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -169,6 +171,144 @@ def body(path, mode, role):
     return 200, {}
 
 
+async def check_workflows(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, requests, mutations, audits = [], [], [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    events = [{**deepcopy(EVENT), "id": f"konser-{i}", "artist": f"Konser {i:02d}" + (" dengan nama sangat panjang untuk operasional acara" if i == 19 else ""), "publicationStatus": ["DRAFT", "PUBLISHED", "ARCHIVED"][i % 3]} for i in range(20)]
+    _, detail = body(base + f"/api/v1/admin/orders/{ORDER}", "standard", "ADMIN")
+    orders = [{"id": f"{i + 100:032x}", "reference": f"TO-{i:020d}", "buyerName": "Pembeli dengan nama panjang " + str(i), "eventName": events[i % 20]["artist"], "eventId": events[i % 20]["id"], "status": ["PAID", "PENDING", "EXPIRED", "CANCELLED", "REFUND_PENDING", "REFUNDED"][i % 6], "total": 100000 + i, "createdAt": "2026-10-01T10:00:00Z", "ticketCount": 2} for i in range(22)]
+    audit_js = run_path(str(Path(__file__).with_name("staff-review-check.py")))["STYLE_AUDIT"]
+
+    async def fixture(route):
+        url = urlparse(route.request.url)
+        path, method = url.path.removeprefix("/api/v1/"), route.request.method
+        requests.append((method, path, parse_qs(url.query)))
+        if path == "staff/me": await route.fulfill(json={"staff": ADMIN})
+        elif path == "admin/events" and method == "GET": await route.fulfill(json={"events": events})
+        elif path.endswith("/changes") and method == "GET": await route.fulfill(json=[])
+        elif path.startswith("admin/events"):
+            value = route.request.post_data_json
+            mutations.append((method, path, value))
+            if path == "admin/events":
+                event = {**deepcopy(EVENT), **value, "zones": [], "ticketTiers": []}
+                events.append(event)
+                await route.fulfill(status=201, json=event)
+            else:
+                event = next(e for e in events if e["id"] == path.split("/")[2])
+                if path.endswith("/zones"):
+                    event["zones"].append(value)
+                    await route.fulfill(status=201, json=value)
+                elif path.endswith("/ticket-tiers"):
+                    tier = {**value, "availableQuantity": value["capacity"], "boundQuantity": 0, "gateLocked": False}
+                    event["ticketTiers"].append(tier)
+                    await route.fulfill(status=201, json=tier)
+                else:
+                    event.update(value)
+                    await route.fulfill(json=event)
+        elif path == "admin/orders":
+            query = parse_qs(url.query)
+            rows = orders[10:] if "cursor" in query else orders[:11]
+            if query.get("q") == ["absent"]: rows = []
+            await route.fulfill(json={"items": rows, "nextCursor": "cursor-two" if len(rows) == 11 else None, "filterOptions": {"events": [{"id": e["id"], "name": e["artist"]} for e in events]}})
+        elif path.startswith("admin/orders/"): await route.fulfill(json={**detail, **next(o for o in orders if o["id"] == path.split("/")[-1])})
+        else: raise AssertionError((method, path))
+
+    async def capture(name):
+        result = await page.evaluate(audit_js)
+        assert not result["failures"] and not result["overflow"], (name, width, result)
+        audits.append({"state": name, **result})
+        await page.screenshot(path=str(output / f"workflow-{name}-{width}.png"), full_page=True, animations="disabled")
+
+    async def text200(name):
+        await page.evaluate("""() => {
+          window.__phase55Fonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__phase55Fonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        await capture(name + "-text200")
+        await page.evaluate("() => { for (const [el, original] of window.__phase55Fonts) el.style.fontSize = original; }")
+
+    await page.route("**/api/v1/**", fixture)
+    await page.goto(base + "/admin/events")
+    try: await expect(page.locator(".event-admin-list li")).to_have_count(20, timeout=15000)
+    except AssertionError: raise AssertionError({"url": page.url, "errors": errors, "requests": requests, "text": await page.locator("body").inner_text()})
+    await expect(page.locator("#event-form")).to_have_count(0)
+    await capture("events-list")
+    await text200("events-list")
+    await page.get_by_label("Cari konser", exact=True).fill("Konser 19")
+    await page.get_by_role("button", name="Kelola konser Konser 19", exact=False).click()
+    await expect(page.locator("#event-editor-title")).to_be_focused()
+    await expect(page.locator(".event-admin-list")).to_have_count(0)
+    await page.get_by_label("Nama konser / artis", exact=True).fill("Draft tidak disimpan")
+    page.once("dialog", lambda d: d.dismiss())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(page.locator("#event-form")).to_have_count(1)
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(page.get_by_label("Cari konser", exact=True)).to_have_value("Konser 19")
+    await expect(page.locator("#event-manage-konser-19")).to_be_focused()
+    await page.locator("#event-create-opener").click()
+    await expect(page.locator("#event-editor-title")).to_be_focused()
+    name = page.get_by_label("Nama konser / artis", exact=True)
+    await name.fill("Konser Uji Baru")
+    await expect(page.locator("#event-id")).to_have_value("konser-uji-baru")
+    await page.locator("#event-id").fill("id-manual")
+    await name.fill("Nama setelah ID manual")
+    await expect(page.locator("#event-id")).to_have_value("id-manual")
+    await capture("events-create")
+    await page.get_by_role("button", name="Buat konser", exact=True).click()
+    await expect(page.locator("#event-editor-title")).to_contain_text("Edit konser")
+    await expect(page.get_by_text("Draf konser dibuat.", exact=False)).to_be_visible()
+    await expect(page.locator("#event-id")).to_have_count(0)
+    await page.get_by_label("Nama zona", exact=True).fill("Zona Uji")
+    await page.get_by_role("button", name="Tambah zona", exact=True).click()
+    await expect(page.get_by_text("Zona tersimpan.", exact=True)).to_be_visible()
+    await page.get_by_label("Nama kategori", exact=True).fill("Kategori Uji")
+    await page.locator(".event-inventory-editor form").last.get_by_role("combobox").first.select_option("zona-uji")
+    await page.get_by_label("Harga (rupiah)", exact=True).fill("100000")
+    await page.get_by_label("Kapasitas", exact=True).fill("20")
+    await page.get_by_label("Gate", exact=True).fill("Gate Uji")
+    await page.get_by_role("button", name="Tambah kategori", exact=True).click()
+    await expect(page.get_by_text("Kategori tiket tersimpan.", exact=True)).to_be_visible()
+    await page.get_by_label("Jadwal (WIB)", exact=True).fill("2027-12-01T19:00")
+    for label, value in [("Kota", "Jakarta"), ("Venue", "Venue Uji"), ("Alamat", "Alamat Uji"), ("Deskripsi", "Deskripsi konser uji"), ("Lineup", "Artis Uji")]:
+        await page.get_by_label(label, exact=label != "Lineup").fill(value)
+    await page.get_by_role("radio", name="Gunakan URL gambar", exact=True).check()
+    await page.get_by_label("URL poster", exact=True).fill("https://example.test/poster.jpg")
+    await page.get_by_role("combobox", name="Status publikasi", exact=True).select_option("PUBLISHED")
+    await page.get_by_role("button", name="Simpan perubahan", exact=True).click()
+    await expect(page.get_by_text("Perubahan konser tersimpan.", exact=True)).to_be_visible()
+    await capture("events-edit")
+    assert events[-1]["publicationStatus"] == "PUBLISHED" and events[-1]["ticketTiers"][0]["gate"] == "Gate Uji"
+    await page.goto(base + "/admin/orders")
+    await expect(page.locator("tbody tr")).to_have_count(11)
+    await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(1)
+    if width >= 768: await expect(page.get_by_role("columnheader", name="Nomor pesanan", exact=True)).to_be_visible()
+    await page.get_by_role("button", name="Muat berikutnya", exact=True).click()
+    await expect(page.locator("tbody tr")).to_have_count(22)
+    await expect(page.get_by_text("22 pesanan dimuat", exact=True)).to_be_visible()
+    assert await page.locator("tbody tr").evaluate_all("rows => new Set(rows.map(r => r.querySelector('code').textContent)).size") == 22
+    await capture("orders-list")
+    await text200("orders-list")
+    await page.locator(f"#order-detail-{orders[-1]['id']}").click()
+    await expect(page.locator("#order-detail-title")).to_be_focused()
+    await capture("orders-detail")
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(page.locator(f"#order-detail-{orders[-1]['id']}")).to_be_focused()
+    await expect(page.locator("tbody tr")).to_have_count(22)
+    await page.get_by_label("Nomor pesanan", exact=True).fill("absent")
+    await page.get_by_role("button", name="Cari", exact=True).click()
+    await expect(page.locator("tbody tr")).to_have_count(0)
+    await capture("orders-empty")
+    assert requests[-1][2].get("q") == ["absent"]
+    assert not errors, errors
+    (output / f"workflow-{width}.json").write_text(json.dumps({"automated": True, "humanUAT": "not performed", "events": 20, "orders": 22, "audits": audits, "browserErrors": errors, "mutations": mutations}, indent=2))
+    await context.close()
+    print(f"PASS {width}: 20 concerts, create/inventory/publish, preserved drafts/focus, 2 cursor pages, 22 unique orders, table/mobile detail")
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
@@ -177,6 +317,7 @@ async def main():
     parser.add_argument("--phase", type=int, default=29, help="Phase number recorded in the manifest")
     parser.add_argument("--phase35", action="store_true", help="Capture tablet, landscape, reduced-height keyboard, and enlarged-text layouts")
     parser.add_argument("--inject-pageerror", action="store_true", help="Inject a non-blocking browser exception to verify failure reporting")
+    parser.add_argument("--workflows", action="store_true", help="Verify the phase 55 concert/order workflows with larger fixtures")
     args = parser.parse_args()
     output = args.output_dir if args.output_dir and args.output_dir.is_absolute() else ROOT / args.output_dir if args.output_dir else OUTPUT
     output.mkdir(parents=True, exist_ok=True)
@@ -198,6 +339,10 @@ async def main():
             parser.error(f"unknown route key: {args.only}")
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        if args.workflows:
+            for width in (1440, 320, 390, 768): await check_workflows(browser, args.base_url, output, width)
+            await browser.close()
+            return
         for viewport, size in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
             for name, route, role in routes:
                 modes = ("standard", "loading", "empty", "error") + (("rejected", "unknown-checkedin", "camera-exit") if name == "scanner" else ())
@@ -365,11 +510,11 @@ async def main():
                         search_input = page.locator("#order-search-form input").first
                         await search_input.fill("TO-0123456789abcdef0123")
                         await page.locator("#order-search-form").get_by_role("button", name="Cari", exact=True).click()
-                        await page.get_by_role("button", name="Buka pesanan TO-0123456789abcdef0123").wait_for()
+                        await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123").wait_for()
                         mobile_order_list = "orders-filtered-list-mobile.png"
                         await page.locator(".order-list-panel").scroll_into_view_if_needed()
                         await page.screenshot(path=str(output / mobile_order_list), full_page=False, animations="disabled")
-                        await page.get_by_role("button", name="Buka pesanan TO-0123456789abcdef0123").click()
+                        await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123").click()
                         await page.get_by_role("heading", name="Detail pesanan").wait_for()
                         if await search_input.input_value() != "TO-0123456789abcdef0123":
                             raise AssertionError("mobile order selection discarded the active search filter")
@@ -465,7 +610,10 @@ async def main():
                         if capture["audit"]["visibleEmDashCount"]:
                             raise AssertionError(f"visible em-dash copy needs rewriting on {route}: {capture['audit']['visibleEmDashCount']}")
                         action = page.locator(".admin-page-heading .admin-heading-actions > button").first
-                        if name not in ("login", "scanner"):
+                        if name == "orders":
+                            await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(1)
+                            assert not await action.count(), "Order search belongs in its filter form"
+                        elif name not in ("login", "scanner"):
                             if not await action.count():
                                 raise AssertionError(f"admin heading action missing on {route}")
                             action_info = await action.evaluate("button => ({label:button.innerText.trim(),type:button.type,formId:button.form?.id||'',disabled:button.disabled})")

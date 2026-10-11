@@ -5,7 +5,7 @@
   type Page = "pricing" | "events" | "staff" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "history";
   let { page, contentId, skipLabel, kicker, title, description, onLogout, loggingOut, logoutDisabled, primaryAction, secondaryAction, children }: {
     page: Page; contentId: string; skipLabel: string; kicker: string; title: string; description: string;
-    onLogout: () => void; loggingOut: boolean; logoutDisabled?: boolean; primaryAction: Action; secondaryAction?: Action; children: Snippet;
+    onLogout: () => void; loggingOut: boolean; logoutDisabled?: boolean; primaryAction?: Action; secondaryAction?: Action; children: Snippet;
   } = $props();
 
   let dialog: HTMLDialogElement;
@@ -42,7 +42,7 @@
   }
 </script>
 
-<div class="scan-shell staff-admin-shell admin-layout">
+<div class="scan-shell staff-admin-shell admin-layout" class:compact={["pricing", "events", "orders", "staff"].includes(page)}>
   <a class="skip-link" href={`#${contentId}`}>{skipLabel}</a>
   <header class="scan-topbar admin-topbar">
     <a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a>
@@ -66,7 +66,7 @@
     </aside>
 
     <main id={contentId} class="staff-admin-content" tabindex="-1">
-      <div class="staff-admin-heading admin-page-heading"><div><p class="scan-kicker">{kicker}</p><h1>{title}</h1><p>{description}</p></div><div class="admin-heading-actions"><button class="scan-submit staff-submit" id={primaryAction.id} aria-controls={primaryAction.controls} aria-expanded={primaryAction.expanded} type={primaryAction.form ? "submit" : "button"} form={primaryAction.form} onclick={primaryAction.onclick} disabled={primaryAction.disabled}>{primaryAction.label}</button>{#if secondaryAction}<button class="staff-secondary-button" type="button" onclick={secondaryAction.onclick} disabled={secondaryAction.disabled}>{secondaryAction.label}</button>{/if}</div></div>
+      <div class="staff-admin-heading admin-page-heading"><div><p class="scan-kicker">{kicker}</p><h1>{title}</h1><p>{description}</p></div><div class="admin-heading-actions">{#if primaryAction}<button class="scan-submit staff-submit" id={primaryAction.id} aria-controls={primaryAction.controls} aria-expanded={primaryAction.expanded} type={primaryAction.form ? "submit" : "button"} form={primaryAction.form} onclick={primaryAction.onclick} disabled={primaryAction.disabled}>{primaryAction.label}</button>{/if}{#if secondaryAction}<button class="staff-secondary-button" type="button" onclick={secondaryAction.onclick} disabled={secondaryAction.disabled}>{secondaryAction.label}</button>{/if}</div></div>
       {@render children()}
     </main>
   </div>
@@ -88,6 +88,10 @@
   .admin-nav-group a[aria-current="page"] { color: var(--scan-lime); border-left-color: var(--scan-lime); background: var(--scan-panel); }
   .admin-layout .staff-admin-content { width: auto; min-width: 0; margin: 0; padding: 42px 0 40px; }
   .admin-page-heading { align-items: center; }
+  .admin-layout.compact .staff-admin-content { padding-top: 24px; }
+  .compact .admin-page-heading { margin-bottom: 20px; }
+  .compact .admin-page-heading .scan-kicker { margin-bottom: 8px; }
+  .compact .admin-page-heading > div > p:last-child { margin-top: 12px; }
   .admin-page-heading > div:first-child { min-width: 0; }
   .admin-page-heading .scan-kicker { font-size: 14px; }
   .admin-page-heading > div > p:last-child { font-size: 16px; }
@@ -108,6 +112,7 @@
   }
   @media (max-width: 600px) {
     .admin-page-heading { display: grid; gap: 20px; }
+    .compact .admin-page-heading { gap: 12px; }
     .admin-heading-actions { justify-content: stretch; }
     .admin-heading-actions > * { flex: 1 1 auto; }
     .admin-mobile-menu { margin: 10px 10px auto auto; }
