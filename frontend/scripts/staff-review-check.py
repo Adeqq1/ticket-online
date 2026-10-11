@@ -35,7 +35,7 @@ STYLE_AUDIT = """() => {
             const contrast = ratio(rgb(style.color), background(el)); ratios.push(contrast);
             if (contrast < 4.5 || parseFloat(style.fontSize) < 14) failures.push({text: el.textContent.slice(0, 70), contrast, size: style.fontSize, color: style.color, background: background(el), disabled: el.matches(':disabled'), opacity: style.opacity});
         }
-        if (el.matches('input:not([type="checkbox"]), select, textarea, .staff-secondary-button, .scan-submit:disabled, .staff-status')) {
+        if (el.matches('input:not([type="checkbox"]), select, textarea, .staff-secondary-button, .scan-submit:disabled')) {
             for (const bg of [background(el), background(el.parentElement)]) {
                 const contrast = ratio(rgb(style.borderTopColor), bg);
                 borders.push(contrast);
@@ -129,7 +129,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
     submit = panel.get_by_role("button", name="Buat akun petugas", exact=True)
     cancel = panel.get_by_role("button", name="Batal", exact=True)
     manage = page.locator(f"#staff-manage-{people[0]['id']}")
-    output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase43-46/workflow"))
+    output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase47-50/workflow"))
     output.mkdir(parents=True, exist_ok=True)
 
     async def draft():
@@ -145,8 +145,8 @@ async def verify_create_flow(page, people, admin, width, base_url):
     await page.route("**/api/v1/**", fixture)
     await visit()
     await expect(panel).to_have_count(0)
-    await expect(page.locator(".staff-role").first).to_have_text("Admin")
-    await expect(page.locator(".staff-status").last).to_have_text("Nonaktif")
+    await expect(page.locator(".staff-role").first).to_have_text("Peran: Admin")
+    await expect(page.locator(".staff-status").last).to_have_text("Status: Nonaktif")
     await audit("list")
     await page.screenshot(path=str(output / f"list-{width}.png"), full_page=True)
     if width < 1024:
@@ -310,6 +310,290 @@ async def verify_create_flow(page, people, admin, width, base_url):
     print(f"PASS {width}: catalog loading, failure/retry, expired session; no browser runtime errors")
 
 
+async def verify_management_flow(page, admin, width, base_url):
+    names = ["Ayu Satriana", "Bima Pradana", "Citra Nirmala", "Damar Santosa", "Eka Wulandari", "Farhan Ardi", "Gita Kusuma", "Hana Putri", "Indra Mahendra", "Jihan Laras", "Kirana Sari", "Laras Wening", "Maya Prameswari", "Nanda Prasetya", "Oki Saputra", "Putri Anindya", "Rani Paramita", "Satria Wibowo", "Tania Maharani dengan nama panjang untuk operasional konser"]
+    events = [dict(id="musik", artist="Nusa Malam", city="Jakarta", ticketTiers=[dict(gate=f"Gate {letter}") for letter in "ABCDEFG"]),
+              dict(id="teater", artist="Panggung Senja", city="Bandung", ticketTiers=[dict(gate="Gate Utama")]),
+              dict(id="tanpa-gate", artist="Konser Baru", city="Bogor", ticketTiers=[])]
+    rows = [admin, *[dict(id=f"{index:032x}", name=name, email=name.lower().replace(" ", ".") + "@operasional-konser.example.test", role="STAFF", active=index % 3 != 0,
+                         assignments=[] if index % 4 == 0 else [dict(eventId="musik", gate="Gate A")] if index % 2 else [dict(eventId="teater", gate="Gate Utama")]) for index, name in enumerate(names, 1)]]
+    rows[1]["assignments"] = [dict(eventId="musik", gate=f"Gate {letter}") for letter in "ABCDEFG"]
+    output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase47-50/workflow"))
+    (output / f"fixture20-{width}.json").write_text(json.dumps(dict(staff=rows, events=events), indent=2))
+    mutations, errors, audits = [], [], []
+    reads = 0
+    mode = "success"
+    delay = False
+    started, release = asyncio.Event(), asyncio.Event()
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    async def fixture(route):
+        nonlocal reads
+        path = route.request.url.split("/api/v1/")[1]
+        method = route.request.method
+        if path == "staff/me": await route.fulfill(json=dict(staff=admin))
+        elif path == "admin/events": await route.fulfill(json=dict(events=events))
+        elif path == "admin/staff" and method == "GET":
+            reads += 1
+            await route.fulfill(json=dict(staff=rows))
+        else:
+            payload = route.request.post_data_json
+            mutations.append(dict(method=method, path=path, payload={k: v for k, v in payload.items() if k != "password"}))
+            if delay:
+                started.set()
+                await release.wait()
+            if mode == "network":
+                await route.abort("failed")
+                return
+            if method == "POST" and path == "admin/staff":
+                person = dict(id="d" * 32, role="STAFF", active=True, **{k: v for k, v in payload.items() if k != "password"})
+                rows.append(person)
+                await route.fulfill(status=201, json=person)
+                return
+            parts = path.split("/")
+            person = next(row for row in rows if row["id"] == parts[2])
+            if method == "PATCH" and len(parts) == 3: person.update(payload)
+            elif method == "PUT" and parts[-1] == "assignments": person["assignments"] = payload["assignments"]
+            elif method == "PUT" and parts[-1] == "password": assert len(payload["password"]) >= 12
+            else: raise AssertionError((method, path))
+            if mode == "truncated": await route.fulfill(status=200, content_type="application/json", body='{"result":')
+            else: await route.fulfill(status=204)
+
+    async def audit(label):
+        result = await page.evaluate(STYLE_AUDIT)
+        assert not result["failures"] and not result["overflow"], (width, label, result)
+        audits.append(dict(state=label, **result))
+
+    async def capture(name, target=None):
+        if target is not None: await target.evaluate("element => element.scrollIntoView({block: 'start', behavior: 'instant'})")
+        else: await page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
+        await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        await audit(name)
+        await page.screenshot(path=str(output / f"roster20-{name}-{width}.png"), animations="disabled")
+
+    async def reset_filters():
+        if await page.get_by_role("button", name="Reset filter", exact=True).count():
+            await page.get_by_role("button", name="Reset filter", exact=True).click()
+
+    async def reload_saved(person):
+        await page.reload()
+        await expect(page.locator(f"#staff-account-{person['id']}")).to_contain_text(person["name"])
+        await page.locator(f"#staff-manage-{person['id']}").click()
+        await expect(page.locator("#staff-edit-title")).to_be_focused()
+        await expect(page.locator(".staff-edit-panel").get_by_label("Nama", exact=True)).to_have_value(person["name"])
+
+    await page.route("**/api/v1/**", fixture)
+    await page.goto(base_url + "/admin/staff")
+    await expect(page.locator(".staff-list li")).to_have_count(20)
+    await expect(page.locator(".staff-filter-results")).to_contain_text("20 dari 20 akun")
+    assert await page.locator(".staff-list li").evaluate_all("rows => rows.map(row => row.id.replace('staff-account-', ''))") == [row["id"] for row in rows]
+    await expect(page.get_by_role("button", name="Kelola", exact=False)).to_have_count(19)
+    await expect(page.locator(f"#staff-account-{admin['id']}")).to_contain_text("Akun administrator tidak dapat diubah melalui halaman ini.")
+    assert await page.locator(".staff-status").evaluate_all("badges => badges.every(b => b.tabIndex === -1 && b.tagName === 'SPAN' && getComputedStyle(b).cursor !== 'pointer' && !b.closest('button,a'))")
+    badge = page.locator(".staff-status").first
+    before = await badge.evaluate("b => [getComputedStyle(b).backgroundColor, getComputedStyle(b).color]")
+    await badge.hover()
+    assert await badge.evaluate("b => [getComputedStyle(b).backgroundColor, getComputedStyle(b).color]") == before
+    await capture("list")
+    await page.screenshot(path=str(output / f"roster20-full-list-{width}.png"), full_page=True)
+    summary = page.locator(f"#staff-account-{rows[1]['id']} summary")
+    await expect(page.locator(f"#staff-account-{rows[1]['id']} details span").last).not_to_be_visible()
+    await summary.focus(); await page.keyboard.press("Enter")
+    await expect(page.locator(f"#staff-account-{rows[1]['id']} details span").last).to_be_visible()
+    await page.keyboard.press("Enter")
+    if width <= 600:
+        await expect(page.get_by_role("combobox", name="Status akun")).not_to_be_visible()
+        await page.get_by_role("button", name="Filter lainnya", exact=True).click()
+    search = page.get_by_label("Cari nama atau email", exact=True)
+    initial_reads = reads
+    await search.fill("  AYU  ")
+    await page.get_by_role("combobox", name="Status akun", exact=True).select_option("active")
+    await page.get_by_role("combobox", name="Event penugasan", exact=True).select_option("musik")
+    await expect(page.locator(".staff-list li")).to_have_count(1)
+    await page.get_by_label("Tanpa penugasan", exact=True).check()
+    await expect(page.locator(".staff-filter-results")).to_contain_text("0 dari 20 akun")
+    await capture("empty-search")
+    assert reads == initial_reads, "Filtering must use existing list data without API requests"
+    await reset_filters()
+    await expect(search).to_be_focused()
+    await page.locator(f"#staff-manage-{rows[1]['id']}").click()
+    editor = page.locator(".staff-edit-panel")
+    await expect(page.locator("#staff-edit-title")).to_be_focused()
+    await expect(editor).to_contain_text(rows[1]["email"])
+    await editor.get_by_label("Nama", exact=True).fill("Draft Ayu")
+    await search.fill("hasil-tidak-ada")
+    await expect(page.get_by_text("Ayu Satriana tidak termasuk hasil saat ini.", exact=False)).to_be_visible()
+    await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Draft Ayu")
+    await editor.get_by_role("link", name="Penugasan", exact=True).click()
+    await expect(page.locator("#staff-assignments")).to_be_focused()
+    await editor.get_by_role("link", name="Profil dan akses", exact=True).click()
+    await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Draft Ayu")
+    await capture("filtered-editor", editor.locator("h2"))
+    await reset_filters()
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    await editor.get_by_role("button", name="Tutup", exact=True).click()
+    await expect(editor).to_have_count(1)
+    page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Tutup", exact=True).click()
+
+    # An unadded choice is protected, then cleared when switching to another account.
+    await page.locator(f"#staff-manage-{rows[1]['id']}").click()
+    await editor.get_by_role("combobox", name="Event", exact=True).select_option("musik")
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    await page.locator(f"#staff-manage-{rows[2]['id']}").click()
+    await expect(page.locator("#staff-edit-title")).to_have_text(rows[1]["name"])
+    page.once("dialog", lambda dialog: dialog.accept())
+    await page.locator(f"#staff-manage-{rows[2]['id']}").click()
+    await expect(page.locator("#staff-edit-title")).to_be_focused()
+    await expect(editor.get_by_role("combobox", name="Event", exact=True)).to_have_value("")
+    await expect(editor.get_by_role("button", name="Simpan penugasan")).to_be_enabled()
+    await editor.get_by_role("button", name="Tutup", exact=True).click()
+
+    # End-to-end workflow uses one mutable API fixture so reloads verify persisted state.
+    await page.locator("#staff-create-opener").click()
+    panel = page.locator(".staff-create-panel")
+    await capture("create-open", panel.locator("h2"))
+    await panel.get_by_label("Nama", exact=True).fill("Nadia Petugas")
+    await panel.get_by_label("Email", exact=True).fill("nadia.uat@example.test")
+    await panel.get_by_label("Password awal").fill("fixture-password-123")
+    event_select = panel.get_by_role("combobox", name="Event", exact=True)
+    gate_select = panel.get_by_role("combobox", name="Gate", exact=True)
+    submit = panel.get_by_role("button", name="Buat akun petugas", exact=True)
+    await event_select.select_option("tanpa-gate")
+    await expect(gate_select).to_be_disabled()
+    await expect(submit).to_be_disabled()
+    await expect(panel).to_contain_text("Event ini belum memiliki gate")
+    await panel.get_by_role("button", name="Batalkan pilihan").click()
+    await event_select.select_option("musik")
+    await gate_select.select_option("Gate A")
+    await expect(submit).to_be_disabled()
+    count = len(mutations)
+    await panel.locator("form").dispatch_event("submit")
+    assert len(mutations) == count
+    await capture("event-gate-selection", gate_select)
+    await panel.get_by_role("button", name="Tambah", exact=True).click()
+    await expect(submit).to_be_enabled()
+    await event_select.select_option("musik")
+    await gate_select.select_option("Gate A")
+    await expect(panel).to_contain_text("Penugasan event/gate ini sudah ada di draft")
+    await expect(panel.get_by_role("button", name="Tambah", exact=True)).to_be_disabled()
+    await panel.get_by_role("button", name="Batalkan pilihan").click()
+    await submit.click()
+    await expect(panel).to_have_count(0)
+    person = rows[-1]
+    assert person["assignments"] == [dict(eventId="musik", gate="Gate A")]
+    await reload_saved(person)
+    await capture("manage", editor.locator("h2"))
+    await editor.get_by_label("Nama", exact=True).fill("Nadia Petugas Utama")
+    await editor.get_by_role("button", name="Simpan profil", exact=True).click()
+    await page.get_by_text("Profil petugas berhasil diperbarui.", exact=True).wait_for()
+    await reload_saved(person)
+    assert person["name"] == "Nadia Petugas Utama"
+    assignments_form = editor.locator("form").nth(1)
+    await assignments_form.get_by_role("combobox", name="Event", exact=True).select_option("musik")
+    await assignments_form.get_by_role("combobox", name="Gate", exact=True).select_option("Gate B")
+    await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_disabled()
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    await editor.get_by_role("button", name="Tutup", exact=True).click()
+    await expect(editor).to_have_count(1)
+    await assignments_form.get_by_role("button", name="Tambah", exact=True).click()
+    await assignments_form.get_by_role("button", name="Hapus penugasan Gate A", exact=True).click()
+    count = len(mutations)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    await assignments_form.get_by_role("button", name="Simpan penugasan").click()
+    assert len(mutations) == count
+    delay = True
+    page.once("dialog", lambda dialog: dialog.accept())
+    await assignments_form.get_by_role("button", name="Simpan penugasan").click()
+    await asyncio.wait_for(started.wait(), 15)
+    await assignments_form.dispatch_event("submit")
+    assert len(mutations) == count + 1
+    release.set(); delay = False
+    await page.get_by_text("Penugasan berhasil diperbarui.", exact=True).wait_for()
+    await reload_saved(person)
+    assert person["assignments"] == [dict(eventId="musik", gate="Gate B")]
+    await editor.get_by_label("Akun aktif", exact=True).uncheck()
+    count = len(mutations)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    await editor.get_by_role("button", name="Simpan profil", exact=True).click()
+    assert len(mutations) == count
+    page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Simpan profil", exact=True).click()
+    await page.get_by_text("Profil petugas berhasil diperbarui.", exact=True).wait_for()
+    await reload_saved(person)
+    await expect(editor.get_by_label("Akun aktif", exact=True)).not_to_be_checked()
+    await expect(page.locator(f"#staff-account-{person['id']} .staff-status")).to_have_text("Status: Nonaktif")
+    await editor.get_by_label("Password baru", exact=True).fill("fixture-password-456")
+    count = len(mutations)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    await editor.get_by_role("button", name="Reset password", exact=True).click()
+    assert len(mutations) == count
+    page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Reset password", exact=True).click()
+    await page.get_by_text("Password direset dan sesi lama petugas dicabut.", exact=True).wait_for()
+    await expect(editor.get_by_label("Password baru", exact=True)).to_have_value("")
+    await reload_saved(person)
+    assert [item["method"] for item in mutations] == ["POST", "PATCH", "PUT", "PATCH", "PUT"]
+
+    # Unknown outcomes cannot be turned into another mutation by switching panels.
+    mode = "network"
+    await editor.get_by_label("Nama", exact=True).fill("Nadia Perubahan Terputus")
+    await editor.get_by_role("button", name="Simpan profil", exact=True).click()
+    await expect(editor.get_by_role("button", name="Simpan profil", exact=True)).to_be_disabled()
+    count = len(mutations)
+    await editor.locator("form").first.dispatch_event("submit")
+    assert len(mutations) == count
+    mode = "success"
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_enabled()
+    await expect(editor.get_by_role("button", name="Simpan profil", exact=True)).to_be_disabled()
+    person["name"] = "Nadia Perubahan Terputus"
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(editor.get_by_role("button", name="Simpan profil", exact=True)).to_be_enabled()
+    await assignments_form.get_by_role("button", name="Hapus penugasan Gate B").click()
+    mode = "truncated"
+    page.once("dialog", lambda dialog: dialog.accept())
+    await assignments_form.get_by_role("button", name="Simpan penugasan").click()
+    await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_disabled()
+    count = len(mutations)
+    await assignments_form.dispatch_event("submit")
+    assert len(mutations) == count
+    page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Tutup", exact=True).click()
+    await page.locator(f"#staff-manage-{person['id']}").click()
+    await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_disabled()
+    mode = "success"
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_enabled()
+    await expect(assignments_form.locator(".staff-assignment-list li")).to_have_count(0)
+    await expect(editor.locator(".staff-edit-unsaved")).to_have_count(0)
+    mode = "network"
+    await editor.get_by_label("Password baru", exact=True).fill("fixture-password-789")
+    page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Reset password", exact=True).click()
+    await expect(editor.get_by_role("button", name="Reset password", exact=True)).to_be_disabled()
+    count = len(mutations)
+    await editor.locator("form").last.dispatch_event("submit")
+    assert len(mutations) == count
+    mode = "success"
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_enabled()
+    await expect(editor.get_by_role("button", name="Reset password", exact=True)).to_be_disabled()
+    page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Tutup", exact=True).click()
+    await page.locator(f"#staff-manage-{person['id']}").click()
+    await expect(editor.get_by_role("button", name="Reset password", exact=True)).to_be_disabled()
+    await capture("unknown-password", editor.locator("h2"))
+    assert not errors, errors
+    (output / f"management-{width}.json").write_text(json.dumps(dict(width=width, fixtureAccounts=20, automated=True, humanUAT="not performed", audits=audits, mutations=mutations, browserErrors=errors), indent=2))
+    # Accept the native page-exit warning before the following scanner checks.
+    page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Tutup", exact=True).click()
+    await page.unroute("**/api/v1/**", fixture)
+    page.once("dialog", lambda dialog: dialog.accept())
+    print(f"PASS {width}: 20-account filters, summaries, pending selections, full saved workflow/reloads, confirmations, unknown mutation locks")
+
+
 async def main():
     base_url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5173"
     width = int(sys.argv[2]) if len(sys.argv) > 2 else 1440
@@ -370,6 +654,7 @@ async def main():
         print("PASS: delayed assignment save preserves selection and profile draft")
         await page.unroute("**/api/v1/**", admin_api)
         await verify_create_flow(page, people, admin, width, base_url)
+        await verify_management_flow(page, admin, width, base_url)
 
         mode = "success"
         posts = []

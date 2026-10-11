@@ -602,6 +602,8 @@ async def main():
                 async def denied_fixture(request):
                     if request.request.url.endswith("/staff/me"):
                         await request.fulfill(json={"staff": STAFF})
+                    elif "/api/v1/admin/" in request.request.url:
+                        await request.fulfill(status=403, json={"error": {"code": "FORBIDDEN", "message": "Akses administrator diperlukan."}})
                     else:
                         await request.fulfill(json={"events": [EVENT]})
 
