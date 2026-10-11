@@ -1,0 +1,113 @@
+{
+  "scope": "Email detail: problem, next step, actions, supporting facts",
+  "frontend": {
+    "tests": 127,
+    "assertions": 586,
+    "checkErrors": 0,
+    "checkWarnings": 0,
+    "build": "passed"
+  },
+  "emailBrowser": [
+    {
+      "width": 320,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    },
+    {
+      "width": 390,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    },
+    {
+      "width": 768,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    },
+    {
+      "width": 1440,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    }
+  ],
+  "adminIssues": {
+    "captures": 16,
+    "pageErrors": [],
+    "unhandledApiRequests": [],
+    "unexpectedRedirects": []
+  },
+  "runtime": {
+    "frontend/src/pages/admin/AdminIssuesPage.svelte": "Matches workspace at localhost:5173",
+    "frontend/src/lib/admin-operations.ts": "Matches workspace at localhost:5173"
+  },
+  "screenshots": {
+    "directory": "/tmp/email-detail-review",
+    "expiredDesktop": "/tmp/email-detail-review/email/expired-recovery-1440.png",
+    "expiredMobile": "/tmp/email-detail-review/email/expired-recovery-320.png"
+  },
+  "backendSMTP": "Not rerun; frontend behavior uses existing canRetry and retry endpoint",
+  "humanUAT": "Not performed"
+}

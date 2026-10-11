@@ -385,6 +385,8 @@ async def verify_management_flow(page, admin, width, base_url):
 
     async def reload_saved(person):
         await page.reload()
+        if width < 768:
+            await page.get_by_label("Cari nama atau email", exact=True).fill(person["email"])
         await expect(page.locator(f"#staff-account-{person['id']}")).to_contain_text(person["name"])
         await page.locator(f"#staff-manage-{person['id']}").click()
         await expect(page.locator("#staff-edit-title")).to_be_focused()
@@ -392,10 +394,10 @@ async def verify_management_flow(page, admin, width, base_url):
 
     await page.route("**/api/v1/**", fixture)
     await page.goto(base_url + "/admin/staff")
-    await expect(page.locator(".staff-list li")).to_have_count(20)
+    await expect(page.locator(".staff-list li")).to_have_count(5 if width < 768 else 20)
     await expect(page.locator(".staff-filter-results")).to_contain_text("20 dari 20 akun")
-    assert await page.locator(".staff-list li").evaluate_all("rows => rows.map(row => row.id.replace('staff-account-', ''))") == [row["id"] for row in rows]
-    await expect(page.get_by_role("button", name="Kelola", exact=False)).to_have_count(19)
+    assert await page.locator(".staff-list li").evaluate_all("rows => rows.map(row => row.id.replace('staff-account-', ''))") == [row["id"] for row in (rows[:5] if width < 768 else rows)]
+    await expect(page.get_by_role("button", name="Kelola", exact=False)).to_have_count(4 if width < 768 else 19)
     await expect(page.locator(f"#staff-account-{admin['id']}")).to_contain_text("Akun administrator tidak dapat diubah melalui halaman ini.")
     assert await page.locator(".staff-status").evaluate_all("badges => badges.every(b => b.tabIndex === -1 && b.tagName === 'SPAN' && getComputedStyle(b).cursor !== 'pointer' && !b.closest('button,a'))")
     badge = page.locator(".staff-status").first
@@ -470,6 +472,9 @@ async def verify_management_flow(page, admin, width, base_url):
 
     # A distant account restores list scroll and its trigger.
     trigger = page.locator(f"#staff-manage-{rows[-1]['id']}")
+    if width < 768:
+        for _ in range(3):
+            await page.get_by_role("button", name="Berikutnya", exact=True).click()
     await trigger.scroll_into_view_if_needed()
     scroll = await page.evaluate("scrollY")
     await trigger.click()
@@ -644,6 +649,10 @@ async def main():
         page = await context.new_page()
         admin = dict(id="c" * 32, name="Admin", email="admin@example.com", role="ADMIN", active=True, assignments=[])
         people = [dict(id=letter * 32, name=name, email=name.lower() + "@example.com", role="STAFF", active=True, assignments=[dict(eventId="event", gate=gate)]) for letter, name, gate in [("a", "Alice", "Gate A"), ("b", "Bob", "Gate B")]]
+        if "--management-only" in sys.argv:
+            await verify_management_flow(page, admin, width, base_url)
+            await browser.close()
+            return
         started, release = asyncio.Event(), asyncio.Event()
         mutations = []
 

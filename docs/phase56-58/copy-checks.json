@@ -1,0 +1,123 @@
+{
+  "scope": "Copy refinement and native scope disclosures after Phase 58",
+  "frontend": {
+    "bunTest": {
+      "passed": 125,
+      "assertions": 574
+    },
+    "svelteCheck": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "build": "passed"
+  },
+  "emailBrowserFixtures": [
+    {
+      "width": 320,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    },
+    {
+      "width": 390,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    },
+    {
+      "width": 768,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    },
+    {
+      "width": 1440,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error"
+      ],
+      "keyboardOpenReturn": true,
+      "scopeDisclosures": "initially closed; Enter opens and closes Issues/Operations explanations",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplicationAndReceiptPreserved": true
+    }
+  ],
+  "adminBrowser": {
+    "issues": {
+      "captures": 16,
+      "pageErrors": [],
+      "unhandledApiRequests": [],
+      "unexpectedRedirects": []
+    },
+    "operations": {
+      "captures": 14,
+      "pageErrors": [],
+      "unhandledApiRequests": [],
+      "unexpectedRedirects": []
+    }
+  },
+  "runtime": {
+    "issues": {
+      "url": "http://localhost:5173/src/pages/admin/AdminIssuesPage.svelte",
+      "matchesWorkspace": true
+    },
+    "operations": {
+      "url": "http://localhost:5173/src/pages/admin/AdminOperationsPage.svelte",
+      "matchesWorkspace": true
+    }
+  },
+  "screenshots": "/tmp/phase56-58-copy",
+  "backendSMTP": "Prior Phase 58 evidence retained; not rerun for copy refinement",
+  "humanUAT": "Not performed; two admins unavailable"
+}

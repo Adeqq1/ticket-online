@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, exportAdminSalesReportCSV, getAdminSalesReport, saveAdminReportCSV, type AdminSalesAmounts, type AdminSalesReport } from "../../lib/api.ts";
@@ -88,12 +89,14 @@
 
 <svelte:head><title>Laporan penjualan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
   <AdminLayout page="reports" contentId="reports-content" skipLabel="Lewati ke laporan" kicker="LAPORAN KEUANGAN • ADMIN" title="Penjualan dan refund." description="Pembayaran dihitung dari waktu lunas, refund dari waktu penyelesaian. Penerimaan setelah refund belum memperhitungkan biaya provider." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Muat ulang", onclick: () => void load(), disabled: loading }}>
+    <AdminMobileFilters id="reports-mobile-filters" title="Filter laporan">
     <form class="history-filter-form sales-report-filters" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each eventOptions as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
       <label>Dari tanggal WIB<input type="date" bind:value={dateFrom} required /></label>
       <label>Sampai tanggal WIB<input type="date" bind:value={dateTo} required /></label>
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
     </form>
+    </AdminMobileFilters>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={retry}>Coba lagi</button></p>{/if}
     {#if exportError}<p class="staff-form-message staff-form-error" role="alert">{exportError}</p>{/if}
     {#if loading && !data}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan…</p>{/if}

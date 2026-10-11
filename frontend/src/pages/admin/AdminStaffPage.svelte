@@ -1,4 +1,9 @@
 <script lang="ts">
+  import { MediaQuery } from "svelte/reactivity";
+  import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
+  import { mobileListItems } from "../../lib/mobile-list.ts";
+  const mobileList = new MediaQuery("(max-width: 767px)");
+
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onMount, tick } from "svelte";
   import StaffAssignmentsEditor from "../../components/admin/StaffAssignmentsEditor.svelte";
@@ -6,6 +11,8 @@
   import type { AdminApiEvent } from "../../lib/api.ts";
   import { filterStaff, sameAssignments, type StaffFilters } from "../../lib/staff-management.ts";
 
+  let mobileGroup = $state(0);
+  let mobileScroll = $state(0);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let staff = $state<Staff[]>([]);
   let events = $state<AdminApiEvent[]>([]);
@@ -34,6 +41,7 @@
   let filters = $state<StaffFilters>({ query: "", status: "all", eventId: "", unassigned: false });
   let showFilters = $state(false);
   let filteredStaff = $derived(filterStaff(staff, filters));
+  $effect(() => { filters.query; filters.status; filters.eventId; filters.unassigned; mobileGroup = 0; mobileScroll = 0; });
   let filtersActive = $derived(Boolean(filters.query.trim() || filters.status !== "all" || filters.eventId || filters.unassigned));
   let activeFilterCount = $derived(Number(filters.status !== "all") + Number(Boolean(filters.eventId)) + Number(filters.unassigned));
   let filterEventIds = $derived([...new Set([...events.map((item) => item.id), ...staff.flatMap((person) => person.assignments.map((item) => item.eventId))])]);
@@ -69,6 +77,12 @@
     document.getElementById(id)?.focus();
   }
 
+  function revealAccount(id: string, loaded = true) {
+    const index = filteredStaff.findIndex(person => person.id === id);
+    if (loaded && index >= 0 && mobileList.current) { mobileGroup = Math.floor(index / 5); mobileScroll = 0; }
+    void focusElement(loaded && index >= 0 ? `staff-account-${id}` : "staff-result");
+  }
+
   function clearCreate() {
     newName = ""; newEmail = ""; newPassword = ""; newAssignments = [];
     creating = false; createUncertain = false; newAssignmentPending = false;
@@ -84,6 +98,8 @@
   async function closePanel() {
     if (saving || !allowStaffDiscard()) return;
     const previousId = selectedId;
+    const index = filteredStaff.findIndex(person => person.id === previousId);
+    if (mobileList.current && index >= 0 && Math.floor(index / 5) !== mobileGroup) { mobileGroup = Math.floor(index / 5); mobileScroll = 0; }
     clearCreate(); selectedId = ""; resetPassword = ""; editAssignmentPending = false; error = "";
     await tick();
     document.getElementById(previousId ? filteredStaff.some((person) => person.id === previousId) ? `staff-manage-${previousId}` : "staff-list-title" : "staff-create-opener")?.focus({ preventScroll: true });
@@ -150,7 +166,7 @@
       notice = "Akun petugas berhasil dibuat.";
       const loaded = await loadStaff();
       if (!loaded) notice = "Akun petugas berhasil dibuat, tetapi daftar belum dapat dimuat ulang. Muat ulang daftar untuk melihat akun baru.";
-      void focusElement(loaded && filteredStaff.some((person) => person.id === created.id) ? `staff-account-${created.id}` : "staff-result");
+      revealAccount(created.id, loaded);
     } catch (cause) {
       createUncertain = unknownOutcome(cause);
       showError(cause);
@@ -168,7 +184,7 @@
       if (found) {
         clearCreate(); error = "";
         notice = "Akun dengan email tersebut sudah tersedia pada daftar. Periksa akun sebelum melanjutkan.";
-        void focusElement(filteredStaff.some((person) => person.id === found.id) ? `staff-account-${found.id}` : "staff-result");
+        revealAccount(found.id);
       } else {
         createUncertain = false;
         error = "Akun dengan email tersebut belum ditemukan. Periksa input sebelum mencoba kembali.";
@@ -270,7 +286,7 @@
         {:else if staffError}<p class="staff-form-message staff-form-error" role="alert">{staffError}</p>
         {:else if staff.length === 0}<p class="staff-muted">Belum ada akun petugas.</p>
         {:else if filteredStaff.length === 0}<p class="staff-muted">Tidak ada akun yang cocok. Ubah pencarian atau reset filter.</p>
-        {:else}<ul class="staff-list">{#each filteredStaff as person (person.id)}
+        {:else}<AdminMobileList count={filteredStaff.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="staff-list-title"><ul class="staff-list">{#each mobileListItems(filteredStaff, mobileGroup, mobileList.current) as person (person.id)}
           <li id={`staff-account-${person.id}`} tabindex="-1">
             <div class="staff-list-identity">
               <strong>{person.name}</strong><span>{person.email}</span>
@@ -282,7 +298,7 @@
             <div class="staff-account-meta"><span class="staff-role">Peran: {person.role === "ADMIN" ? "Admin" : "Staff"}</span><span class="staff-status" class:is-active={person.active}>Status: {person.active ? "Aktif" : "Nonaktif"}</span></div>
             {#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button" type="button" disabled={saving} onclick={() => selectStaff(person)}>Kelola<span class="visually-hidden"> {person.name}</span></button>{/if}
           </li>
-        {/each}</ul>{/if}
+        {/each}</ul></AdminMobileList>{/if}
       </section>
       {:else if creating}<section id="staff-work-panel" class="staff-admin-panel staff-create-panel" aria-labelledby="staff-create-title">
         <div class="staff-panel-heading"><h2 id="staff-create-title" tabindex="-1">Tambah petugas</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
@@ -370,7 +386,7 @@
   .staff-workspace :global(button), .staff-list li { min-height: 44px; }
   .staff-workspace :global(.staff-assignment-list li) { min-height: 52px; overflow-wrap: anywhere; }
   .staff-workspace :global(.staff-assignment-controls) { grid-template-columns: minmax(0, 1fr); }
-  @media (max-width: 600px) {
+  @media (max-width: 767px) {
     .staff-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
     .staff-list-identity { grid-column: 1 / -1; }
     .staff-list li > button { justify-self: end; }

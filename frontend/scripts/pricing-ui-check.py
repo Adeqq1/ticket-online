@@ -103,6 +103,32 @@ async def check(browser, base, width):
     mode["hold"].set()
     await expect(page.get_by_role("status").filter(has_text="Biaya admin tersimpan")).to_be_visible()
     assert len(saves) == 2 and state["settings"]["adminFee"] == 9000
+    if width < 768:
+        await expect(page.locator(".voucher-editor")).not_to_be_visible()
+        await expect(fee).to_be_visible()
+        await page.locator("#voucher-create-opener").click()
+        await expect(page.locator("#voucher-title")).to_be_focused()
+        await page.get_by_label("Kode voucher", exact=True).fill("DRAFT")
+        await page.evaluate("""() => {
+          window.__voucherFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__voucherFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        audit = await page.evaluate(staff_audit)
+        assert not audit["failures"] and not audit["overflow"], (width, "voucher-editor-text200", audit)
+        await page.screenshot(path=f"/tmp/phase51-55/pricing/voucher-editor-text200-{width}.png", full_page=True)
+        await page.evaluate("() => { for (const [el, size] of window.__voucherFonts) el.style.fontSize = size; }")
+        await page.set_viewport_size({"width": width, "height": 420})
+        await page.get_by_label("Kode voucher", exact=True).focus()
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        await page.set_viewport_size({"width": width, "height": 900})
+        page.once("dialog", lambda d: d.dismiss())
+        await page.get_by_role("button", name="Batal", exact=True).click()
+        await expect(page.get_by_label("Kode voucher", exact=True)).to_have_value("DRAFT")
+        page.once("dialog", lambda d: d.accept())
+        await page.get_by_role("button", name="Batal", exact=True).click()
+        await expect(page.locator("#voucher-create-opener")).to_be_focused()
+        await page.locator("#voucher-create-opener").click()
+        await expect(page.get_by_label("Kode voucher", exact=True)).to_have_value("")
     await page.get_by_label("Kode voucher", exact=True).fill("dummy50")
     await page.get_by_label("Jenis diskon").select_option("FIXED")
     await page.get_by_label("Nilai diskon (Rp)", exact=True).fill("50000")
@@ -113,6 +139,9 @@ async def check(browser, base, width):
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Buat voucher", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
+    if width < 768:
+        await expect(page.locator("#voucher-manage-DUMMY50")).to_be_focused()
+        await page.locator("#voucher-manage-DUMMY50").click()
     await expect(page.get_by_label("Kode voucher", exact=True)).to_have_attribute("readonly", "")
     await expect(page.locator(".voucher-list")).to_contain_text("Ditahan 1 · Dipakai 2 · Dilepas 1 · Kuota 5")
     await page.get_by_label("Voucher aktif", exact=True).uncheck()
@@ -120,7 +149,7 @@ async def check(browser, base, width):
     await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
     await expect(page.locator(".voucher-list")).to_contain_text("Nonaktif")
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "admin overflow"
-    assert await page.get_by_role("button", name="Voucher baru", exact=True).evaluate("el => el.getBoundingClientRect().height >= 44")
+    assert await page.locator("#voucher-create-opener" if width < 768 else ".voucher-desktop-action").evaluate("el => el.getBoundingClientRect().height >= 44")
 
     await page.goto(base + "/checkout/nusa-malam?festival=1")
     await expect(page.locator(".grand-total")).to_contain_text("284.000")
@@ -278,13 +307,15 @@ async def check_loading(browser, base, width):
     await page.get_by_role("button", name="Coba lagi", exact=True).click()
     fee = page.get_by_label("Nominal tetap (Rp)", exact=True)
     await expect(fee).to_have_value("7500")
-    await expect(page.get_by_role("button", name="Buat voucher", exact=True)).to_be_disabled()
+    if width < 768:
+        await page.locator("#voucher-create-opener").click()
+    await expect(page.locator(".voucher-editor").get_by_role("button", name="Buat voucher", exact=True)).to_be_disabled()
     await fee.fill("9000")
     await expect(page.get_by_role("button", name="Simpan biaya admin", exact=True)).to_be_enabled()
     await page.screenshot(path=str(output / f"catalog-error-{width}.png"), full_page=True)
     mode["catalog"] = 200
     await page.get_by_role("button", name="Coba lagi katalog", exact=True).click()
-    await expect(page.get_by_role("button", name="Buat voucher", exact=True)).to_be_enabled()
+    await expect(page.locator(".voucher-editor").get_by_role("button", name="Buat voucher", exact=True)).to_be_enabled()
     sample = page.get_by_label("Subtotal tiket untuk pratinjau (Rp)")
     await sample.fill("123456"); await sample.press("Tab")
     await expect(sample).to_have_value("123.456")

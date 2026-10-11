@@ -1,0 +1,106 @@
+{
+  "scope": "Remove selected Issues copy and both email detail buttons; reuse existing status badges",
+  "frontend": {
+    "tests": 126,
+    "assertions": 577,
+    "checkErrors": 0,
+    "checkWarnings": 0,
+    "build": "passed"
+  },
+  "browser": [
+    {
+      "width": 320,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenAndMenuNavigation": true,
+      "disclosures": "Operations scope and email status meanings initially closed; Enter opens and closes",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplication": true,
+      "selectedCopyAndButtonsRemoved": true
+    },
+    {
+      "width": 390,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenAndMenuNavigation": true,
+      "disclosures": "Operations scope and email status meanings initially closed; Enter opens and closes",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplication": true,
+      "selectedCopyAndButtonsRemoved": true
+    },
+    {
+      "width": 768,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenAndMenuNavigation": true,
+      "disclosures": "Operations scope and email status meanings initially closed; Enter opens and closes",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplication": true,
+      "selectedCopyAndButtonsRemoved": true
+    },
+    {
+      "width": 1440,
+      "scenarios": [
+        "standard",
+        "same-id",
+        "replacement",
+        "unproven",
+        "rejected",
+        "rate-limit",
+        "expired",
+        "refresh-error",
+        "detail-error",
+        "success-refresh-error",
+        "recovery-new-request"
+      ],
+      "keyboardOpenAndMenuNavigation": true,
+      "disclosures": "Operations scope and email status meanings initially closed; Enter opens and closes",
+      "textEnlargement": "200% injected font sizes, list, email detail and open scope disclosures",
+      "contrast": "rendered text/borders/focus audited",
+      "cursorDeduplication": true,
+      "selectedCopyAndButtonsRemoved": true
+    }
+  ],
+  "runtime": {
+    "url": "http://localhost:5173",
+    "issuesSourceMatchesWorkspace": true
+  },
+  "screenshots": "/tmp/email-copy-removal/",
+  "humanUAT": "Not performed"
+}

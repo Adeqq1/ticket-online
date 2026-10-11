@@ -216,7 +216,7 @@
 .order-detail-grid h3 { font-size: 18px; }
 .order-detail-grid dl, .order-detail-list li { font-size: 16px; line-height: 1.5; }
 .order-detail-list li { padding: 13px; }
-.order-list-panel .history-table { min-width: 0; font-size: 16px; table-layout: fixed; overflow-wrap: anywhere; }
+.order-list-panel .history-table { min-width: 0; font-size: 16px; table-layout: auto; white-space: nowrap; }
 .order-list-panel .history-table th { font-size: 14px; }
 .order-list-panel .history-table td { padding: 12px 8px; }
 .order-list-panel .history-table code { font-size: 14px; overflow-wrap: anywhere; }
@@ -225,16 +225,24 @@
 .admin-layout .admin-order-status { display: inline-block; padding: 4px 8px; border-radius: 2px; background: var(--admin-neutral-bg); color: var(--admin-text); font-size: 14px; line-height: 1.5; }
 .admin-layout .admin-order-status.is-paid { background: var(--admin-active-bg); color: var(--admin-active-text); }
 .admin-layout .admin-order-status.is-expired { background: var(--admin-warning-bg); color: var(--admin-warning-text); }
+.order-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 18px; }
+.order-search-toggle { display: none; }
 @media (max-width: 767px) {
-  .order-list-panel .history-table { display: block; }
+  .order-search-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 10px; }
+  .order-search-panel:not(.is-expanded) { padding-block: 12px; }
+  .order-search-panel:not(.is-expanded) .staff-panel-heading { margin-bottom: 0; }
+  .order-search-panel:not(.is-expanded) .order-filter-form { display: none; }
+  .order-list-panel .history-table-wrap { scroll-snap-type: x mandatory; }
+  .order-list-panel .history-table { display: block; white-space: normal; }
   .order-list-panel .history-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
-  .order-list-panel .history-table tbody, .order-list-panel .history-table tr { display: grid; width: 100%; }
-  .order-list-panel .history-table tr { gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--scan-line); }
-  .order-list-panel .history-table td { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 10px; padding: 5px 0; border: 0; font-size: 16px; }
+  .order-list-panel .history-table tbody { display: flex; width: 100%; gap: 16px; }
+  .order-list-panel .history-table tr { display: grid; flex: 0 0 100%; min-width: 0; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--scan-line); scroll-snap-align: start; }
+  .order-list-panel .history-table td { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 10px; padding: 5px 0; border: 0; font-size: 16px; overflow-wrap: anywhere; }
   .order-list-panel .history-table td::before { content: attr(data-label); color: var(--scan-muted); font-size: 14px; }
 }
-.issue-workspace { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-.issue-workspace .history-table { min-width: 0; font-size: 16px; }
+.issue-workspace { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.issue-workspace .history-table { width: 100%; min-width: 0; table-layout: fixed; font-size: 16px; }
+.issue-workspace .history-table :is(td, th) { overflow-wrap: anywhere; }
 .issue-workspace .history-table th { font-size: 14px; }
 .issue-workspace .history-table code { font-size: 14px; overflow-wrap: anywhere; }
 .issue-workspace .history-table td { padding: 12px 8px; }
@@ -267,11 +275,4 @@
 @media (max-width: 600px) {
   .order-filter-form { grid-template-columns: minmax(0, 1fr); }
   .order-filter-form .history-filter-actions { grid-column: auto; }
-  .issue-workspace .history-table { display: block; }
-  .issue-workspace .history-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
-  .issue-workspace .history-table tbody, .issue-workspace .history-table tr { display: grid; width: 100%; }
-  .issue-workspace .history-table tr { gap: 4px; padding: 13px 0; border-bottom: 1px solid var(--scan-line); }
-  .issue-workspace .history-table td { display: grid; grid-template-columns: minmax(94px, .55fr) minmax(0, 1fr); gap: 10px; padding: 5px 0; border: 0; font-size: 16px; }
-  .issue-workspace .history-table td::before { content: attr(data-label); color: var(--scan-muted); font-size: 14px; }
-  .issue-workspace .history-table code { font-size: 14px; }
 }

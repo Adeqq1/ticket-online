@@ -10,6 +10,7 @@
 
   let dialog: HTMLDialogElement;
   let menuButton: HTMLButtonElement;
+  let menuOpen = $state(false);
   const groups = [
     { label: "Pengelolaan", links: [{ page: "pricing", label: "Biaya dan voucher", href: "/admin/pricing" }, { page: "events", label: "Konser", href: "/admin/events" }, { page: "staff", label: "Kelola petugas", href: "/admin/staff" }] },
     { label: "Operasional", links: [{ page: "orders", label: "Pesanan", href: "/admin/orders" }, { page: "issues", label: "Masalah", href: "/admin/issues" }, { page: "operations", label: "Operasional", href: "/admin/operations" }, { page: "history", label: "Riwayat check-in", href: "/admin/check-ins" }] },
@@ -18,6 +19,7 @@
 
   async function openMenu() {
     dialog.showModal();
+    menuOpen = true;
     await tick();
     dialog.querySelector<HTMLButtonElement>("[data-menu-close]")?.focus();
   }
@@ -27,6 +29,7 @@
   }
 
   function restoreMenuFocus() {
+    menuOpen = false;
     if (matchMedia("(max-width: 1023px)").matches) menuButton?.focus();
     else document.querySelector<HTMLElement>(".admin-topbar .scan-brand")?.focus();
   }
@@ -47,11 +50,11 @@
   <header class="scan-topbar admin-topbar">
     <a class="scan-brand" href="/" aria-label="Kembali ke Tiket Online"><span class="scan-brand-mark" aria-hidden="true">TO</span><span>Tiket Online <b>/ Gate Control</b></span></a>
     <span class="staff-login-label">ADMINISTRATOR</span>
-    <button class="staff-text-button admin-menu-trigger" bind:this={menuButton} type="button" aria-haspopup="dialog" aria-controls="admin-mobile-menu" onclick={openMenu}>Menu</button>
-    <button class="staff-text-button admin-logout" type="button" disabled={logoutDisabled ?? loggingOut} onclick={onLogout}>Keluar</button>
+    <button class="staff-text-button admin-menu-trigger" bind:this={menuButton} type="button" aria-label="Menu" title="Buka menu navigasi" aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls="admin-mobile-menu" onclick={openMenu}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg><span class="admin-menu-label">Menu</span></button>
+    <button class="staff-text-button admin-logout" type="button" aria-label="Keluar" title="Keluar dari akun admin" disabled={logoutDisabled ?? loggingOut} onclick={onLogout}><svg class="admin-logout-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H4v14h5M9 12h11m-4-4 4 4-4 4" /></svg><span class="admin-logout-label">Keluar</span></button>
   </header>
 
-  <dialog id="admin-mobile-menu" class="admin-mobile-menu" bind:this={dialog} onclose={restoreMenuFocus} onkeydown={handleMenuKeydown}>
+  <dialog id="admin-mobile-menu" class="admin-mobile-menu" aria-label="Navigasi admin" bind:this={dialog} onclose={restoreMenuFocus} onkeydown={handleMenuKeydown}>
     <div class="admin-mobile-menu-heading"><strong>Navigasi admin</strong><button class="staff-text-button" data-menu-close type="button" onclick={() => dialog.close()}>Tutup</button></div>
     {#each groups as group (group.label)}
       <nav aria-label={group.label} class="admin-nav-group"><h2>{group.label}</h2>{#each group.links as link (link.href)}<a href={link.href} aria-current={page === link.page ? "page" : undefined}>{link.label}</a>{/each}</nav>
@@ -78,6 +81,7 @@
   .admin-topbar { width: min(100% - 56px, 1500px); }
   .admin-topbar .scan-brand { min-height: 44px; }
   .admin-menu-trigger { display: none; }
+  .admin-logout-icon { display: none; }
   .admin-logout, .admin-mobile-menu-heading button { min-width: 44px; min-height: 44px; }
   .admin-layout-grid { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: clamp(28px, 4vw, 64px); width: min(100% - 56px, 1500px); margin: 0 auto; }
   .admin-sidebar { position: sticky; top: 20px; align-self: start; display: grid; gap: 24px; padding: 32px 16px; border-right: 1px solid var(--admin-border); background: var(--admin-sidebar); }
@@ -103,14 +107,20 @@
   .admin-mobile-menu .admin-nav-group { margin-top: 20px; }
   .admin-layout :is(a, button):focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
   @media (max-width: 1023px) {
-    .admin-topbar { width: min(100% - 32px, 1500px); min-height: 64px; }
-    .admin-menu-trigger { display: inline-flex; min-width: 44px; min-height: 44px; justify-content: center; }
+    .admin-topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: min(100% - 32px, 1500px); min-height: 68px; padding-block: 12px; }
+    .admin-topbar .scan-brand { min-width: 0; gap: 8px; }
+    .admin-topbar .scan-brand-mark { flex: 0 0 29px; }
+    .admin-topbar .scan-brand > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+    .admin-topbar :is(.admin-menu-trigger, .admin-logout) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; min-height: 44px; padding: 10px; border: 1px solid var(--admin-control-border); border-radius: 4px; background: var(--admin-input); color: var(--admin-text); }
+    .admin-logout-icon { display: block; flex: 0 0 22px; }
+    .admin-logout-label { display: none; }
     .admin-layout .staff-login-label { display: none; }
     .admin-sidebar { display: none; }
     .admin-layout-grid { display: block; width: min(100% - 32px, 900px); }
     .admin-layout .staff-admin-content { padding: 36px 0 40px; }
   }
   @media (max-width: 600px) {
+    .admin-menu-label { display: none; }
     .admin-page-heading { display: grid; gap: 20px; }
     .compact .admin-page-heading { gap: 12px; }
     .admin-heading-actions { justify-content: stretch; }

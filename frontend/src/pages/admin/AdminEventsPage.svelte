@@ -1,4 +1,10 @@
 <script lang="ts">
+  import { MediaQuery } from "svelte/reactivity";
+  import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
+  import { mobileListItems } from "../../lib/mobile-list.ts";
+  const mobileList = new MediaQuery("(max-width: 767px)");
+
+  import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import PosterEditor from "../../components/admin/PosterEditor.svelte";
   import EventChangePanel from "../../components/admin/EventChangePanel.svelte";
@@ -6,6 +12,9 @@
   import { ApiError, createAdminEvent, createAdminTier, createAdminZone, getAdminEvents, updateAdminEvent, updateAdminTier, updateAdminZone, type AdminEventInput, type AdminApiEvent, type AdminTierInput, type PublicationStatus } from "../../lib/api.ts";
   import { suggestAdminId } from "../../lib/admin-id.ts";
 
+  let searchOpen = $state(false);
+  let mobileGroup = $state(0);
+  let mobileScroll = $state(0);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let events = $state<AdminApiEvent[]>([]);
   let selectedId = $state("");
@@ -67,6 +76,8 @@
   }
   const visible = $derived(events.filter((event) => (!publicationFilter || event.publicationStatus === publicationFilter) && `${event.artist} ${event.city} ${event.venue}`.toLowerCase().includes(query.trim().toLowerCase())));
 
+  $effect(() => { query; publicationFilter; mobileGroup = 0; mobileScroll = 0; });
+
   function select(event: AdminApiEvent, discardChecked = false) {
     if ((saving && !discardChecked) || event.id === selectedId || (!discardChecked && !allowDiscard())) return;
     if (mode === "list") { listScroll = window.scrollY; listTrigger = `event-manage-${event.id}`; }
@@ -94,6 +105,8 @@
   }
   async function backToList() {
     if (saving || !allowDiscard()) return;
+    const index = visible.findIndex(item => `event-manage-${item.id}` === listTrigger);
+    if (mobileList.current && index >= 0 && Math.floor(index / 5) !== mobileGroup) { mobileGroup = Math.floor(index / 5); mobileScroll = 0; }
     mode = "list"; selectedId = ""; posterGeneration++; posterPending = false; posterUploading = false; changePanelDirty = false;
     error = ""; notice = "";
     await tick();
@@ -198,12 +211,12 @@
       {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
         <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="event-list-title" tabindex="-1">Daftar konser</h2></div><span class="staff-muted">{visible.length} konser</span></div>
-        <div class="event-list-filters"><label>Cari konser<input bind:value={query} type="search" placeholder="Nama, kota, atau venue" disabled={loading} /></label><label>Status publikasi<select bind:value={publicationFilter} disabled={loading}><option value="">Semua status</option><option value="DRAFT">Draf</option><option value="PUBLISHED">Terbit</option><option value="ARCHIVED">Diarsipkan</option></select></label></div>
+        <AdminMobileFilters id="event-mobile-filters" bind:open={searchOpen}><div class="event-list-filters"><label>Cari konser<input bind:value={query} type="search" placeholder="Nama, kota, atau venue" disabled={loading} /></label><label>Status publikasi<select bind:value={publicationFilter} disabled={loading}><option value="">Semua status</option><option value="DRAFT">Draf</option><option value="PUBLISHED">Terbit</option><option value="ARCHIVED">Diarsipkan</option></select></label></div></AdminMobileFilters>
         {#if listError}<p class="staff-form-message staff-form-error" role="alert">{listError} <button class="staff-text-button" type="button" disabled={loading} onclick={load}>Coba lagi</button></p>{/if}
         {#if loading}<p class="staff-muted" role="status">Memuat konser…</p>
         {:else if !events.length && !listError}<p class="staff-muted" role="status">Belum ada konser. Pilih Tambah konser untuk membuat draf pertama.</p>
         {:else if !visible.length && events.length}<p class="staff-muted" role="status">Tidak ada konser yang cocok dengan pencarian atau filter.</p>
-        {:else}<ul class="event-admin-list">{#each visible as item (item.id)}<li><div><strong>{item.artist || item.id}</strong><small>{item.startsAt ? `${new Date(item.startsAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : "Jadwal belum diatur"}</small><small>{item.city || "Kota belum diatur"} · {item.venue || "Venue belum diatur"}</small></div><span class={`event-publication event-${item.publicationStatus.toLowerCase()}`}>{publicationLabel[item.publicationStatus]}</span><button id={`event-manage-${item.id}`} class="staff-secondary-button" type="button" aria-label={`Kelola konser ${item.artist || item.id}`} onclick={() => select(item)}>Kelola konser</button></li>{/each}</ul>{/if}
+        {:else}<AdminMobileList count={visible.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="event-list-title"><ul class="event-admin-list">{#each mobileListItems(visible, mobileGroup, mobileList.current) as item (item.id)}<li><div><strong>{item.artist || item.id}</strong><small>{item.startsAt ? `${new Date(item.startsAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : "Jadwal belum diatur"}</small><small>{item.city || "Kota belum diatur"} · {item.venue || "Venue belum diatur"}</small></div><span class={`event-publication event-${item.publicationStatus.toLowerCase()}`}>{publicationLabel[item.publicationStatus]}</span><button id={`event-manage-${item.id}`} class="staff-secondary-button" type="button" aria-label={`Kelola konser ${item.artist || item.id}`} onclick={() => select(item)}>Kelola konser</button></li>{/each}</ul></AdminMobileList>{/if}
       </section>
       {:else}
       <section class="staff-admin-panel event-editor-panel" aria-labelledby="event-editor-title">

@@ -1,0 +1,17 @@
+[
+  {
+    "source": "pages/admin/AdminIssuesPage.svelte",
+    "servedAt": "http://localhost:5173",
+    "matchesWorkspace": true
+  },
+  {
+    "source": "lib/admin-operations.ts",
+    "servedAt": "http://localhost:5173",
+    "matchesWorkspace": true
+  },
+  {
+    "source": "pages/admin/AdminOperationsPage.svelte",
+    "servedAt": "http://localhost:5173",
+    "matchesWorkspace": true
+  }
+]

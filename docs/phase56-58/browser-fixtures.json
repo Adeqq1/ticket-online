@@ -1,0 +1,78 @@
+[
+  {
+    "width": 320,
+    "scenarios": [
+      "standard",
+      "same-id",
+      "replacement",
+      "unproven",
+      "rejected",
+      "rate-limit",
+      "expired",
+      "refresh-error",
+      "detail-error",
+      "success-refresh-error"
+    ],
+    "keyboardOpenReturn": true,
+    "textEnlargement": "200% injected font sizes, list and email detail",
+    "contrast": "rendered text/borders/focus audited",
+    "cursorDeduplicationAndReceiptPreserved": true
+  },
+  {
+    "width": 390,
+    "scenarios": [
+      "standard",
+      "same-id",
+      "replacement",
+      "unproven",
+      "rejected",
+      "rate-limit",
+      "expired",
+      "refresh-error",
+      "detail-error",
+      "success-refresh-error"
+    ],
+    "keyboardOpenReturn": true,
+    "textEnlargement": "200% injected font sizes, list and email detail",
+    "contrast": "rendered text/borders/focus audited",
+    "cursorDeduplicationAndReceiptPreserved": true
+  },
+  {
+    "width": 768,
+    "scenarios": [
+      "standard",
+      "same-id",
+      "replacement",
+      "unproven",
+      "rejected",
+      "rate-limit",
+      "expired",
+      "refresh-error",
+      "detail-error",
+      "success-refresh-error"
+    ],
+    "keyboardOpenReturn": true,
+    "textEnlargement": "200% injected font sizes, list and email detail",
+    "contrast": "rendered text/borders/focus audited",
+    "cursorDeduplicationAndReceiptPreserved": true
+  },
+  {
+    "width": 1440,
+    "scenarios": [
+      "standard",
+      "same-id",
+      "replacement",
+      "unproven",
+      "rejected",
+      "rate-limit",
+      "expired",
+      "refresh-error",
+      "detail-error",
+      "success-refresh-error"
+    ],
+    "keyboardOpenReturn": true,
+    "textEnlargement": "200% injected font sizes, list and email detail",
+    "contrast": "rendered text/borders/focus audited",
+    "cursorDeduplicationAndReceiptPreserved": true
+  }
+]

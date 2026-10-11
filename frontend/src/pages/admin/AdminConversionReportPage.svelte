@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, getAdminConversionReport, type ConversionBreakdown, type ConversionReport } from "../../lib/api.ts";
@@ -44,12 +45,14 @@
 
 <svelte:head><title>Konversi | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
   <AdminLayout page="conversion" contentId="conversion-content" skipLabel="Lewati ke laporan" kicker="LAPORAN PERJALANAN • ADMIN" title="Konversi pembeli." description="Tahapan mengikuti perjalanan anonim per tab dan event. Periode memakai tanggal WIB; hasil dianggap matang setelah 24 jam." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Muat ulang", onclick: () => void load(), disabled: loading }}>
+    <AdminMobileFilters id="conversionreport-mobile-filters" title="Filter laporan">
     <form class="history-filter-form sales-report-filters report-filter-form" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each eventOptions as event (event.eventId)}<option value={event.eventId}>{event.eventName}</option>{/each}</select></label>
       <label>Perangkat<select bind:value={device}><option value="">Semua perangkat</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option><option value="unknown">Tidak diketahui</option></select></label>
       <label>Dari tanggal WIB<input type="date" bind:value={dateFrom} required /></label><label>Sampai tanggal WIB<input type="date" bind:value={dateTo} required /></label>
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button></div>
     </form>
+    </AdminMobileFilters>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={retry}>Coba lagi</button></p>{/if}
     {#if loading && !report}<p class="staff-muted" role="status" aria-live="polite">Memuat laporan…</p>{/if}
     {#if report}
