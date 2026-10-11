@@ -264,18 +264,23 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		h.error(w, r, err)
 		return
 	}
-	rows, err := tx.QueryContext(r.Context(), "SELECT code FROM vouchers ORDER BY code")
+	rows, err := tx.QueryContext(r.Context(), `SELECT v.code,v.kind,v.value,v.starts_at,v.ends_at,v.active,COALESCE(v.event_id,''),v.minimum_subtotal,v.quota,v.revision,
+	 COALESCE(SUM(NOT ov.consumed AND o.status='PENDING'),0),COALESCE(SUM(ov.consumed),0),COALESCE(SUM(NOT ov.consumed AND o.status<>'PENDING'),0)
+	 FROM vouchers v LEFT JOIN order_vouchers ov ON ov.code=v.code LEFT JOIN orders o ON o.id=ov.order_id
+	 GROUP BY v.code ORDER BY v.code`)
 	if err != nil {
 		h.error(w, r, err)
 		return
 	}
-	codes := []string{}
+	vs := []ListedVoucher{}
 	for rows.Next() {
-		var code string
-		if err = rows.Scan(&code); err != nil {
+		var v ListedVoucher
+		var start, end time.Time
+		if err = rows.Scan(&v.Code, &v.Kind, &v.Value, &start, &end, &v.Active, &v.EventID, &v.MinimumSubtotal, &v.Quota, &v.Revision, &v.Usage.Held, &v.Usage.Consumed, &v.Usage.Released); err != nil {
 			break
 		}
-		codes = append(codes, code)
+		v.StartsAt, v.EndsAt = start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano)
+		vs = append(vs, v)
 	}
 	if err == nil {
 		err = rows.Err()
@@ -284,20 +289,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.error(w, r, err)
 		return
-	}
-	vs := []ListedVoucher{}
-	for _, code := range codes {
-		v, e := readVoucher(r.Context(), tx, code, false)
-		if e != nil {
-			h.error(w, r, e)
-			return
-		}
-		u, e := usage(r.Context(), tx, code)
-		if e != nil {
-			h.error(w, r, e)
-			return
-		}
-		vs = append(vs, ListedVoucher{v, u})
 	}
 	rows, err = tx.QueryContext(r.Context(), "SELECT actor_name,object_id,before_json,after_json,created_at FROM admin_audit_log WHERE object_type='pricing' ORDER BY id DESC LIMIT 100")
 	if err != nil {
@@ -380,10 +371,23 @@ func (h *Handler) saveVoucher(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var v Voucher
-	if !decode(w, r, &v) {
+	// These fields have valid zero values, so require their explicit presence.
+	var input struct {
+		Voucher
+		Active          *bool   `json:"active"`
+		EventID         *string `json:"eventId"`
+		MinimumSubtotal *uint64 `json:"minimumSubtotal"`
+		Revision        *uint64 `json:"revision"`
+	}
+	if !decode(w, r, &input) {
 		return
 	}
+	if input.Active == nil || input.EventID == nil || input.MinimumSubtotal == nil || input.Revision == nil {
+		h.error(w, r, ErrInvalid)
+		return
+	}
+	v := input.Voucher
+	v.Active, v.EventID, v.MinimumSubtotal, v.Revision = *input.Active, *input.EventID, *input.MinimumSubtotal, *input.Revision
 	v.Code = strings.ToUpper(strings.TrimSpace(v.Code))
 	if err := v.Validate(); err != nil {
 		h.error(w, r, err)

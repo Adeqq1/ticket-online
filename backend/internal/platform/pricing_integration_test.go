@@ -76,7 +76,7 @@ func TestPricingSnapshotsVoucherQuotaExpiryAndRefund(t *testing.T) {
 			remove("DELETE FROM reservations WHERE id=?", rid)
 		}
 		remove("DELETE FROM event_changes WHERE id=?", code)
-		remove("DELETE FROM vouchers WHERE code=?", code)
+		remove("DELETE FROM vouchers WHERE code IN (?,?)", code, code+"_NEW")
 		remove("DELETE FROM ticket_tiers WHERE event_id='nusa-malam' AND slug=?", tier)
 		for _, id := range []string{admin.ID, staff.ID} {
 			remove("DELETE FROM admin_audit_log WHERE actor_id=?", id)
@@ -134,10 +134,72 @@ func TestPricingSnapshotsVoucherQuotaExpiryAndRefund(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := pricing.Voucher{Code: code, Kind: "PERCENT", Value: 25, StartsAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), EndsAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339), Active: true, EventID: "nusa-malam", MinimumSubtotal: 10000, Quota: 1}
+	v := pricing.Voucher{Code: code, Kind: "PERCENT", Value: 25, StartsAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), EndsAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339), Quota: 1}
 	response = call("POST", "/api/v1/admin/vouchers", as.AccessToken, "", v, 201)
 	if err = json.Unmarshal(response.Body.Bytes(), &v); err != nil {
 		t.Fatal(err)
+	}
+	response = call("PUT", "/api/v1/admin/vouchers/"+code, as.AccessToken, "", v, 200)
+	if err = json.Unmarshal(response.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	// Explicit false/empty/zero values are valid on create; scope the promotion before testing rejected replacements.
+	v.Active, v.EventID, v.MinimumSubtotal = true, "nusa-malam", 10000
+	response = call("PUT", "/api/v1/admin/vouchers/"+code, as.AccessToken, "", v, 200)
+	if err = json.Unmarshal(response.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	beforeInvalid := call("GET", "/api/v1/admin/pricing", as.AccessToken, "", nil, 200).Body.String()
+	for _, method := range []string{"POST", "PUT"} {
+		path := "/api/v1/admin/vouchers"
+		if method == "PUT" {
+			path += "/" + code
+		}
+		for _, field := range []string{"code", "kind", "value", "startsAt", "endsAt", "active", "eventId", "minimumSubtotal", "quota", "revision"} {
+			for _, null := range []bool{false, true} {
+				var input map[string]any
+				if err = json.Unmarshal(response.Body.Bytes(), &input); err != nil {
+					t.Fatal(err)
+				}
+				if method == "POST" {
+					input["code"], input["revision"] = code+"_NEW", 0
+				}
+				if null {
+					input[field] = nil
+				} else {
+					delete(input, field)
+				}
+				call(method, path, as.AccessToken, "", input, 422)
+			}
+		}
+		var unknown map[string]any
+		if err = json.Unmarshal(response.Body.Bytes(), &unknown); err != nil {
+			t.Fatal(err)
+		}
+		unknown["unexpected"] = true
+		call(method, path, as.AccessToken, "", unknown, 400)
+	}
+	if after := call("GET", "/api/v1/admin/pricing", as.AccessToken, "", nil, 200).Body.String(); after != beforeInvalid {
+		t.Fatal("incomplete/null/unknown voucher input changed rules, revision, or audit")
+	}
+	var unused struct{ Vouchers []pricing.ListedVoucher }
+	if err = json.Unmarshal([]byte(beforeInvalid), &unused); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i, listed := range unused.Vouchers {
+		if i > 0 && unused.Vouchers[i-1].Code >= listed.Code {
+			t.Fatal("voucher list not sorted by code")
+		}
+		if listed.Code == code {
+			found = true
+			if listed.Voucher != v || listed.Usage != (pricing.Usage{}) {
+				t.Fatalf("unused voucher missing fields or nonzero usage: %+v", listed)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("voucher without orders missing from list")
 	}
 	copy := v
 	copy.Revision = 0
@@ -343,6 +405,21 @@ func TestPricingSnapshotsVoucherQuotaExpiryAndRefund(t *testing.T) {
 	}
 	if _, _, err = repo.Create(ctx, r3, k3, request); err != nil {
 		t.Fatal(err)
+	}
+	if err = json.Unmarshal(call("GET", "/api/v1/admin/pricing", as.AccessToken, "", nil, 200).Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, listed := range data.Vouchers {
+		if listed.Code == code {
+			found = true
+			if listed.Usage != (pricing.Usage{Held: 1, Consumed: 1, Released: 1}) {
+				t.Fatalf("mixed pending/refunded/expired usage: %+v", listed.Usage)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("voucher with mixed order statuses missing from list")
 	}
 	tooSmall := v
 	tooSmall.Quota = 1

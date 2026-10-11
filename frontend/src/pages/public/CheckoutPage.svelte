@@ -213,7 +213,10 @@
         reference = created.reference;
         expiresAt = Date.parse(created.expiresAt);
         updateExpiryTimer();
-        if (quote && created.total !== quote.total) { paymentError = "Nominal berubah sejak pratinjau. Periksa total pesanan lalu lanjutkan pembayaran."; return; }
+        if (!quote || created.total !== quote.total) {
+          paymentError = quote ? "Nominal berubah sejak pratinjau. Periksa total pesanan lalu lanjutkan pembayaran." : "Pesanan dipulihkan. Periksa rincian dan total akhir lalu lanjutkan pembayaran.";
+          return;
+        }
       }
       if (!orderAccess || !activeOrder) throw new Error("Akses order tidak tersedia di memori browser");
       if (activeOrder.status !== "PENDING") return;

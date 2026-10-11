@@ -152,6 +152,86 @@ async def check(browser, base, width):
     print(f"PASS {width}px: fee preview/confirmation/failure, voucher CRUD/usage, server quote/quota error, changed-total review, STAFF denied")
 
 
+async def check_recovery(browser, base, width, scenario):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 600, has_touch=width < 600)
+    page = await context.new_page()
+    errors, checkouts, payments, quotes = [], [], [], []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    saved_order = None
+    lost_response = scenario != "same-quote"
+
+    async def api(route):
+        nonlocal saved_order
+        path = urlparse(route.request.url).path
+        if path.endswith("/quote"):
+            assert saved_order is None, "recovery must not requote a converted reservation"
+            code = route.request.post_data_json["voucherCode"]
+            quotes.append(code)
+            await route.fulfill(json={"subtotal": 275000, "adminFee": 7500, "discount": 10000 if code else 0, "total": 272500 if code else 282500, "voucher": {"code": code, "kind": "FIXED", "value": 10000} if code else None})
+        elif path.endswith("/checkout"):
+            key, payload = route.request.headers["idempotency-key"], route.request.post_data_json
+            checkouts.append((key, payload))
+            if saved_order is None:
+                fee = 10000 if lost_response else 7500
+                saved_order = {**public.order("PENDING", "PENDING"), "adminFee": fee, "discount": 10000, "total": 265000 + fee, "voucher": {"code": "DUMMY10", "kind": "FIXED", "value": 10000}, "buyer": payload["buyer"], "attendees": [{"tierId": "festival", "ticketNumber": 1, "name": payload["attendees"][0]["names"][0]}], "payment": None, "accessToken": public.TOKEN}
+            assert (key, payload) == checkouts[0], "replay changed the key or frozen payload"
+            if lost_response and (len(checkouts) == 1 or scenario == "manual-replay" and len(checkouts) == 2):
+                await route.abort("connectionreset")
+            else:
+                await route.fulfill(status=200 if len(checkouts) > 1 else 201, json=saved_order)
+        elif path.endswith("/payments") or path.endswith("/simulate-payment"):
+            assert path.split("/")[-2] == public.ORDER_ID
+            assert route.request.headers["authorization"] == "Bearer " + public.TOKEN
+            payments.append(path)
+            if path.endswith("/simulate-payment"):
+                await route.fulfill(json={"status": "FAILED", "orderStatus": "PENDING", "amount": saved_order["total"], "tickets": []})
+            else:
+                await route.fulfill(json={"redirectUrl": base + "/pesanan/" + public.ORDER_ID})
+        elif path == "/api/v1/orders/" + public.ORDER_ID:
+            await route.fulfill(json=saved_order)
+        elif path == "/api/v1/reservations/" + public.RESERVATION_ID:
+            await route.fulfill(json={**public.reservation(), "status": "CONVERTED" if saved_order else "ACTIVE"})
+        else:
+            status, body = public.reply(urlparse(route.request.url), "standard")
+            await route.fulfill(status=status, json=body)
+
+    await page.route("**/api/v1/**", api)
+    await page.goto(base + "/checkout/nusa-malam?festival=1")
+    await expect(page.locator(".grand-total")).to_contain_text("282.500")
+    if width < 600:
+        await page.locator(".summary-breakdown summary").click()
+    await page.get_by_label("Kode promo", exact=True).fill("DUMMY10")
+    await page.get_by_role("button", name="Gunakan", exact=True).click()
+    await expect(page.locator(".grand-total")).to_contain_text("272.500")
+    for selector, value in [("#buyer-name", "Dummy Buyer"), ("#buyer-email", "buyer@example.test"), ("#buyer-phone", "08123456789"), ("#buyer-identity", "1234567890123456"), ("#attendee-festival-0", "Dummy Guest")]:
+        await page.locator(selector).fill(value)
+    await page.get_by_role("button", name="Lanjut ke pembayaran").click()
+    await page.locator('input[name="payment"][value="QRIS"]').check()
+    await page.get_by_role("button", name="Tinjau pesanan").click()
+    await page.get_by_role("button", name="Buat pesanan dan bayar", exact=True).click()
+    if lost_response:
+        await expect(page.get_by_role("button", name="Coba ulang checkout", exact=True)).to_be_enabled()
+        assert len(checkouts) == 1 and not payments
+        await page.reload()
+        if scenario == "manual-replay":
+            retry = page.get_by_role("button", name="Coba ulang checkout", exact=True)
+            await expect(retry).to_be_enabled()
+            assert len(checkouts) == 2 and not payments
+            await retry.click()
+            await expect(page.locator(".form-error").filter(has_text="Pesanan dipulihkan. Periksa rincian dan total akhir")).to_be_visible()
+        await expect(page.get_by_role("button", name="Lanjutkan pembayaran", exact=True)).to_be_enabled()
+        await expect(page.locator(".grand-total")).to_contain_text("275.000")
+        assert len(checkouts) == (3 if scenario == "manual-replay" else 2) and not payments
+        assert quotes == ["", "DUMMY10"], "recovery fetched a new quote"
+        assert await page.evaluate("Object.keys(sessionStorage).every(key => !key.endsWith(':checkout-attempt'))")
+        await page.get_by_role("button", name="Lanjutkan pembayaran", exact=True).click()
+    await page.wait_for_function("location.pathname.startsWith('/pesanan/') || document.querySelector('.form-error')?.textContent.includes('Pembayaran simulasi gagal')")
+    assert len(payments) == 1 and not errors, (payments, errors)
+    assert checkouts[0][1]["voucherCode"] == "DUMMY10"
+    await context.close()
+    print(f"PASS {width}px {scenario}: original order/payload/key retained, payment starts once after review")
+
+
 async def main():
     base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5175"
     async with async_playwright() as p:
@@ -159,6 +239,8 @@ async def main():
         try:
             for width in (1440, 390):
                 await check(browser, base, width)
+                for scenario in ("same-quote", "auto-replay", "manual-replay"):
+                    await check_recovery(browser, base, width, scenario)
         finally:
             await browser.close()
 

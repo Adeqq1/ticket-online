@@ -80,6 +80,12 @@ Tes [pricing_integration_test.go](../backend/internal/platform/pricing_integrati
 
 Pengujian mobile menemukan rincian biaya menutup sendiri setelah quote voucher diperbarui. State buka/tutup diperbaiki dan tes ulang kedua ukuran lulus. Race detector awal menemukan slice attendee yang dibagi oleh dua request fixture; fixture kini membuat payload terpisah seperti dua HTTP request sebenarnya dan tes ulang lulus.
 
+### Perbaikan review PR #31
+
+- Replay manual tanpa quote memulihkan order/access terlebih dahulu, menampilkan total tersimpan, lalu berhenti sebelum pembayaran. Pembeli menekan **Lanjutkan pembayaran** secara terpisah. Browser desktop/mobile mencakup respons checkout pertama hilang, replay otomatis gagal, replay manual berhasil; payload, idempotency key dan order tetap sama. Replay otomatis berhasil dan jalur quote sama/berubah juga diperiksa.
+- POST/PUT voucher menolak setiap field wajib yang hilang atau null dengan 422 sebelum perubahan disimpan; unknown field tetap 400. Tes memeriksa aturan, revision dan audit tidak berubah. Nilai eksplisit `false`, `""`, dan `0` tetap sah pada create/update sesuai kontrak.
+- Daftar voucher memakai satu agregasi dengan LEFT JOIN: total tiga query data (settings, voucher/penggunaan, history). Voucher tanpa order tetap muncul; urutan kode, timestamp UTC dan penggunaan campuran pending/refunded/expired tetap terjaga. Penguncian dan helper kuota untuk checkout/update tetap digunakan.
+
 Jalankan ulang dari `backend/`, dengan `MYSQL_TEST_DSN` menunjuk database **sementara terpisah**:
 
 ```sh
