@@ -48,9 +48,12 @@ paths:
         6000 piksel per sisi dan total 20 megapiksel. HEIC, SVG, GIF, file kosong/rusak ditolak.
         Nama objek SHA-256 isi dengan ekstensi terverifikasi. URL absolut stabil menunjuk endpoint
         media backend, tanpa token kedaluwarsa; aset dapat diakses publik sebelum konser diterbitkan.
-        Respons 201 hanya setelah S3 mengonfirmasi penyimpanan. Upload tidak menyimpan konser;
+        Respons 201 setelah conditional PutObject (If-None-Match: *) berhasil atau S3 mengonfirmasi
+        key hash sudah ada (412). Upload identik memakai URL sama tanpa membuat versi baru;
+        409 konflik dan 403 izin tetap menghasilkan error storage yang dapat dicoba ulang. Upload tidak menyimpan konser;
         gunakan url pada field image melalui API konser. Backend tidak mengunduh URL eksternal.
-        Batas dua upload bersamaan per proses, timeout operasi 30 detik, maksimal dua percobaan SDK.
+        Batas dua upload bersamaan per proses, timeout operasi 30 detik sejak awal handler, termasuk
+        deadline baca socket multipart/body. Maksimal dua percobaan SDK.
       requestBody:
         required: true
         content:
@@ -97,12 +100,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '503':
-          description: POSTERS_UNAVAILABLE (bucket belum dikonfigurasi), AUTH_UNAVAILABLE, atau POSTER_STORAGE_FAILED. Opsi URL tetap tersedia.
+          description: POSTERS_UNAVAILABLE (bucket belum dikonfigurasi), AUTH_UNAVAILABLE, POSTER_READ_DEADLINE_FAILED (server tidak dapat memasang deadline baca),
+            atau POSTER_STORAGE_FAILED (termasuk konflik 409/izin S3). Opsi URL tetap tersedia.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '504':
-          description: POSTER_TIMEOUT (batas waktu operasi tercapai). Ulangi upload dengan file yang sama.
+          description: POSTER_TIMEOUT (batas operasi atau deadline baca body tercapai). Ulangi upload dengan file yang sama.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -111,7 +115,11 @@ paths:
       operationId: getPoster
       tags: [Katalog]
       summary: Baca poster publik melalui backend dari bucket privat
-      description: URL berbasis isi, stabil tanpa autentikasi/token kedaluwarsa. Objek lama tidak dihapus otomatis.
+      description: >-
+        URL berbasis isi, stabil tanpa autentikasi/token kedaluwarsa. Objek lama tidak dihapus otomatis.
+        GET dengan satu If-None-Match persis sama dengan ETag hash, tanpa If-Match/range,
+        mengonfirmasi objek melalui GetObject lalu mengembalikan 304 tanpa membaca seluruh body S3.
+        Conditional header lainnya tetap diproses ServeContent.
       parameters:
         - name: filename
           in: path

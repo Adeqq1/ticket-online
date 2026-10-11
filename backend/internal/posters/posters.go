@@ -12,6 +12,7 @@ import (
 	_ "image/png"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -24,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 const MaxFile = 5 << 20
@@ -100,6 +102,7 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, status int, code,
 		h.logger.WarnContext(r.Context(), "poster upload failed", "code", code, "status", status)
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Del("ETag")
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
@@ -127,6 +130,8 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, staffauth.ErrUnauthorized) {
 			h.fail(w, r, 401, "UNAUTHORIZED", "Sesi tidak valid atau sudah berakhir")
+		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			h.storageError(w, r, ctx)
 		} else {
 			h.fail(w, r, 503, "AUTH_UNAVAILABLE", "Autentikasi belum tersedia. Coba lagi.")
 		}
@@ -150,6 +155,11 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength > MaxRequest {
 		h.fail(w, r, 413, "POSTER_TOO_LARGE", "File maksimal 5 MiB dan request maksimal 6 MiB")
+		return
+	}
+	deadline, _ := ctx.Deadline()
+	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil {
+		h.fail(w, r, 503, "POSTER_READ_DEADLINE_FAILED", "Upload poster belum tersedia. Coba lagi.")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, MaxRequest)
@@ -185,13 +195,22 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		h.multipartError(w, r, err)
 		return
 	}
+	if ctx.Err() != nil {
+		h.storageError(w, r, ctx)
+		return
+	}
 	filename, contentType, err := validate(data)
+	if ctx.Err() != nil {
+		h.storageError(w, r, ctx)
+		return
+	}
 	if err != nil {
 		h.fail(w, r, 422, "INVALID_POSTER", err.Error())
 		return
 	}
-	_, err = h.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(h.cfg.Bucket), Key: aws.String(h.key(filename)), Body: bytes.NewReader(data), ContentType: aws.String(contentType), CacheControl: aws.String("public, max-age=31536000, immutable")})
-	if err != nil {
+	_, err = h.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(h.cfg.Bucket), Key: aws.String(h.key(filename)), Body: bytes.NewReader(data), ContentType: aws.String(contentType), CacheControl: aws.String("public, max-age=31536000, immutable"), IfNoneMatch: aws.String("*")})
+	var responseError *smithyhttp.ResponseError
+	if err != nil && !(errors.As(err, &responseError) && responseError.HTTPStatusCode() == http.StatusPreconditionFailed) {
 		h.storageError(w, r, ctx)
 		return
 	}
@@ -221,6 +240,11 @@ func validate(data []byte) (string, string, error) {
 }
 
 func (h *Handler) multipartError(w http.ResponseWriter, r *http.Request, err error) {
+	var timeout net.Error
+	if errors.Is(r.Context().Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+		h.fail(w, r, 504, "POSTER_TIMEOUT", "Upload poster melewati batas waktu. Coba lagi.")
+		return
+	}
 	var oversized *http.MaxBytesError
 	if errors.As(err, &oversized) {
 		h.fail(w, r, 413, "POSTER_TOO_LARGE", "Request maksimal 6 MiB")
@@ -261,6 +285,14 @@ func (h *Handler) Media(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer object.Body.Close()
+	etag := `"` + filename + `"`
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("ETag", etag)
+	// ponytail: only one exact ETag; ServeContent handles all other preconditions.
+	if r.Method == http.MethodGet && len(r.Header.Values("If-None-Match")) == 1 && r.Header.Get("If-None-Match") == etag && len(r.Header.Values("If-Match")) == 0 && len(r.Header.Values("Range")) == 0 {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	data, err := io.ReadAll(io.LimitReader(object.Body, MaxFile+1))
 	if err != nil || len(data) > MaxFile || len(data) == 0 {
 		h.storageError(w, r, ctx)
@@ -271,7 +303,5 @@ func (h *Handler) Media(w http.ResponseWriter, r *http.Request) {
 		contentType = "image/jpeg"
 	}
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	w.Header().Set("ETag", `"`+filename+`"`)
 	http.ServeContent(w, r, filename, time.Time{}, bytes.NewReader(data))
 }

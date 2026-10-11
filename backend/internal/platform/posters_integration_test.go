@@ -96,15 +96,29 @@ func TestPosterUploadSaveFailureAndPublicCatalog(t *testing.T) {
 	}
 	cfg := Config{AppEnv: "development", ReservationTTL: 10 * time.Minute, OrderAccessSecret: make([]byte, 32), MidtransEnvironment: "sandbox", TransactionsEnabled: true}
 	handler := NewHandlerWithPosters(db, logger, cfg, nil, posterHandler)
+	apiServer := httptest.NewServer(handler)
+	defer apiServer.Close()
 	call := func(method, path string, data []byte, contentType string, admin bool, want int) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest(method, path, bytes.NewReader(data))
+		r, err := http.NewRequestWithContext(ctx, method, apiServer.URL+path, bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if admin {
 			r.Header.Set("Authorization", "Bearer "+session.AccessToken)
 		}
 		r.Header.Set("Content-Type", contentType)
 		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
+		response, err := apiServer.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		w.HeaderMap = response.Header.Clone()
+		w.WriteHeader(response.StatusCode)
+		if _, err := io.Copy(w, response.Body); err != nil {
+			t.Fatal(err)
+		}
 		if w.Code != want {
 			t.Fatalf("%s %s: %d want %d: %s", method, path, w.Code, want, w.Body.String())
 		}

@@ -32,6 +32,11 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+type uploadRecorder struct{ *httptest.ResponseRecorder }
+
+func newUploadRecorder() *uploadRecorder                { return &uploadRecorder{httptest.NewRecorder()} }
+func (*uploadRecorder) SetReadDeadline(time.Time) error { return nil }
+
 func picture(t *testing.T, format string) []byte {
 	t.Helper()
 	var b bytes.Buffer
@@ -121,7 +126,7 @@ func TestUploadValidationAndContentAddress(t *testing.T) {
 				stored, _ = io.ReadAll(r.Body)
 				w.WriteHeader(200)
 			})
-			response := httptest.NewRecorder()
+			response := newUploadRecorder()
 			h.Upload(response, uploadRequest(t, tc.data, tc.filename, tc.count))
 			if response.Code != tc.want {
 				t.Fatalf("status=%d want=%d: %s", response.Code, tc.want, response.Body.String())
@@ -181,7 +186,7 @@ func TestAuthenticationBeforeReadingAndUnavailableStorage(t *testing.T) {
 			if tc.token {
 				r.Header.Set("Authorization", "Bearer "+strings.Repeat("a", 43))
 			}
-			response := httptest.NewRecorder()
+			response := newUploadRecorder()
 			h.Upload(response, r)
 			if response.Code != tc.want || body.read || response.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("status %d; read=%v", response.Code, body.read)
@@ -209,7 +214,7 @@ func TestWholeRequestLimitAndWrongField(t *testing.T) {
 			case "non multipart":
 				r.Header.Set("Content-Type", "application/json")
 			}
-			response := httptest.NewRecorder()
+			response := newUploadRecorder()
 			h.Upload(response, r)
 			want := 400
 			if kind == "length" || kind == "chunked epilogue" {
@@ -238,7 +243,7 @@ func TestStorageFailureTimeoutAndConcurrency(t *testing.T) {
 	done := make(chan int, 2)
 	for range 2 {
 		r := uploadRequest(t, picture(t, "png"), "a.png", 1)
-		go func() { w := httptest.NewRecorder(); h.Upload(w, r); done <- w.Code }()
+		go func() { w := newUploadRecorder(); h.Upload(w, r); done <- w.Code }()
 	}
 	for range 2 {
 		select {
@@ -247,7 +252,7 @@ func TestStorageFailureTimeoutAndConcurrency(t *testing.T) {
 			t.Fatal("upload did not start")
 		}
 	}
-	busy := httptest.NewRecorder()
+	busy := newUploadRecorder()
 	h.Upload(busy, uploadRequest(t, picture(t, "png"), "a.png", 1))
 	if busy.Code != 429 || busy.Header().Get("Retry-After") == "" {
 		t.Fatal(busy.Code)
@@ -263,7 +268,7 @@ func TestStorageFailureTimeoutAndConcurrency(t *testing.T) {
 	r := uploadRequest(t, picture(t, "png"), "a.png", 1)
 	ctx, cancel := context.WithTimeout(r.Context(), 40*time.Millisecond)
 	defer cancel()
-	w := httptest.NewRecorder()
+	w := newUploadRecorder()
 	timeout.Upload(w, r.WithContext(ctx))
 	if w.Code != 504 || strings.Contains(w.Body.String(), `"url"`) {
 		t.Fatalf("timeout: %d %s", w.Code, w.Body.String())
@@ -349,7 +354,7 @@ func TestRealSessions(t *testing.T) {
 		t.Helper()
 		r := uploadRequest(t, picture(t, "png"), "a.png", 1)
 		r.Header.Set("Authorization", "Bearer "+session.AccessToken)
-		w := httptest.NewRecorder()
+		w := newUploadRecorder()
 		h.Upload(w, r)
 		if w.Code != want {
 			t.Fatalf("%d want %d: %s", w.Code, want, w.Body.String())
@@ -389,7 +394,7 @@ func TestStagingS3(t *testing.T) {
 		return staffauth.Principal{Staff: staffauth.Staff{Role: "ADMIN"}}, nil
 	}
 	data := picture(t, "png")
-	w := httptest.NewRecorder()
+	w := newUploadRecorder()
 	h.Upload(w, uploadRequest(t, data, "staging-check.png", 1))
 	if w.Code != 201 {
 		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
@@ -402,7 +407,7 @@ func TestStagingS3(t *testing.T) {
 	mux := http.NewServeMux()
 	restarted.Register(mux)
 	r := httptest.NewRequest("GET", "/api/v1/media/posters/"+fmtHash(sha256.Sum256(data))+".png", nil)
-	w = httptest.NewRecorder()
+	w = newUploadRecorder()
 	mux.ServeHTTP(w, r)
 	if w.Code != 200 || !bytes.Equal(w.Body.Bytes(), data) {
 		t.Fatalf("read after restart: %d", w.Code)
