@@ -155,6 +155,17 @@ export function getReservationEvent(reservationId: string, idempotencyKey: strin
   return request<ApiEvent>(`/api/v1/reservations/${encodeURIComponent(reservationId)}/event`, signal, { headers: { "Idempotency-Key": idempotencyKey } }).then(mapApiEvent);
 }
 
+export async function uploadAdminPoster(accessToken: string, file: File, signal?: AbortSignal): Promise<{ url: string }> {
+  const body = new FormData(); body.append("file", file);
+  const result = await request<{ url?: unknown }>("/api/v1/admin/posters", signal, { method: "POST", headers: privateHeaders(accessToken), body }, 201);
+  try {
+    if (!result || typeof result.url !== "string" || result.url.length > 500) throw new Error();
+    const url = new URL(result.url);
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new Error();
+    return { url: result.url };
+  } catch { throw new ApiError("Respons upload tidak valid. Coba unggah kembali.", 0, "INVALID_RESPONSE"); }
+}
+
 export function getAdminEvents(accessToken: string, signal?: AbortSignal) {
   return request<{ events: AdminApiEvent[] }>("/api/v1/admin/events", signal, { headers: privateHeaders(accessToken) }).then((value) => value.events);
 }

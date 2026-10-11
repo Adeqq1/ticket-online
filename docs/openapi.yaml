@@ -35,6 +35,118 @@ tags:
   - name: Admin Pesanan
     description: Detail dan refund penuh order oleh ADMIN. Refund otomatis memakai QRIS/GoPay terverifikasi; keputusan acara menyediakan antrean manual untuk transaksi yang tidak mendukung otomatis.
 paths:
+  /api/v1/admin/posters:
+    post:
+      operationId: uploadAdminPoster
+      tags: [Admin Konser]
+      summary: Unggah satu poster ke bucket privat (ADMIN)
+      security: [{StaffSessionToken: []}]
+      description: >-
+        Autentikasi ADMIN diperiksa sebelum body dibaca. Kirim tepat satu part file bernama file,
+        tanpa field lain. JPEG/PNG diverifikasi dengan decoder; MIME dan nama file pengguna diabaikan.
+        Maksimal 5 MiB (5242880 byte) per file, 6 MiB (6291456 byte) seluruh request,
+        6000 piksel per sisi dan total 20 megapiksel. HEIC, SVG, GIF, file kosong/rusak ditolak.
+        Nama objek SHA-256 isi dengan ekstensi terverifikasi. URL absolut stabil menunjuk endpoint
+        media backend, tanpa token kedaluwarsa; aset dapat diakses publik sebelum konser diterbitkan.
+        Respons 201 hanya setelah S3 mengonfirmasi penyimpanan. Upload tidak menyimpan konser;
+        gunakan url pada field image melalui API konser. Backend tidak mengunduh URL eksternal.
+        Batas dua upload bersamaan per proses, timeout operasi 30 detik, maksimal dua percobaan SDK.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file: {type: string, format: binary, description: JPEG atau PNG maksimal 5 MiB.}
+      responses:
+        '201':
+          description: Poster tersimpan; URL siap digunakan pada field image.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string, format: uri, maxLength: 500}
+              example: {url: 'https://tickets.example.com/api/v1/media/posters/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.jpg'}
+        '400':
+          description: INVALID_MULTIPART (bukan multipart, field salah/tambahan, atau lebih dari satu file).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401': {$ref: '#/components/responses/StaffUnauthorized'}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '413':
+          description: POSTER_TOO_LARGE (file lebih dari 5 MiB atau seluruh request lebih dari 6 MiB).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: INVALID_POSTER (format/isi/dimensi gambar tidak valid).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '429':
+          description: UPLOAD_BUSY (dua upload sedang berjalan pada proses ini).
+          headers:
+            Retry-After: {schema: {type: integer}, description: Tunggu 3 detik sebelum mencoba kembali.}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: POSTERS_UNAVAILABLE (bucket belum dikonfigurasi), AUTH_UNAVAILABLE, atau POSTER_STORAGE_FAILED. Opsi URL tetap tersedia.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '504':
+          description: POSTER_TIMEOUT (batas waktu operasi tercapai). Ulangi upload dengan file yang sama.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/media/posters/{filename}:
+    get:
+      operationId: getPoster
+      tags: [Katalog]
+      summary: Baca poster publik melalui backend dari bucket privat
+      description: URL berbasis isi, stabil tanpa autentikasi/token kedaluwarsa. Objek lama tidak dihapus otomatis.
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[0-9a-f]{64}\.(jpg|png)$'}
+      responses:
+        '200':
+          description: Isi JPEG/PNG. Mendukung conditional GET dan byte ranges melalui ServeContent.
+          headers:
+            Cache-Control: {schema: {type: string}, example: 'public, max-age=31536000, immutable'}
+            X-Content-Type-Options: {schema: {type: string}, example: nosniff}
+            ETag: {schema: {type: string}, description: Nama file berbasis hash dalam tanda kutip.}
+          content:
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/png:
+              schema: {type: string, format: binary}
+        '206': {description: Rentang byte yang diminta.}
+        '304': {description: ETag sesuai; gunakan poster dalam cache.}
+        '404':
+          description: POSTER_NOT_FOUND (nama tidak valid atau objek tidak ada).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '416': {description: Rentang byte tidak valid.}
+        '503':
+          description: POSTERS_UNAVAILABLE atau POSTER_STORAGE_FAILED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '504':
+          description: POSTER_TIMEOUT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/events:
     get:
       operationId: listEvents

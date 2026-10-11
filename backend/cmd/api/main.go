@@ -17,6 +17,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/platform"
+	"github.com/Adeqq1/ticket-online/backend/internal/posters"
 	"github.com/Adeqq1/ticket-online/backend/internal/refund"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
 	"github.com/Adeqq1/ticket-online/backend/internal/staffauth"
@@ -62,7 +63,14 @@ func main() {
 	defer stop()
 	slog.SetDefault(logger)
 	metrics := operations.NewService(db, staffauth.New(db), operations.Process)
-	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithRefundConfig(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL, cfg.MidtransEnvironment, cfg.TransactionsEnabled, metrics, cfg.MidtransRefundMethods, cfg.TrustedProxyCIDRs...))
+	posterCtx, cancelPosters := context.WithTimeout(serverCtx, 10*time.Second)
+	posterHandler, err := posters.New(posterCtx, cfg.Posters, staffauth.New(db), logger)
+	cancelPosters()
+	if err != nil {
+		logger.Error("poster storage initialization failed", "error", err)
+		os.Exit(1)
+	}
+	server := platform.NewHTTPServer(cfg.HTTPAddr, platform.NewHandlerWithPosters(db, logger, cfg, metrics, posterHandler))
 	worker := reservation.NewWorker(reservation.NewRepository(db, cfg.ReservationTTL), cfg.ExpiryInterval, logger)
 	operations.Process.Register("reservation", time.Now())
 	operations.Process.Register("payment_expiry", time.Now())

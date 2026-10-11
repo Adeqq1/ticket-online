@@ -140,6 +140,7 @@ func TestAdminEventRoutesRequireAdministratorSession(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/admin/events"},
 		{http.MethodPost, "/api/v1/admin/events"},
+		{http.MethodPost, "/api/v1/admin/posters"},
 		{http.MethodPut, "/api/v1/admin/events/nusa-malam"},
 	} {
 		response := httptest.NewRecorder()

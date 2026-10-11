@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
+	"github.com/Adeqq1/ticket-online/backend/internal/posters"
 )
 
 type Config struct {
+	Posters               posters.Config
 	AppEnv                string
 	HTTPAddr              string
 	MySQLDSN              string
@@ -53,6 +55,13 @@ func LoadConfig() (Config, error) {
 		SMTPTLSMode:           envOr("SMTP_TLS_MODE", "starttls"),
 		ReservationTTL:        10 * time.Minute,
 		ExpiryInterval:        15 * time.Second,
+	}
+	cfg.Posters = posters.Config{Bucket: strings.TrimSpace(os.Getenv("POSTER_S3_BUCKET")), Region: strings.TrimSpace(os.Getenv("POSTER_S3_REGION")), Endpoint: strings.TrimSpace(os.Getenv("POSTER_S3_ENDPOINT")), Prefix: envOr("POSTER_S3_PREFIX", "posters"), PublicOrigin: cfg.FrontendURL}
+	if err := cfg.Posters.Validate(); err != nil {
+		return Config{}, err
+	}
+	if cfg.Posters.Bucket != "" && cfg.AppEnv == "production" && !strings.HasPrefix(cfg.FrontendURL, "https://") {
+		return Config{}, fmt.Errorf("poster FRONTEND_URL must use HTTPS in production")
 	}
 	var err error
 	if cfg.AppEnv != "development" && cfg.AppEnv != "production" {
