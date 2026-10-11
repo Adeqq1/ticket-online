@@ -145,6 +145,8 @@ def reply(path, scenario, page_state="standard", refund_requested=False):
     if endpoint.endswith("/checkout") and "/reservations/" in endpoint:
         result = order("PENDING", "PENDING")
         return 201, {**result, "accessToken": TOKEN}
+    if endpoint.endswith("/quote") and "/reservations/" in endpoint:
+        return 200, {"subtotal": 275000, "adminFee": 5000, "discount": 0, "total": 280000, "voucher": None}
     if endpoint.startswith("/api/v1/reservations/"):
         return 200, reservation()
     if endpoint.endswith("/refund-request"):
@@ -798,4 +800,5 @@ async def main():
     print(f"Captured {len(captures)} {MODE} public UI screenshots in {OUTPUT}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -25,6 +25,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
 	"github.com/Adeqq1/ticket-online/backend/internal/posters"
+	"github.com/Adeqq1/ticket-online/backend/internal/pricing"
 	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
 	"github.com/Adeqq1/ticket-online/backend/internal/refund"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
@@ -71,6 +72,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	paymentHandler := payment.NewHandlerWithMidtrans(paymentRepository, logger, access, midtransKey, frontendURL, environment)
 	conversionService.Register(mux, logger)
 	staffauth.NewHandler(staffService, logger).Register(mux)
+	pricing.NewHandler(db, staffService, logger).Register(mux)
 	catalog.NewAdminHandler(catalog.NewRepository(db), staffService, logger).Register(mux)
 	adminorders.NewHandler(adminorders.NewService(db, staffService), logger).Register(mux)
 	adminreports.NewHandler(adminreports.NewService(db, staffService), logger).Register(mux)
@@ -105,6 +107,7 @@ func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, s
 	mux.HandleFunc("DELETE /api/v1/reservations/{reservationID}", reservationHandler.Cancel)
 	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/convert", reservationHandler.Convert)
 	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/checkout", checkoutHandler.Create)
+	mux.HandleFunc("POST /api/v1/reservations/{reservationID}/quote", checkoutHandler.Quote)
 	mux.HandleFunc("GET /api/v1/orders/{orderID}", checkoutHandler.Get)
 	mux.HandleFunc("GET /api/v1/orders/{orderID}/tickets", paymentHandler.TicketsForOrder)
 	mux.HandleFunc("GET /api/v1/tickets/{ticketID}", paymentHandler.GetTicket)

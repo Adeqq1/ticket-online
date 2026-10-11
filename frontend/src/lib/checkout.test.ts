@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { getConcertById, parseQuantities } from "./concerts.ts";
-import { ADMIN_FEE, checkoutLines, isValidEmail, isValidIdentity, isValidPhone, orderSubtotal, voucherDiscount } from "./checkout.ts";
+import { checkoutLines, isValidEmail, isValidIdentity, isValidPhone, orderSubtotal } from "./checkout.ts";
 
 test("accepts only valid ticket quantities from checkout URL", () => {
   const concert = getConcertById("nusa-malam")!;
@@ -14,12 +14,10 @@ test("restores only bounded ticket quantities", () => {
   expect(parseQuantities(concert, new URLSearchParams("festival=2&vip-a=99&unknown=4"))).toEqual({ festival: 2 });
 });
 
-test("calculates promo totals and validates buyer input", () => {
+test("calculates ticket subtotal and validates buyer input", () => {
   const concert = getConcertById("nusa-malam")!;
   const subtotal = orderSubtotal(checkoutLines(concert, new URLSearchParams("festival=2")));
   expect(subtotal).toBe(450_000);
-  expect(voucherDiscount(subtotal, "hemat10")).toBe(45_000);
-  expect(subtotal + ADMIN_FEE - voucherDiscount(subtotal, "HEMAT10")).toBe(412_500);
   expect(isValidEmail("halo@example.com")).toBe(true);
   expect(isValidEmail("halo.example.com")).toBe(false);
   expect(isValidPhone("0812 3456 7890")).toBe(true);

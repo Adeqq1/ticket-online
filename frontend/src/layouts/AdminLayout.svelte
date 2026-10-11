@@ -2,7 +2,7 @@
   import { tick, type Snippet } from "svelte";
 
   type Action = { label: string; onclick?: () => void; form?: string; disabled?: boolean };
-  type Page = "events" | "staff" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "history";
+  type Page = "pricing" | "events" | "staff" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "history";
   let { page, contentId, skipLabel, kicker, title, description, onLogout, loggingOut, logoutDisabled, primaryAction, secondaryAction, children }: {
     page: Page; contentId: string; skipLabel: string; kicker: string; title: string; description: string;
     onLogout: () => void; loggingOut: boolean; logoutDisabled?: boolean; primaryAction: Action; secondaryAction?: Action; children: Snippet;
@@ -11,7 +11,7 @@
   let dialog: HTMLDialogElement;
   let menuButton: HTMLButtonElement;
   const groups = [
-    { label: "Pengelolaan", links: [{ page: "events", label: "Konser", href: "/admin/events" }, { page: "staff", label: "Kelola petugas", href: "/admin/staff" }] },
+    { label: "Pengelolaan", links: [{ page: "pricing", label: "Biaya dan voucher", href: "/admin/pricing" }, { page: "events", label: "Konser", href: "/admin/events" }, { page: "staff", label: "Kelola petugas", href: "/admin/staff" }] },
     { label: "Operasional", links: [{ page: "orders", label: "Pesanan", href: "/admin/orders" }, { page: "issues", label: "Masalah", href: "/admin/issues" }, { page: "operations", label: "Operasional", href: "/admin/operations" }, { page: "history", label: "Riwayat check-in", href: "/admin/check-ins" }] },
     { label: "Laporan", links: [{ page: "reports", label: "Penjualan dan refund", href: "/admin/reports" }, { page: "attendance", label: "Kehadiran", href: "/admin/reports/attendance" }, { page: "conversion", label: "Konversi", href: "/admin/reports/conversion" }] },
   ] as const;

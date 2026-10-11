@@ -1,4 +1,4 @@
-"""Run against Vite: python3 scripts/staff-review-check.py [base URL].
+"""Run against Vite: python3 scripts/staff-review-check.py [base URL] [width].
 
 Requires the installed Python Playwright package and Google Chrome.
 """
@@ -10,9 +10,10 @@ from playwright.async_api import async_playwright, expect
 
 async def main():
     base_url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5173"
+    width = int(sys.argv[2]) if len(sys.argv) > 2 else 1440
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
-        context = await browser.new_context()
+        context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 600, has_touch=width < 600)
         await context.add_init_script("sessionStorage.setItem('ticket-online:staff-session', JSON.stringify({accessToken:'s'.repeat(43),expiresAt:new Date(Date.now()+3600000).toISOString()}))")
         page = await context.new_page()
         admin = dict(id="c" * 32, name="Admin", email="admin@example.com", role="ADMIN", active=True, assignments=[])
@@ -24,7 +25,7 @@ async def main():
             path = route.request.url.split("/api/v1/")[1]
             if path == "staff/me":
                 await route.fulfill(json=dict(staff=admin))
-            elif path == "events":
+            elif path == "admin/events":
                 await route.fulfill(json=dict(events=[]))
             elif path == "admin/staff":
                 await route.fulfill(json=dict(staff=people))
@@ -55,6 +56,10 @@ async def main():
         await expect(bob).to_be_enabled()
         await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Alice draft")
         await expect(editor.get_by_label("Akun aktif", exact=True)).not_to_be_checked()
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        await bob.click()
+        await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Alice draft")
+        page.once("dialog", lambda dialog: dialog.accept())
         await bob.click()
         await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Bob")
         await editor.get_by_role("button", name="Simpan penugasan", exact=True).click()
@@ -71,6 +76,9 @@ async def main():
         async def scanner_api(route):
             if route.request.url.endswith("/me"):
                 await route.fulfill(json=dict(staff=people[0]))
+                return
+            if route.request.url.endswith("/events"):
+                await route.fulfill(json=dict(events=[]))
                 return
             assert route.request.url.endswith("/check-ins")
             payload = route.request.post_data_json
@@ -101,14 +109,19 @@ async def main():
         assert len(posts) == 1
         release.set()
         await page.get_by_text("Gate Masuk Terbuka", exact=True).wait_for()
+        await expect(page.locator("#scan-result-title")).to_be_focused()
+        await expect(code_input).to_be_disabled()
+        next_scan = page.get_by_role("button", name="Scan berikutnya", exact=True)
+        await next_scan.focus()
+        await page.keyboard.press("Enter")
         await expect(code_input).to_be_focused()
         await expect(code_input).to_have_value("")
         await page.keyboard.type(second)
         await page.keyboard.press("Enter")
         await expect(page.locator(".ticket-detail-card")).to_contain_text(second)
-        await expect(code_input).to_be_focused()
+        await expect(page.locator("#scan-result-title")).to_be_focused()
         assert [post["code"] for post in posts] == [first, second]
-        print("PASS: two keyboard scans without mouse and concurrent submit blocked")
+        print("PASS: two keyboard scans with explicit next scan, result focus, and concurrent submit blocked")
 
         for mode in ["network", "truncated", "500"]:
             await page.goto(base_url + "/admin/scan")
@@ -121,6 +134,7 @@ async def main():
             await expect(page.locator(".result-footer")).to_contain_text("Akses ditahan")
             await expect(code_input).to_have_value(first)
             await expect(code_input).not_to_be_focused()
+            await expect(page.get_by_role("button", name="Scan berikutnya", exact=True)).to_be_disabled()
             await page.wait_for_load_state("networkidle")
             assert len(posts) == count + 1
             print(f"PASS: {mode} keeps unknown result, recovery instructions, ticket code, and no retry")

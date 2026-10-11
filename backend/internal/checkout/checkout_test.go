@@ -25,7 +25,7 @@ func TestValidateRejectsInvalidBuyerAndVoucher(t *testing.T) {
 		{"email", Request{Buyer: Buyer{Name: "Buyer", Email: "invalid", Phone: "081234567890", Identity: "123456789012"}}, ErrInvalidRequest},
 		{"phone", Request{Buyer: Buyer{Name: "Buyer", Email: "buyer@example.com", Phone: "abc", Identity: "123456789012"}}, ErrInvalidRequest},
 		{"identity", Request{Buyer: Buyer{Name: "Buyer", Email: "buyer@example.com", Phone: "081234567890", Identity: "12345"}}, ErrInvalidRequest},
-		{"voucher", Request{Buyer: valid.Buyer, VoucherCode: "UNKNOWN"}, ErrInvalidVoucher},
+		{"voucher", Request{Buyer: valid.Buyer, VoucherCode: "BAD CODE"}, ErrInvalidVoucher},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

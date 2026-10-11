@@ -13,7 +13,7 @@ Browser -> frontend:5173 -> /api proxy -> api:8080 -> db:3306
 - `backend/migrations/`: migration dan seed yang di-embed ke binary Go.
 - `compose.yaml`: MySQL, API production, dan Vite development server.
 
-Catalog event, reservation, order, pembayaran, dan e-ticket menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer`, nama untuk setiap tiket pada `attendees`, dan `voucherCode` opsional. Biaya admin Rp7.500 dan voucher `HEMAT10` dihitung server; request ulang dengan data checkout sama mengembalikan order yang sama. Pembayaran simulasi hanya tersedia di backend development. Pembayaran berhasil menerbitkan snapshot e-ticket untuk setiap tiket dalam transaksi yang sama.
+Catalog event, reservation, order, pembayaran, dan e-ticket menggunakan database. Checkout dibuat dari reservasi aktif lewat `POST /api/v1/reservations/{reservationID}/checkout` dengan `buyer`, nama untuk setiap tiket pada `attendees`, dan `voucherCode` opsional. Biaya admin dan voucher dikelola ADMIN di `/admin/pricing`, disimpan dalam database, dan dihitung server (seed awal Rp7.500 dan `HEMAT10` 10%); request ulang dengan data checkout sama mengembalikan order yang sama. Pratinjau biaya tersedia melalui `POST /api/v1/reservations/{reservationID}/quote`; checkout menyimpan snapshot nominal dan voucher serta menahan kuota secara transaksional. Panduan pengaturan, aturan kuota dan bukti pengujian: [Phase 41–42](docs/phase41-42-pricing.md). Pembayaran simulasi hanya tersedia di backend development. Pembayaran berhasil menerbitkan snapshot e-ticket untuk setiap tiket dalam transaksi yang sama.
 
 Frontend checkout, pembayaran simulasi, dan e-ticket membaca order serta snapshot tiket dari API. Setiap peserta menerima satu kode `ET-…` dengan data gate dan snapshot acara dari server. Tiket Saya memuat order yang aksesnya tersimpan pada browser yang sama; tautan pada email konfirmasi juga dapat membuka e-ticket di perangkat lain. Snapshot demo lama tetap tersimpan, tetapi tidak dianggap tiket backend.
 
@@ -279,3 +279,5 @@ The staging target is RPO 24 hours with a restore exercise under 60 minutes. Sch
 ## Poster konser (Phase 36–39)
 
 Admin dapat mengunggah JPEG/PNG dari perangkat atau menggunakan URL gambar. Upload menyimpan bucket S3 privat, lalu mengembalikan URL backend stabil untuk field konser `image`; upload belum menyimpan konser. Konfigurasi kosong menghasilkan 503 untuk upload dan tetap mendukung URL. Lihat [konfigurasi, provisioning staging/production, pengujian, dan pemulihan poster](docs/phase36-39-posters.md) serta [OpenAPI](docs/openapi.yaml).
+
+[Verifikasi Phase 40 dengan data dummy](docs/phase40-verification.md) mencatat alur dua admin dan dua petugas dari penyiapan konser sampai check-in, pengujian kegagalan/restart, serta hasil browser desktop dan emulasi ponsel.

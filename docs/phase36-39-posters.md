@@ -99,6 +99,8 @@ Tes memeriksa versioning, upload SDK, dan baca melalui handler baru yang mensimu
 
 ## Pemeriksaan staging/perangkat yang masih diperlukan
 
+Putaran lanjutan dengan data dummy, dua ADMIN/dua STAFF, koneksi upload terputus, restart backend dan browser desktop/mobile tercatat pada [Phase 40](phase40-verification.md). Putaran lokal tersebut melengkapi bukti otomatis; pengujian AWS dan perangkat fisik berikut tetap diperlukan.
+
 - Provisioning AWS aktual, pengisian konfigurasi per lingkungan, policy IAM, budget/alarm kapasitas, serta eksekusi tes S3 di atas membutuhkan akun/profile AWS dan domain staging yang dipilih operator. Lingkungan pengerjaan belum menyediakan AWS CLI/kredensial/konfigurasi poster.
 - Setelah deploy, gunakan sesi ADMIN nyata untuk upload, simpan konser, lalu verifikasi poster pada empat permukaan dari perangkat berbeda. Pastikan GET tanpa sesi ke backend berhasil, sedangkan akses anonim langsung ke key bucket ditolak. Ulangi sesudah redeploy, saat sesi berakhir, dan ketika izin S3 sementara dicabut pada staging.
 - Desktop Chrome otomatis mencakup set_input_files dan rendering, bukan dialog OS fisik. Ulangi picker di desktop, Android Chrome, iOS Safari: ambil file kamera/galeri JPEG/PNG, cancel picker, ganti file saat upload, rotasi, keyboard, dan pindah konser. Pilihan accept adalah petunjuk; perangkat bisa tetap menawarkan format lain.

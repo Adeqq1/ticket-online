@@ -11,6 +11,7 @@ export type Route =
   | { name: "admin-login" }
   | { name: "admin-staff" }
   | { name: "admin-events" }
+  | { name: "admin-pricing" }
   | { name: "admin-orders" }
   | { name: "admin-issues" }
   | { name: "admin-operations" }
@@ -30,6 +31,7 @@ export function matchRoute(pathname: string): Route {
   if (path === "/panduan") return { name: "guide" };
   if (path === "/admin/login") return { name: "admin-login" };
   if (path === "/admin/staff") return { name: "admin-staff" };
+  if (path === "/admin/pricing") return { name: "admin-pricing" };
   if (path === "/admin/events") return { name: "admin-events" };
   if (path === "/admin/orders") return { name: "admin-orders" };
   if (path === "/admin/issues") return { name: "admin-issues" };

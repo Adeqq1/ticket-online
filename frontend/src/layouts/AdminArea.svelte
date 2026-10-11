@@ -4,6 +4,7 @@
   import AdminScanPage from "../pages/admin/AdminScanPage.svelte";
   import AdminStaffPage from "../pages/admin/AdminStaffPage.svelte";
   import AdminCheckInsPage from "../pages/admin/AdminCheckInsPage.svelte";
+  import AdminPricingPage from "../pages/admin/AdminPricingPage.svelte";
   import AdminEventsPage from "../pages/admin/AdminEventsPage.svelte";
   import AdminOrdersPage from "../pages/admin/AdminOrdersPage.svelte";
   import AdminIssuesPage from "../pages/admin/AdminIssuesPage.svelte";
@@ -14,7 +15,7 @@
   import { ApiError, getStaffProfile, type Staff } from "../lib/api.ts";
   import { clearStaffSession, logoutStaffSession, readStaffSession, roleMatchesPage, staffHome } from "../lib/staff-session.ts";
 
-  let { page }: { page: "login" | "staff" | "history" | "events" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "scan" } = $props();
+  let { page }: { page: "pricing" | "login" | "staff" | "history" | "events" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "scan" } = $props();
   let staff = $state<Staff | null>(null);
   let checking = $state(true);
   let error = $state("");
@@ -33,8 +34,8 @@
 
   function profileUpdated(current: Staff) {
     staff = current;
-    if ((page === "issues" || page === "operations" || page === "reports" || page === "attendance" || page === "conversion") && current.role !== "ADMIN") location.replace(staffHome(current.role));
-    if (page !== "login" && page !== "issues" && page !== "operations" && page !== "reports" && page !== "attendance" && page !== "conversion" && !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current)) location.replace(staffHome(current.role));
+    if ((page === "pricing" || page === "issues" || page === "operations" || page === "reports" || page === "attendance" || page === "conversion") && current.role !== "ADMIN") location.replace(staffHome(current.role));
+    if (page !== "pricing" && page !== "login" && page !== "issues" && page !== "operations" && page !== "reports" && page !== "attendance" && page !== "conversion" && !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current)) location.replace(staffHome(current.role));
   }
 
   async function logout() {
@@ -73,7 +74,7 @@
       if (!alive || generation !== sessionGeneration) return;
       if (current.role !== "ADMIN" && current.role !== "STAFF") { clearStaffSession(); location.replace("/admin/login"); return; }
       staff = current;
-      if (page === "login" || ((page === "issues" || page === "operations" || page === "reports" || page === "attendance" || page === "conversion") ? current.role !== "ADMIN" : !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current))) { location.replace(staffHome(current.role)); return; }
+      if (page === "login" || ((page === "pricing" || page === "issues" || page === "operations" || page === "reports" || page === "attendance" || page === "conversion") ? current.role !== "ADMIN" : !roleMatchesPage(page === "events" || page === "orders" ? "staff" : page, current))) { location.replace(staffHome(current.role)); return; }
       expiryTimer = setTimeout(login, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     } catch (cause) {
       if (!alive || generation !== sessionGeneration) return;
@@ -116,6 +117,7 @@
   <div inert={checking || Boolean(error)} aria-hidden={checking || Boolean(error)}>
     {#if page === "staff"}<AdminStaffPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
     {:else if page === "history"}<AdminCheckInsPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
+    {:else if page === "pricing"}<AdminPricingPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
     {:else if page === "events"}<AdminEventsPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
     {:else if page === "orders"}<AdminOrdersPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />
     {:else if page === "issues"}<AdminIssuesPage accessToken={readStaffSession()?.accessToken ?? ""} onUnauthorized={login} onLogout={logout} loggingOut={logoutPending} />

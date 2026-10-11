@@ -17,13 +17,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/Adeqq1/ticket-online/backend/internal/eventstate"
+	"github.com/Adeqq1/ticket-online/backend/internal/pricing"
 )
-
-const adminFee uint64 = 7500
 
 var (
 	ErrInvalidRequest          = errors.New("invalid checkout request")
-	ErrInvalidVoucher          = errors.New("invalid voucher")
+	ErrInvalidVoucher          = pricing.ErrVoucher
 	ErrReservationNotFound     = errors.New("reservation not found")
 	ErrReservationExpired      = errors.New("reservation expired")
 	ErrReservationCancelled    = errors.New("reservation cancelled")
@@ -61,18 +60,19 @@ type Item struct {
 }
 
 type Order struct {
-	ID              string  `json:"id"`
-	Reference       string  `json:"reference"`
-	ReservationID   string  `json:"reservationId"`
-	Status          string  `json:"status"`
-	ExpiresAt       string  `json:"expiresAt"`
-	Subtotal        uint64  `json:"subtotal"`
-	AdminFee        uint64  `json:"adminFee"`
-	Discount        uint64  `json:"discount"`
-	Total           uint64  `json:"total"`
-	Items           []Item  `json:"items"`
-	AccessToken     string  `json:"accessToken,omitempty"`
-	AccessExpiresAt *string `json:"accessExpiresAt"`
+	ID              string            `json:"id"`
+	Reference       string            `json:"reference"`
+	ReservationID   string            `json:"reservationId"`
+	Status          string            `json:"status"`
+	ExpiresAt       string            `json:"expiresAt"`
+	Subtotal        uint64            `json:"subtotal"`
+	AdminFee        uint64            `json:"adminFee"`
+	Discount        uint64            `json:"discount"`
+	Total           uint64            `json:"total"`
+	Items           []Item            `json:"items"`
+	AccessToken     string            `json:"accessToken,omitempty"`
+	AccessExpiresAt *string           `json:"accessExpiresAt"`
+	Voucher         *pricing.Snapshot `json:"voucher"`
 }
 
 type Attendee struct {
@@ -141,7 +141,7 @@ func Validate(request Request) (Request, error) {
 		return Request{}, ErrInvalidRequest
 	}
 	request.VoucherCode = strings.ToUpper(strings.TrimSpace(request.VoucherCode))
-	if request.VoucherCode != "" && request.VoucherCode != "HEMAT10" {
+	if request.VoucherCode != "" && !pricing.ValidCode(request.VoucherCode) {
 		return Request{}, ErrInvalidVoucher
 	}
 	return request, nil
@@ -168,6 +168,42 @@ func requestHash(reservationID string, request Request) (string, error) {
 	}
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+func (r *Repository) Quote(ctx context.Context, reservationID, key, code string) (pricing.Quote, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code != "" && !pricing.ValidCode(code) {
+		return pricing.Quote{}, ErrInvalidVoucher
+	}
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return pricing.Quote{}, err
+	}
+	defer tx.Rollback()
+	var eventID, status, storedKey string
+	var expires time.Time
+	err = tx.QueryRowContext(ctx, "SELECT event_id,status,idempotency_key,expires_at FROM reservations WHERE id=?", reservationID).Scan(&eventID, &status, &storedKey, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return pricing.Quote{}, ErrReservationNotFound
+	}
+	if err != nil {
+		return pricing.Quote{}, err
+	}
+	if subtle.ConstantTimeCompare([]byte(key), []byte(storedKey)) != 1 {
+		return pricing.Quote{}, ErrReservationAccessDenied
+	}
+	if status != "ACTIVE" || !time.Now().Before(expires) {
+		return pricing.Quote{}, ErrReservationExpired
+	}
+	var subtotal uint64
+	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(quantity*unit_price),0) FROM reservation_items WHERE reservation_id=?", reservationID).Scan(&subtotal); err != nil {
+		return pricing.Quote{}, err
+	}
+	q, err := pricing.Calculate(ctx, tx, eventID, subtotal, code, false)
+	if err != nil {
+		return q, err
+	}
+	return q, tx.Commit()
 }
 
 func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey string, request Request) (Order, bool, error) {
@@ -247,7 +283,7 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 	if err != nil {
 		return Order{}, false, fmt.Errorf("read reservation items: %w", err)
 	}
-	order := Order{ReservationID: reservationID, Status: "PENDING", AdminFee: adminFee, ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano)}
+	order := Order{ReservationID: reservationID, Status: "PENDING", ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano)}
 	attendeeNames := make(map[string][]string, len(request.Attendees))
 	for _, attendee := range request.Attendees {
 		if attendee.TierID == "" || len(attendee.Names) == 0 || attendeeNames[attendee.TierID] != nil {
@@ -294,10 +330,11 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 	if len(seenAttendees) != len(attendeeNames) {
 		return Order{}, false, ErrInvalidRequest
 	}
-	if request.VoucherCode == "HEMAT10" {
-		order.Discount = order.Subtotal / 10
+	quote, err := pricing.Calculate(ctx, tx, state.ID, order.Subtotal, request.VoucherCode, true)
+	if err != nil {
+		return Order{}, false, err
 	}
-	order.Total = order.Subtotal + order.AdminFee - order.Discount
+	order.AdminFee, order.Discount, order.Total, order.Voucher = quote.AdminFee, quote.Discount, quote.Total, quote.Voucher
 	order.ID, err = randomID()
 	if err != nil {
 		return Order{}, false, err
@@ -311,6 +348,11 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 		(id, reference, reservation_id, status, subtotal, admin_fee, discount, created_at, updated_at, request_hash, expires_at)
 		VALUES (?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?)`, order.ID, order.Reference, reservationID, order.Subtotal, order.AdminFee, order.Discount, now, now, hash, expiresAt); err != nil {
 		return Order{}, false, fmt.Errorf("insert order: %w", err)
+	}
+	if order.Voucher != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO order_vouchers(order_id,code,kind,value) VALUES (?,?,?,?)", order.ID, order.Voucher.Code, order.Voucher.Kind, order.Voucher.Value); err != nil {
+			return Order{}, false, err
+		}
 	}
 	for _, item := range order.Items {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO order_items
@@ -336,6 +378,11 @@ func (r *Repository) Create(ctx context.Context, reservationID, idempotencyKey s
 }
 
 func loadItems(ctx context.Context, tx *sql.Tx, order *Order) error {
+	var err error
+	order.Voucher, err = pricing.LoadSnapshot(ctx, tx, order.ID)
+	if err != nil {
+		return err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT oi.ticket_tier_id, tt.slug, oi.tier_name, oi.quantity, oi.unit_price, oi.line_total
 		FROM order_items oi JOIN ticket_tiers tt ON tt.id = oi.ticket_tier_id WHERE oi.order_id = ? ORDER BY oi.ticket_tier_id`, order.ID)
 	if err != nil {

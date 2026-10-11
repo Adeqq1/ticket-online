@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { getAdminPricing, saveAdminFee, saveAdminVoucher, quoteCheckout, type Voucher } from "./api.ts";
 import { uploadAdminPoster, ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createSnapPayment, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, requestEventRefund, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
 
 const apiEvent: ApiEvent = {
@@ -8,6 +9,45 @@ const apiEvent: ApiEvent = {
   zones: [{ id: "festival", name: "Festival", description: "Area umum" }],
   ticketTiers: [{ id: "festival", name: "Festival", zoneId: "festival", price: 225000, availableQuantity: 42, maxPerOrder: 6, benefit: "Area berdiri", gate: "Gate B", seating: "free-standing" }],
 };
+
+test("pricing APIs send admin authorization, revision, and voucher constraints", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; init?: RequestInit }> = [];
+  const voucher: Voucher = { code: "DUMMY25", kind: "PERCENT", value: 25, startsAt: "2026-01-01T00:00:00Z", endsAt: "2027-01-01T00:00:00Z", active: true, eventId: "nusa-malam", minimumSubtotal: 10000, quota: 2, revision: 0 };
+  globalThis.fetch = (async (path: RequestInfo | URL, init?: RequestInit) => { calls.push({ path: String(path), init }); return Response.json({}); }) as typeof fetch;
+  try {
+    await getAdminPricing("admin-token");
+    await saveAdminFee("admin-token", { adminFee: 0, revision: 4 });
+    await saveAdminVoucher("admin-token", voucher, true);
+    await saveAdminVoucher("admin-token", { ...voucher, revision: 1, active: false }, false);
+    expect(calls.map(c => [c.path, c.init?.method ?? "GET"])).toEqual([["/api/v1/admin/pricing", "GET"], ["/api/v1/admin/pricing", "PUT"], ["/api/v1/admin/vouchers", "POST"], ["/api/v1/admin/vouchers/DUMMY25", "PUT"]]);
+    for (const c of calls) expect(new Headers(c.init?.headers).get("Authorization")).toBe("Bearer admin-token");
+    expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({ adminFee: 0, revision: 4 });
+    expect(JSON.parse(calls[2]!.init!.body as string)).toEqual(voucher);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("quote uses reservation access and accepts only consistent server amounts", async () => {
+  const originalFetch = globalThis.fetch;
+  const valid = { subtotal: 10001, adminFee: 2000, discount: 2500, total: 9501, voucher: { code: "DUMMY25", kind: "PERCENT" as const, value: 25 } };
+  globalThis.fetch = (async (path: RequestInfo | URL, init?: RequestInit) => {
+    expect(String(path)).toBe("/api/v1/reservations/reservation-id/quote");
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("reservation-secret");
+    expect(JSON.parse(init?.body as string)).toEqual({ voucherCode: "DUMMY25" });
+    return Response.json(valid);
+  }) as typeof fetch;
+  try {
+    expect(await quoteCheckout("reservation-id", "reservation-secret", "DUMMY25")).toEqual(valid);
+    for (const invalid of [{ ...valid, total: 1 }, { ...valid, discount: 10002 }, { ...valid, adminFee: -1 }, { ...valid, total: NaN }, { ...valid, voucher: null }, { ...valid, voucher: { ...valid.voucher, kind: "UNKNOWN" } }, { ...valid, voucher: { ...valid.voucher, value: 101 } }, { ...valid, adminFee: 0, discount: 10001, total: 0 }, null]) {
+      globalThis.fetch = (async () => Response.json(invalid)) as unknown as typeof fetch;
+      await expect(quoteCheckout("id", "key", "DUMMY25")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    }
+    globalThis.fetch = (async () => Response.json(valid)) as unknown as typeof fetch;
+    await expect(quoteCheckout("id", "key")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    globalThis.fetch = (async () => Response.json({ error: { code: "INVALID_VOUCHER", message: "Kuota habis" } }, { status: 422 })) as unknown as typeof fetch;
+    await expect(quoteCheckout("id", "key", "DUMMY25")).rejects.toMatchObject({ code: "INVALID_VOUCHER", status: 422 });
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("refund request reports an interrupted response without retrying", async () => {
   const originalFetch = globalThis.fetch;
