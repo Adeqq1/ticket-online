@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, type Snippet } from "svelte";
 
-  type Action = { label: string; onclick?: () => void; form?: string; disabled?: boolean };
+  type Action = { label: string; onclick?: () => void; form?: string; disabled?: boolean; id?: string; controls?: string; expanded?: boolean };
   type Page = "pricing" | "events" | "staff" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "history";
   let { page, contentId, skipLabel, kicker, title, description, onLogout, loggingOut, logoutDisabled, primaryAction, secondaryAction, children }: {
     page: Page; contentId: string; skipLabel: string; kicker: string; title: string; description: string;
@@ -66,7 +66,7 @@
     </aside>
 
     <main id={contentId} class="staff-admin-content" tabindex="-1">
-      <div class="staff-admin-heading admin-page-heading"><div><p class="scan-kicker">{kicker}</p><h1>{title}</h1><p>{description}</p></div><div class="admin-heading-actions"><button class="scan-submit staff-submit" type={primaryAction.form ? "submit" : "button"} form={primaryAction.form} onclick={primaryAction.onclick} disabled={primaryAction.disabled}>{primaryAction.label}</button>{#if secondaryAction}<button class="staff-secondary-button" type="button" onclick={secondaryAction.onclick} disabled={secondaryAction.disabled}>{secondaryAction.label}</button>{/if}</div></div>
+      <div class="staff-admin-heading admin-page-heading"><div><p class="scan-kicker">{kicker}</p><h1>{title}</h1><p>{description}</p></div><div class="admin-heading-actions"><button class="scan-submit staff-submit" id={primaryAction.id} aria-controls={primaryAction.controls} aria-expanded={primaryAction.expanded} type={primaryAction.form ? "submit" : "button"} form={primaryAction.form} onclick={primaryAction.onclick} disabled={primaryAction.disabled}>{primaryAction.label}</button>{#if secondaryAction}<button class="staff-secondary-button" type="button" onclick={secondaryAction.onclick} disabled={secondaryAction.disabled}>{secondaryAction.label}</button>{/if}</div></div>
       {@render children()}
     </main>
   </div>
@@ -80,11 +80,12 @@
   .admin-menu-trigger { display: none; }
   .admin-logout, .admin-mobile-menu-heading button { min-width: 44px; min-height: 44px; }
   .admin-layout-grid { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: clamp(28px, 4vw, 64px); width: min(100% - 56px, 1500px); margin: 0 auto; }
-  .admin-sidebar { position: sticky; top: 20px; align-self: start; display: grid; gap: 24px; padding: 32px 0; }
+  .admin-sidebar { position: sticky; top: 20px; align-self: start; display: grid; gap: 24px; padding: 32px 16px; border-right: 1px solid var(--admin-border); background: var(--admin-sidebar); }
   .admin-nav-group { display: grid; align-content: start; gap: 4px; }
   .admin-nav-group h2 { margin: 0 0 6px; color: var(--scan-muted); font: 14px "Courier New", monospace; letter-spacing: .06em; text-transform: uppercase; }
   .admin-nav-group a { display: flex; align-items: center; min-height: 44px; padding: 8px 12px; color: var(--scan-muted); font-size: 16px; line-height: 1.3; text-decoration: none; border-left: 2px solid transparent; }
-  .admin-nav-group a:hover, .admin-nav-group a[aria-current="page"] { color: var(--scan-text); border-left-color: var(--scan-lime); background: color-mix(in srgb, var(--scan-lime) 7%, transparent); }
+  .admin-nav-group a:hover { color: var(--scan-text); border-left-color: var(--scan-muted); background: var(--scan-panel); }
+  .admin-nav-group a[aria-current="page"] { color: var(--scan-lime); border-left-color: var(--scan-lime); background: var(--scan-panel); }
   .admin-layout .staff-admin-content { width: auto; min-width: 0; margin: 0; padding: 42px 0 40px; }
   .admin-page-heading { align-items: center; }
   .admin-page-heading > div:first-child { min-width: 0; }
@@ -92,7 +93,7 @@
   .admin-page-heading > div > p:last-child { font-size: 16px; }
   .admin-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
   .admin-heading-actions > * { min-height: 44px; }
-  .admin-mobile-menu { width: min(100% - 28px, 440px); max-height: min(90dvh, 760px); margin: 12px 14px auto auto; padding: 20px; border: 1px solid var(--scan-line); background: var(--scan-panel); color: var(--scan-text); }
+  .admin-mobile-menu { width: min(100% - 28px, 440px); max-height: min(90dvh, 760px); margin: 12px 14px auto auto; padding: 20px; border: 1px solid var(--scan-line); background: var(--admin-sidebar); color: var(--scan-text); }
   .admin-mobile-menu::backdrop { background: rgb(0 0 0 / .65); }
   .admin-mobile-menu-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; font-size: 18px; }
   .admin-mobile-menu .admin-nav-group { margin-top: 20px; }

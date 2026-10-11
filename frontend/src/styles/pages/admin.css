@@ -1,0 +1,39 @@
+.admin-layout {
+  --admin-sidebar: #080e0b;
+  --admin-canvas: #141e1b;
+  --admin-card: #23302c;
+  --admin-input: #0e1714;
+  --admin-border: #596e63;
+  --admin-control-border: #84988f;
+  --admin-text: #edf3ef;
+  --admin-secondary: #c0cfc6;
+  --admin-accent: #b9f36d;
+  --admin-active-bg: #2b4939;
+  --admin-active-text: #b8dfc6;
+  --admin-neutral-bg: #38453f;
+  --scan-bg: var(--admin-canvas);
+  --scan-panel: var(--admin-card);
+  --scan-line: var(--admin-border);
+  --scan-muted: var(--admin-secondary);
+  --scan-text: var(--admin-text);
+  --scan-lime: var(--admin-accent);
+  color-scheme: dark;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.admin-layout .staff-admin-content :is(input:not([type="checkbox"]), select, textarea) { background: var(--admin-input); border-color: var(--admin-control-border); color: var(--admin-text); font-size: 16px; line-height: 1.5; }
+.admin-layout :is(input, textarea)::placeholder { color: var(--admin-secondary); opacity: 1; }
+.admin-layout :is(label, legend) { font-size: 16px; line-height: 1.5; }
+.admin-layout :is(small, .staff-login-label, .panel-index, .history-table th, .history-table code, .sales-metric h2, .sales-chart-labels, .sales-legend, .sales-period) { font-size: 14px; line-height: 1.5; }
+.admin-layout .staff-text-button { color: var(--admin-secondary); }
+.admin-layout .staff-secondary-button { border-color: var(--admin-control-border); background: var(--admin-input); color: var(--admin-text); }
+.admin-layout .scan-submit { transition: none; white-space: normal; }
+.admin-layout .skip-link { background: var(--admin-accent); color: var(--admin-canvas); }
+.admin-layout :is(.staff-secondary-button, .staff-text-button):hover:not(:disabled) { border-color: var(--admin-secondary); background: var(--admin-neutral-bg); color: var(--admin-text); }
+.admin-layout :is(button, input, select, textarea):disabled { opacity: 1; color: var(--admin-secondary); border-color: var(--admin-control-border); background: var(--admin-card); cursor: not-allowed; }
+.admin-layout button:disabled { border: 1px solid var(--admin-control-border); }
+.admin-layout :is(a, button, input, select, textarea, [tabindex]):focus-visible { outline: 3px solid var(--admin-accent); outline-offset: 3px; }
+.admin-layout .staff-form-success { border-color: var(--admin-active-text); color: var(--admin-active-text); }
+.admin-layout .scan-footer { font-size: 14px; line-height: 1.5; }
+.admin-layout .sales-metric { background: var(--admin-card); }
+.admin-layout .issue-history pre { background: var(--admin-input); }
