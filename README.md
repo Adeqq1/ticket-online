@@ -275,3 +275,7 @@ The staging target is RPO 24 hours with a restore exercise under 60 minutes. Sch
 - Gunakan password, DSN, dan secret berbeda untuk production melalui secret manager atau environment deployment.
 - Jangan commit `.env`, password production, generated binary, atau database volume.
 - QR e-ticket berisi kode `ET-…` saja. Midtrans mendukung sandbox dan konfigurasi production; transaksi production dinonaktifkan secara default. Simulasi hanya pada development. Pengiriman email SMTP dan pemulihan tiket lintas perangkat tersedia; refund tersedia melalui provider terverifikasi atau penanganan manual perubahan acara; login pembeli belum tersedia.
+
+## Poster konser (Phase 36–39)
+
+Admin dapat mengunggah JPEG/PNG dari perangkat atau menggunakan URL gambar. Upload menyimpan bucket S3 privat, lalu mengembalikan URL backend stabil untuk field konser `image`; upload belum menyimpan konser. Konfigurasi kosong menghasilkan 503 untuk upload dan tetap mendukung URL. Lihat [konfigurasi, provisioning staging/production, pengujian, dan pemulihan poster](docs/phase36-39-posters.md) serta [OpenAPI](docs/openapi.yaml).

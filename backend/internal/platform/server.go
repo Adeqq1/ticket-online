@@ -24,6 +24,7 @@ import (
 	"github.com/Adeqq1/ticket-online/backend/internal/operations"
 	"github.com/Adeqq1/ticket-online/backend/internal/orderaccess"
 	"github.com/Adeqq1/ticket-online/backend/internal/payment"
+	"github.com/Adeqq1/ticket-online/backend/internal/posters"
 	"github.com/Adeqq1/ticket-online/backend/internal/recovery"
 	"github.com/Adeqq1/ticket-online/backend/internal/refund"
 	"github.com/Adeqq1/ticket-online/backend/internal/reservation"
@@ -31,30 +32,38 @@ import (
 )
 
 func NewHandlerWithOrderAccess(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "", "sandbox", true, nil, nil)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, "", "", "sandbox", true, nil, nil, nil)
 }
 
 func NewHandlerWithPaymentConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, nil, nil, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, nil, nil, nil, trustedProxies...)
 }
 
 func NewHandlerWithOperations(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL string, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, metrics, nil, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, "sandbox", true, metrics, nil, nil, trustedProxies...)
 }
 
 func NewHandlerWithPaymentRuntime(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, nil, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, nil, nil, trustedProxies...)
 }
 
 func NewHandlerWithRefundConfig(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, refundMethods []string, trustedProxies ...netip.Prefix) http.Handler {
-	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, refundMethods, trustedProxies...)
+	return newHandler(db, logger, reservationTTL, staticDir, development, secret, midtransKey, frontendURL, environment, transactionsEnabled, metrics, refundMethods, nil, trustedProxies...)
 }
 
-func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, refundMethods []string, trustedProxies ...netip.Prefix) http.Handler {
+func NewHandlerWithPosters(db *sql.DB, logger *slog.Logger, cfg Config, metrics *operations.Service, posterHandler *posters.Handler) http.Handler {
+	return newHandler(db, logger, cfg.ReservationTTL, cfg.StaticDir, cfg.AppEnv == "development", cfg.OrderAccessSecret, cfg.MidtransServerKey, cfg.FrontendURL, cfg.MidtransEnvironment, cfg.TransactionsEnabled, metrics, cfg.MidtransRefundMethods, posterHandler, cfg.TrustedProxyCIDRs...)
+}
+
+func newHandler(db *sql.DB, logger *slog.Logger, reservationTTL time.Duration, staticDir string, development bool, secret []byte, midtransKey, frontendURL, environment string, transactionsEnabled bool, metrics *operations.Service, refundMethods []string, posterHandler *posters.Handler, trustedProxies ...netip.Prefix) http.Handler {
 	mux := http.NewServeMux()
 	access := orderaccess.New(db, secret)
 	catalogHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db)), logger)
 	staffService := staffauth.New(db)
+	if posterHandler == nil {
+		posterHandler, _ = posters.New(context.Background(), posters.Config{}, staffService, logger)
+	}
+	posterHandler.Register(mux)
 	conversionService := conversion.New(db, staffService)
 	reservationHandler := reservation.NewHandler(reservation.NewRepository(db, reservationTTL), logger, conversionService)
 	checkoutHandler := checkout.NewHandlerWithAccess(checkout.NewRepository(db), logger, access, conversionService)
@@ -159,8 +168,8 @@ func NewHTTPServer(addr string, handler http.Handler) *http.Server {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		ReadTimeout:       35 * time.Second,
+		WriteTimeout:      45 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 }

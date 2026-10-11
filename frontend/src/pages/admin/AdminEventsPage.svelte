@@ -1,5 +1,6 @@
 <script lang="ts">
   import AdminLayout from "../../layouts/AdminLayout.svelte";
+  import PosterEditor from "../../components/admin/PosterEditor.svelte";
   import EventChangePanel from "../../components/admin/EventChangePanel.svelte";
   import { onDestroy, onMount, tick } from "svelte";
   import { ApiError, createAdminEvent, createAdminTier, createAdminZone, getAdminEvents, updateAdminEvent, updateAdminTier, updateAdminZone, type AdminEventInput, type AdminApiEvent, type AdminTierInput, type PublicationStatus } from "../../lib/api.ts";
@@ -30,19 +31,16 @@
   let eventIdManual = $state(false);
   let zoneIdManual = $state(false);
   let tierIdManual = $state(false);
-  let posterFailed = $state(false);
-  let posterPreview = $state("");
+  let posterGeneration = $state(0);
+  let posterUploading = $state(false);
+  let posterPending = $state(false);
   let changePanelDirty = $state(false);
   const eventState = () => JSON.stringify({ draft, lineupText });
   const zoneState = () => JSON.stringify(zoneDraft);
   const tierState = () => JSON.stringify(tierDraft);
-  const hasUnsaved = $derived(eventState() !== eventBaseline || changePanelDirty || (Boolean(selectedId) && (zoneState() !== zoneBaseline || tierState() !== tierBaseline)));
+  const hasUnsaved = $derived(eventState() !== eventBaseline || posterPending || posterUploading || changePanelDirty || (Boolean(selectedId) && (zoneState() !== zoneBaseline || tierState() !== tierBaseline)));
 
   function emptyEvent(): AdminEventInput { return { id: "", artist: "", city: "", venue: "", address: "", startsAt: "", genre: "Pop", status: "Presale", publicationStatus: "DRAFT", image: "", description: "", lineup: [] }; }
-  function currentPosterURL() {
-    try { const url = new URL(draft.image); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : ""; }
-    catch { return ""; }
-  }
   function protectUnsaved(event: BeforeUnloadEvent) {
     if (hasUnsaved) { event.preventDefault(); event.returnValue = ""; }
   }
@@ -65,7 +63,7 @@
   const visible = $derived(events.filter((event) => (!publicationFilter || event.publicationStatus === publicationFilter) && `${event.artist} ${event.city} ${event.venue}`.toLowerCase().includes(query.trim().toLowerCase())));
 
   function select(event: AdminApiEvent, discardChecked = false) {
-    if (event.id === selectedId || (!discardChecked && !allowDiscard())) return;
+    if ((saving && !discardChecked) || event.id === selectedId || (!discardChecked && !allowDiscard())) return;
     selectedId = event.id;
     draft = { id: event.id, artist: event.artist, city: event.city, venue: event.venue, address: event.address, startsAt: localDateTime(event.startsAt), genre: event.genre, status: event.status, publicationStatus: event.publicationStatus, image: event.image, description: event.description, lineup: event.lineup };
     lineupText = event.lineup.join("\n");
@@ -73,14 +71,14 @@
     tierSelected = ""; tierDraft = { id: "", name: "", zoneId: event.zones[0]?.id ?? "", price: 0, capacity: 0, maxPerOrder: 1, benefit: "", gate: "", seating: "free-standing" };
     eventIdManual = false; zoneIdManual = false; tierIdManual = false;
     eventBaseline = eventState(); zoneBaseline = zoneState(); tierBaseline = tierState();
-    posterFailed = false; posterPreview = currentPosterURL();
+    posterGeneration++; posterPending = false; posterUploading = false;
     changePanelDirty = false;
     error = ""; notice = "";
   }
   async function startNew() {
-    if (!allowDiscard()) return;
+    if (saving || !allowDiscard()) return;
     selectedId = ""; draft = emptyEvent(); lineupText = ""; eventIdManual = false; zoneIdManual = false; tierIdManual = false;
-    eventBaseline = eventState(); zoneBaseline = ""; tierBaseline = ""; posterFailed = false; posterPreview = ""; changePanelDirty = false; error = ""; notice = "";
+    eventBaseline = eventState(); zoneBaseline = ""; tierBaseline = ""; posterGeneration++; posterPending = false; posterUploading = false; changePanelDirty = false; error = ""; notice = "";
     await tick();
     document.getElementById("event-form")?.scrollIntoView({ block: "start" });
     document.querySelector<HTMLInputElement>("#event-form input")?.focus({ preventScroll: true });
@@ -97,7 +95,7 @@
   }
 
   async function save(event: SubmitEvent) {
-    event.preventDefault(); if (saving) return;
+    event.preventDefault(); if (saving || posterUploading || posterPending) return;
     saving = true; error = ""; notice = "";
     try {
       const value = payload();
@@ -107,7 +105,7 @@
       if (selectedId === result.id) {
         draft = { id: result.id, artist: result.artist, city: result.city, venue: result.venue, address: result.address, startsAt: localDateTime(result.startsAt), genre: result.genre, status: result.status, publicationStatus: result.publicationStatus, image: result.image, description: result.description, lineup: result.lineup };
         lineupText = result.lineup.join("\n"); eventBaseline = eventState();
-        posterPreview = currentPosterURL(); posterFailed = false;
+        posterGeneration++; posterPending = false; posterUploading = false;
       } else select(result, true);
       notice = "Perubahan konser tersimpan.";
     } catch (cause) {
@@ -209,13 +207,13 @@
           <label>Alamat<input bind:value={draft.address} maxlength="255" required={draft.publicationStatus === "PUBLISHED"} disabled={saving || Boolean(selectedId && events.find((item) => item.id === selectedId)?.locationLocked)} /></label>
           {#if selectedId && events.find((item) => item.id === selectedId)?.locationLocked}<small id="location-lock-note" class="event-lock-note">Kota, venue, dan alamat terkunci setelah reservasi pertama untuk menjaga informasi pada pesanan pembeli. Perubahan lokasi tidak tersedia di panel perubahan acara.</small>{/if}
           </fieldset>
-          <fieldset class="event-group"><legend>Materi publikasi</legend><label>URL poster<input bind:value={draft.image} oninput={() => { posterPreview = currentPosterURL(); posterFailed = false; }} type="url" maxlength="500" placeholder="https://…" required={draft.publicationStatus === "PUBLISHED"} disabled={saving} /></label>
-          {#if posterPreview}<div class="poster-preview" aria-live="polite"><h3>Pratinjau poster</h3>{#key posterPreview}{#if posterFailed}<p role="status">Poster tidak dapat dimuat. Periksa alamat atau akses gambar.</p>{:else}<img src={posterPreview} alt={`Pratinjau poster ${draft.artist || "konser"}`} onerror={() => posterFailed = true} />{/if}{/key}</div>{/if}
+          <fieldset class="event-group"><legend>Materi publikasi</legend>
+          {#key posterGeneration}<PosterEditor bind:image={draft.image} bind:uploading={posterUploading} bind:pending={posterPending} artist={draft.artist} required={draft.publicationStatus === "PUBLISHED"} disabled={saving} {accessToken} {onUnauthorized} />{/key}
           <label>Deskripsi<textarea bind:value={draft.description} rows="5" maxlength="16000" required={draft.publicationStatus === "PUBLISHED"} disabled={saving}></textarea></label>
           <label>Lineup <small>Satu nama per baris</small><textarea bind:value={lineupText} rows="4" maxlength="16000" required={draft.publicationStatus === "PUBLISHED"} disabled={saving}></textarea></label>
           </fieldset>
           {#if !events.find((item) => item.id === selectedId)?.ticketTiers.length && draft.publicationStatus === "PUBLISHED"}<p class="staff-muted">Tambahkan setidaknya satu zona dan kategori tiket sebelum menerbitkan konser.</p>{/if}
-          <button class="scan-submit staff-submit" type="submit" disabled={saving || loading}>{saving ? "Menyimpan…" : selectedId ? "Simpan perubahan" : "Buat konser"}</button>
+          <button class="scan-submit staff-submit" type="submit" disabled={saving || loading || posterUploading || posterPending}>{saving ? "Menyimpan…" : selectedId ? "Simpan perubahan" : "Buat konser"}</button>
         </form>
         {#if selectedId}
           {@const currentEvent = events.find((item) => item.id === selectedId)}
@@ -262,9 +260,6 @@
   .event-group > :global(label) { margin-top: 16px; }
   .event-group > :global(label:first-of-type) { margin-top: 0; }
   .event-unsaved { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid var(--scan-lime); color: var(--scan-text); font-size: 14px; }
-  .poster-preview { display: grid; gap: 10px; }
-  .poster-preview h3 { margin: 0; color: var(--scan-muted); font-size: 14px; font-weight: 400; }
-  .poster-preview img { display: block; width: min(100%, 280px); max-height: 380px; object-fit: contain; object-position: left center; background: #111918; }
   .event-editor-panel :global(button), .event-editor-panel :global(input), .event-editor-panel :global(select), .event-editor-panel :global(textarea) { font-size: 16px; }
   .event-editor-panel :global(button) { min-height: 44px; }
   .event-admin-list button { min-height: 64px; }

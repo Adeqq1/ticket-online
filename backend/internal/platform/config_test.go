@@ -197,3 +197,39 @@ func TestLoadConfigTrustedProxies(t *testing.T) {
 		})
 	}
 }
+
+func TestPosterStorageConfig(t *testing.T) {
+	clearSMTPEnv(t)
+	t.Setenv("MYSQL_DSN", "ticket:ticket@tcp(localhost:3306)/ticket_online?parseTime=true")
+	t.Setenv("ORDER_ACCESS_SECRET", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("APP_ENV", "production")
+	for _, tc := range []struct {
+		name, bucket, region, endpoint, prefix, origin string
+		valid                                          bool
+	}{
+		{"disabled", "", "", "", "", "http://localhost:5173", true},
+		{"AWS", "staging-posters", "ap-southeast-1", "", "posters", "https://staging.example.test", true},
+		{"compatible", "staging-posters", "us-east-1", "https://s3.example.test", "posters/staging", "https://staging.example.test", true},
+		{"missing region", "posters", "", "", "posters", "https://staging.example.test", false},
+		{"HTTP production", "posters", "us-east-1", "", "posters", "http://staging.example.test", false},
+		{"origin has path", "posters", "us-east-1", "", "posters", "https://staging.example.test/path", false},
+		{"origin credentials", "posters", "us-east-1", "", "posters", "https://user:pass@staging.example.test", false},
+		{"endpoint credentials", "posters", "us-east-1", "https://user:pass@s3.example.test", "posters", "https://staging.example.test", false},
+		{"traversal prefix", "posters", "us-east-1", "", "posters/../backups", "https://staging.example.test", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("POSTER_S3_BUCKET", tc.bucket)
+			t.Setenv("POSTER_S3_REGION", tc.region)
+			t.Setenv("POSTER_S3_ENDPOINT", tc.endpoint)
+			t.Setenv("POSTER_S3_PREFIX", tc.prefix)
+			t.Setenv("FRONTEND_URL", tc.origin)
+			cfg, err := LoadConfig()
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v: %v", tc.valid, err)
+			}
+			if tc.valid && cfg.Posters.Bucket != tc.bucket {
+				t.Fatal(cfg.Posters.Bucket)
+			}
+		})
+	}
+}

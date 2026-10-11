@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createSnapPayment, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, requestEventRefund, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
+import { uploadAdminPoster, ApiError, addAdminPaymentCaseNote, checkInTicket, createAdminEvent, createOrder, createReservation, createSnapPayment, createStaff, exportAdminAttendanceReportCSV, exportAdminSalesReportCSV, getAdminAttendanceReport, getAdminConversionReport, getAdminCheckInHistory, getAdminEmailJobs, getAdminOperations, getAdminSalesReport, getAdminOrder, getAdminOrders, getAdminPaymentCases, getAdminEvents, getEvent, getOrder, requestEventRefund, getStaffProfile, getStaffTicketStatus, getTicket, listOrderTickets, listStaff, loginStaff, logoutStaff, mapApiEvent, recheckAdminPaymentCase, replaceStaffAssignments, resetStaffPassword, retryAdminEmailJob, resolveAdminPaymentCase, simulatePayment, updateAdminEvent, updateStaff, type ApiEvent, type Staff } from "./api.ts";
 
 const apiEvent: ApiEvent = {
   id: "nusa-malam", artist: "Nusa Malam", city: "Jakarta", venue: "Ruang Selatan", address: "Jl. Musik Raya, Jakarta",
@@ -400,5 +400,40 @@ test("requires the backend's 204 confirmation for staff logout", async () => {
   globalThis.fetch = (async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
   try {
     await expect(logoutStaff("staff-token")).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test("poster upload uses a single multipart file and session header with browser boundary", async () => {
+  const originalFetch = globalThis.fetch;
+  const file = new File(["jpeg"], "../../poster.jpg", { type: "image/jpeg" });
+  const controller = new AbortController();
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    expect(String(input)).toBe("/api/v1/admin/posters");
+    expect(init?.method).toBe("POST");
+    expect(init?.signal).toBe(controller.signal);
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer admin-token");
+    expect(headers.has("Content-Type")).toBe(false);
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect(Array.from((init?.body as FormData).keys())).toEqual(["file"]);
+    return Response.json({ url: "https://tickets.example.test/api/v1/media/posters/hash.jpg" }, { status: 201 });
+  }) as typeof fetch;
+  try { expect((await uploadAdminPoster("admin-token", file, controller.signal)).url).toStartWith("https://"); }
+  finally { globalThis.fetch = originalFetch; }
+});
+
+test("poster upload rejects malformed success and preserves session/storage errors", async () => {
+  const originalFetch = globalThis.fetch;
+  const file = new File(["png"], "poster.png", { type: "image/png" });
+  try {
+    for (const result of [{}, {url:"javascript:alert(1)"}, {url:"https://user:pass@example.test/a.jpg"}, {url:44}, null]) {
+      globalThis.fetch = (async () => Response.json(result, { status: 201 })) as unknown as typeof fetch;
+      await expect(uploadAdminPoster("token", file)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    }
+    for (const status of [401, 403, 413, 422, 429, 503, 504]) {
+      globalThis.fetch = (async () => Response.json({error:{code:"POSTER_ERROR",message:"Upload gagal"}}, {status})) as unknown as typeof fetch;
+      await expect(uploadAdminPoster("token", file)).rejects.toMatchObject({status,code:"POSTER_ERROR"});
+    }
   } finally { globalThis.fetch = originalFetch; }
 });

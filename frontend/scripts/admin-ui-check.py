@@ -637,4 +637,5 @@ async def main():
         raise AssertionError(f"Browser runtime errors: {manifest['pageErrors']}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
