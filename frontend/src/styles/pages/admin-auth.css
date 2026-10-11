@@ -210,8 +210,8 @@
 .order-filter-form input, .order-filter-form select { font-size: 16px; }
 .order-workspace { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; }
 .order-workspace > .checkin-history-panel { margin-top: 16px; }
-.order-workspace.has-selected { grid-template-columns: minmax(0, 1fr); }
 .order-selected-panel { min-width: 0; }
+.order-selected-panel .staff-panel-heading { flex-wrap: wrap; }
 .order-selected-panel #order-detail-title:focus-visible, .issue-detail-panel :is(h2, h3):focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
 .order-detail-grid h3 { font-size: 18px; }
 .order-detail-grid dl, .order-detail-list li { font-size: 16px; line-height: 1.5; }

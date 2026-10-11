@@ -176,6 +176,9 @@ async def check_workflows(browser, base, output, width):
     await context.add_init_script(SESSION_INIT)
     page = await context.new_page()
     errors, requests, mutations, audits = [], [], [], []
+    refund_calls = []
+    refund_found = False
+    detail_failed = False
     page.on("pageerror", lambda error: errors.append(str(error)))
     events = [{**deepcopy(EVENT), "id": f"konser-{i}", "artist": f"Konser {i:02d}" + (" dengan nama sangat panjang untuk operasional acara" if i == 19 else ""), "publicationStatus": ["DRAFT", "PUBLISHED", "ARCHIVED"][i % 3]} for i in range(20)]
     _, detail = body(base + f"/api/v1/admin/orders/{ORDER}", "standard", "ADMIN")
@@ -213,11 +216,22 @@ async def check_workflows(browser, base, output, width):
             rows = orders[10:] if "cursor" in query else orders[:11]
             if query.get("q") == ["absent"]: rows = []
             await route.fulfill(json={"items": rows, "nextCursor": "cursor-two" if len(rows) == 11 else None, "filterOptions": {"events": [{"id": e["id"], "name": e["artist"]} for e in events]}})
-        elif path.startswith("admin/orders/"): await route.fulfill(json={**detail, **next(o for o in orders if o["id"] == path.split("/")[-1])})
+        elif path.startswith("admin/orders/"):
+            if method == "POST":
+                refund_calls.append(route.request.post_data_json)
+                await route.abort("connectionreset")
+            elif detail_failed:
+                await route.fulfill(status=503, json={"error": {"message": "Detail gagal dimuat."}})
+            else:
+                value = {**detail, **next(o for o in orders if o["id"] == path.split("/")[-1])}
+                if refund_found: value.update(status="REFUND_PENDING", refund={"status": "REQUESTED", "amount": value["total"], "reason": "Permintaan admin"})
+                await route.fulfill(json=value)
         else: raise AssertionError((method, path))
 
     async def capture(name):
         result = await page.evaluate(audit_js)
+        if result["overflow"]:
+            result["overflowElements"] = await page.evaluate("() => [...document.querySelectorAll('body *')].filter(el => el.getBoundingClientRect().right > innerWidth + 1).slice(-20).map(el => ({tag: el.tagName, classes: el.className, text: el.textContent.slice(0, 60), right: el.getBoundingClientRect().right}))")
         assert not result["failures"] and not result["overflow"], (name, width, result)
         audits.append({"state": name, **result})
         await page.screenshot(path=str(output / f"workflow-{name}-{width}.png"), full_page=True, animations="disabled")
@@ -235,12 +249,16 @@ async def check_workflows(browser, base, output, width):
     try: await expect(page.locator(".event-admin-list li")).to_have_count(20, timeout=15000)
     except AssertionError: raise AssertionError({"url": page.url, "errors": errors, "requests": requests, "text": await page.locator("body").inner_text()})
     await expect(page.locator("#event-form")).to_have_count(0)
+    await expect(page.get_by_role("heading", level=1)).to_have_text("Daftar konser.")
     await capture("events-list")
     await text200("events-list")
     await page.get_by_label("Cari konser", exact=True).fill("Konser 19")
     await page.get_by_role("button", name="Kelola konser Konser 19", exact=False).click()
     await expect(page.locator("#event-editor-title")).to_be_focused()
     await expect(page.locator(".event-admin-list")).to_have_count(0)
+    await expect(page.locator(".event-list-filters")).to_have_count(0)
+    await expect(page.locator("#event-create-opener")).to_have_count(0)
+    await expect(page.get_by_role("heading", level=1)).to_have_text("Edit konser.")
     await page.get_by_label("Nama konser / artis", exact=True).fill("Draft tidak disimpan")
     page.once("dialog", lambda d: d.dismiss())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
@@ -251,6 +269,8 @@ async def check_workflows(browser, base, output, width):
     await expect(page.locator("#event-manage-konser-19")).to_be_focused()
     await page.locator("#event-create-opener").click()
     await expect(page.locator("#event-editor-title")).to_be_focused()
+    await expect(page.get_by_role("heading", level=1)).to_have_text("Tambah konser.")
+    await expect(page.locator(".event-list-filters")).to_have_count(0)
     name = page.get_by_label("Nama konser / artis", exact=True)
     await name.fill("Konser Uji Baru")
     await expect(page.locator("#event-id")).to_have_value("konser-uji-baru")
@@ -292,12 +312,56 @@ async def check_workflows(browser, base, output, width):
     assert await page.locator("tbody tr").evaluate_all("rows => new Set(rows.map(r => r.querySelector('code').textContent)).size") == 22
     await capture("orders-list")
     await text200("orders-list")
-    await page.locator(f"#order-detail-{orders[-1]['id']}").click()
+    order_trigger = page.locator(f"#order-detail-{orders[-1]['id']}")
+    await order_trigger.scroll_into_view_if_needed()
+    list_scroll = await page.evaluate("scrollY")
+    await order_trigger.click()
     await expect(page.locator("#order-detail-title")).to_be_focused()
+    await expect(page.locator(".order-list-panel")).to_have_count(0)
+    await expect(page.locator("#order-search-form")).to_have_count(0)
+    await expect(page.locator(".order-detail-grid")).to_be_visible()
     await capture("orders-detail")
+    await text200("orders-detail")
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
-    await expect(page.locator(f"#order-detail-{orders[-1]['id']}")).to_be_focused()
+    await expect(order_trigger).to_be_focused()
+    assert abs(await page.evaluate("scrollY") - list_scroll) <= 2
     await expect(page.locator("tbody tr")).to_have_count(22)
+    # Detail load failures still provide a focused title and a way back to the retained list.
+    detail_failed = True
+    await order_trigger.click()
+    await expect(page.locator("#order-detail-title")).to_be_focused()
+    await expect(page.get_by_role("alert")).to_contain_text("Detail gagal dimuat")
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    detail_failed = False
+    await expect(page.locator("tbody tr")).to_have_count(22)
+
+    # Refund drafts require confirmation; unknown mutations stay locked across list/detail switches.
+    await page.locator(f"#order-detail-{orders[0]['id']}").click()
+    reason = page.get_by_label("Alasan refund", exact=True)
+    await reason.fill("Permintaan admin")
+    page.once("dialog", lambda d: d.dismiss())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(reason).to_have_value("Permintaan admin")
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Ajukan refund", exact=True).click()
+    await expect(page.get_by_role("button", name="Ajukan refund", exact=True)).to_be_disabled()
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await page.locator(f"#order-detail-{orders[0]['id']}").click()
+    await expect(reason).to_have_value("")
+    await reason.fill("Permintaan ulang ditahan")
+    await expect(page.get_by_role("button", name="Ajukan refund", exact=True)).to_be_disabled()
+    await page.locator(".recovery-panel").dispatch_event("submit")
+    assert len(refund_calls) == 1
+    await page.get_by_role("button", name="Periksa detail refund", exact=True).click()
+    await expect(page.get_by_role("button", name="Ajukan refund", exact=True)).to_be_disabled()
+    refund_found = True
+    await page.get_by_role("button", name="Periksa detail refund", exact=True).click()
+    await expect(page.locator(".order-selected-panel")).to_contain_text("Permintaan admin")
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(page.locator("tbody tr")).to_have_count(22)
+    await expect(page.locator("tbody tr").first).to_contain_text("Refund diproses")
     await page.get_by_label("Nomor pesanan", exact=True).fill("absent")
     await page.get_by_role("button", name="Cari", exact=True).click()
     await expect(page.locator("tbody tr")).to_have_count(0)
@@ -515,9 +579,12 @@ async def main():
                         await page.locator(".order-list-panel").scroll_into_view_if_needed()
                         await page.screenshot(path=str(output / mobile_order_list), full_page=False, animations="disabled")
                         await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123").click()
-                        await page.get_by_role("heading", name="Detail pesanan").wait_for()
+                        await page.get_by_role("heading", name="Detail pesanan", exact=True).wait_for()
+                        await expect(search_input).to_have_count(0)
+                        await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
                         if await search_input.input_value() != "TO-0123456789abcdef0123":
                             raise AssertionError("mobile order selection discarded the active search filter")
+                        await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123").click()
                     if name == "login" and mode in ("loading", "error"):
                         await page.get_by_label("Email", exact=True).fill("admin@example.test")
                         await page.get_by_label("Password", exact=True).fill("fixture-password")
@@ -611,7 +678,7 @@ async def main():
                             raise AssertionError(f"visible em-dash copy needs rewriting on {route}: {capture['audit']['visibleEmDashCount']}")
                         action = page.locator(".admin-page-heading .admin-heading-actions > button").first
                         if name == "orders":
-                            await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(1)
+                            await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(0 if await page.locator(".order-selected-panel").count() else 1)
                             assert not await action.count(), "Order search belongs in its filter form"
                         elif name not in ("login", "scanner"):
                             if not await action.count():

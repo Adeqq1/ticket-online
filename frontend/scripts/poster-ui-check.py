@@ -176,6 +176,7 @@ async def check(browser, base, width):
 
     # Both sources also work when creating a new draft concert.
     for source in ("file", "url"):
+        await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
         await page.get_by_role("button", name="Tambah konser", exact=True).click()
         await expect(page.get_by_role("radio", name="Unggah dari perangkat")).to_be_checked()
         await page.get_by_label("Nama konser / artis", exact=True).fill("Konser Baru " + source)

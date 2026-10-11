@@ -41,6 +41,8 @@
   let selectedUncertain = $derived(uncertain[selectedId]);
   let hasUncertain = $derived(Object.values(uncertain).some((item) => item.profile || item.assignments || item.password));
   let selected = $derived(staff.find((item) => item.id === selectedId && item.role === "STAFF"));
+  const mode = $derived(creating ? "create" : selectedId ? "edit" : "list");
+  let listScroll = 0;
   const staffEditorDirty = $derived(Boolean(selectedId) && (JSON.stringify({ name: editName, active: editActive }) !== profileBaseline || JSON.stringify(editAssignments) !== assignmentBaseline || Boolean(resetPassword) || editAssignmentPending));
   const createDirty = $derived(creating && Boolean(newName || newEmail || newPassword || newAssignments.length || newAssignmentPending));
 
@@ -74,15 +76,18 @@
 
   function openCreate() {
     if (saving || creating || !allowStaffDiscard()) return;
+    listScroll = window.scrollY;
     selectedId = ""; resetPassword = ""; editAssignmentPending = false; error = ""; notice = ""; creating = true;
     void focusElement("staff-create-title");
   }
 
-  function closePanel() {
+  async function closePanel() {
     if (saving || !allowStaffDiscard()) return;
     const previousId = selectedId;
     clearCreate(); selectedId = ""; resetPassword = ""; editAssignmentPending = false; error = "";
-    void focusElement(previousId ? filteredStaff.some((person) => person.id === previousId) ? `staff-manage-${previousId}` : "staff-list-title" : "staff-create-opener");
+    await tick();
+    document.getElementById(previousId ? filteredStaff.some((person) => person.id === previousId) ? `staff-manage-${previousId}` : "staff-list-title" : "staff-create-opener")?.focus({ preventScroll: true });
+    window.scrollTo({ top: listScroll, behavior: "instant" });
   }
 
   async function loadStaff(): Promise<boolean> {
@@ -119,6 +124,7 @@
   function selectStaff(person: Staff) {
     if (saving) return;
     if (person.id === selectedId || !allowStaffDiscard()) return;
+    listScroll = window.scrollY;
     clearCreate();
     selectedId = person.id; editName = person.name; editActive = person.active;
     editAssignments = person.assignments.map((assignment) => ({ ...assignment }));
@@ -238,13 +244,15 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-  <AdminLayout page="staff" contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title="Kelola petugas." description="Atur akses tim pada event dan gate yang ditugaskan." onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={{ label: "Buat akun petugas", onclick: openCreate, disabled: saving || creating, id: "staff-create-opener", controls: creating ? "staff-work-panel" : undefined, expanded: creating }}>
+  <AdminLayout page="staff" contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title={mode === "list" ? "Daftar petugas." : mode === "create" ? "Tambah petugas." : "Edit petugas."} description={mode === "list" ? "Temukan akun dan periksa akses tim pada event dan gate." : mode === "create" ? "Buat akun petugas beserta penugasan awalnya." : "Ubah profil, penugasan, atau password akun yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah petugas", onclick: openCreate, disabled: saving, id: "staff-create-opener" } : undefined} secondaryAction={mode === "edit" ? { label: "Muat ulang", onclick: () => { void loadStaff(); }, disabled: loadingStaff || saving } : undefined}>
     <div id="staff-result" role="status" aria-live="polite" tabindex="-1">
       {#if notice}<p class="staff-form-message staff-form-success">{notice}</p>{/if}
     </div>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
 
-    <div class="staff-workspace" class:has-panel={creating || Boolean(selected)}>
+    {#if mode !== "list" && staffError}<p class="staff-form-message staff-form-error" role="alert">{staffError}</p>{/if}
+    <div class="staff-workspace">
+      {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="staff-list-title">
         <div class="staff-panel-heading"><h2 id="staff-list-title" tabindex="-1">Akun petugas</h2><button class="staff-text-button" type="button" onclick={() => { if (!saving) void loadStaff(); }} disabled={loadingStaff || saving}>{loadingStaff ? "Memuat…" : "Muat ulang"}</button></div>
         <p class="staff-list-help">Pilih Kelola untuk mengubah profil, penugasan event/gate, atau status akun petugas.</p>
@@ -258,13 +266,12 @@
           </div>
         </div>
         <div class="staff-filter-results"><p class="staff-list-help" role="status" aria-live="polite" aria-atomic="true">{filteredStaff.length} dari {staff.length} akun</p>{#if filtersActive}<button class="staff-text-button" type="button" onclick={resetFilters}>Reset filter</button>{/if}</div>
-        {#if selected && !filteredStaff.some((person) => person.id === selectedId)}<p class="staff-list-help" role="status">{selected.name} tidak termasuk hasil saat ini. Panel Kelola dan draft tetap terbuka.</p>{/if}
         {#if loadingStaff}<p class="staff-muted" aria-live="polite">Memuat daftar petugas…</p>
         {:else if staffError}<p class="staff-form-message staff-form-error" role="alert">{staffError}</p>
         {:else if staff.length === 0}<p class="staff-muted">Belum ada akun petugas.</p>
         {:else if filteredStaff.length === 0}<p class="staff-muted">Tidak ada akun yang cocok. Ubah pencarian atau reset filter.</p>
         {:else}<ul class="staff-list">{#each filteredStaff as person (person.id)}
-          <li id={`staff-account-${person.id}`} tabindex="-1" class:staff-selected={selectedId === person.id}>
+          <li id={`staff-account-${person.id}`} tabindex="-1">
             <div class="staff-list-identity">
               <strong>{person.name}</strong><span>{person.email}</span>
               {#each person.assignments.slice(0, 2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}
@@ -273,13 +280,12 @@
               {#if person.role === "ADMIN"}<span>Akun administrator tidak dapat diubah melalui halaman ini.</span>{/if}
             </div>
             <div class="staff-account-meta"><span class="staff-role">Peran: {person.role === "ADMIN" ? "Admin" : "Staff"}</span><span class="staff-status" class:is-active={person.active}>Status: {person.active ? "Aktif" : "Nonaktif"}</span></div>
-            {#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button" type="button" disabled={saving} aria-expanded={selectedId === person.id} aria-controls={selectedId === person.id ? "staff-work-panel" : undefined} onclick={() => selectStaff(person)}>Kelola<span class="visually-hidden"> {person.name}</span></button>{/if}
+            {#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button" type="button" disabled={saving} onclick={() => selectStaff(person)}>Kelola<span class="visually-hidden"> {person.name}</span></button>{/if}
           </li>
         {/each}</ul>{/if}
       </section>
-
-      {#if creating}<section id="staff-work-panel" class="staff-admin-panel staff-create-panel" aria-labelledby="staff-create-title">
-        <div class="staff-panel-heading"><h2 id="staff-create-title" tabindex="-1">Tambah petugas</h2></div>
+      {:else if creating}<section id="staff-work-panel" class="staff-admin-panel staff-create-panel" aria-labelledby="staff-create-title">
+        <div class="staff-panel-heading"><h2 id="staff-create-title" tabindex="-1">Tambah petugas</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
         <form id="staff-create-form" class="staff-form" onsubmit={create} aria-busy={saving}>
           <label>Nama<input bind:value={newName} autocomplete="name" minlength="2" maxlength="80" required disabled={saving} readonly={createUncertain} /></label>
           <label>Email<input bind:value={newEmail} type="email" autocomplete="email" maxlength="254" required disabled={saving} readonly={createUncertain} /></label>
@@ -290,8 +296,9 @@
         </form>
       </section>
     {:else if selected}<section id="staff-work-panel" class="staff-admin-panel staff-edit-panel" aria-labelledby="staff-edit-title">
-      <div class="staff-panel-heading"><h2 id="staff-edit-title" tabindex="-1">{selected.name}</h2><button class="staff-text-button" type="button" disabled={saving} onclick={closePanel}>Tutup</button></div>
+      <div class="staff-panel-heading"><h2 id="staff-edit-title" tabindex="-1">Edit petugas: {selected.name}</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
       <p class="staff-list-help">{selected.email}</p>
+      {#if !filteredStaff.some((person) => person.id === selectedId)}<p class="staff-list-help" role="status">{selected.name} tidak termasuk hasil saat ini. Editor dan draft tetap terbuka.</p>{/if}
       <nav class="staff-section-nav" aria-label="Bagian pengelolaan akun"><a href="#staff-profile">Profil dan akses</a><a href="#staff-assignments">Penugasan</a><a href="#staff-password">Reset password</a></nav>
       {#if selectedUncertain?.profile || selectedUncertain?.assignments}<p class="staff-list-help" role="alert">Hasil perubahan {selectedUncertain.profile ? "profil" : "penugasan"} belum pasti. Tindakan tersebut ditahan. Muat ulang daftar dan periksa hasilnya sebelum melanjutkan.</p>{/if}
       {#if selectedUncertain?.password}<p class="staff-list-help" role="alert">Hasil reset password belum pasti. Jangan mengulang reset. Minta petugas memeriksa apakah password baru dapat digunakan; daftar akun tidak dapat membuktikan hasil reset.</p>{/if}
@@ -326,13 +333,10 @@
 
 <style>
   .staff-workspace { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 24px; }
-  .staff-workspace.has-panel { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
   .staff-workspace :global(.staff-form) { font-size: 16px; }
   .staff-workspace :global(.staff-form > label) { font-size: 16px; line-height: 1.5; }
   .staff-workspace :global(.staff-form small), .staff-list-identity span { font-size: 14px; line-height: 1.6; }
   .staff-list li { grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px 16px; padding-block: 12px; }
-  .has-panel .staff-list li { grid-template-columns: minmax(0, 1fr) auto; }
-  .has-panel .staff-list-identity { grid-column: 1 / -1; }
   .staff-list li > button { justify-self: end; }
   .staff-list-help { margin: 0 0 16px; color: var(--scan-muted); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
   .staff-section-nav { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 20px; }
@@ -341,8 +345,6 @@
   .staff-list-identity summary { min-height: 44px; padding-block: 12px; color: var(--scan-text); font-size: 14px; line-height: 1.5; cursor: pointer; }
   .staff-list-identity summary:focus-visible { outline: 3px solid var(--scan-lime); outline-offset: 3px; }
   .staff-list-filters { grid-template-columns: minmax(180px, 1.3fr) minmax(130px, .8fr) minmax(160px, 1fr); align-items: end; gap: 12px; margin: 0 0 8px; }
-  .has-panel .staff-list-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .has-panel .staff-list-filters > label { grid-column: 1 / -1; }
   .staff-extra-filters { display: contents; }
   .staff-extra-filters label { display: grid; gap: 8px; min-width: 0; color: var(--scan-muted); }
   .staff-extra-filters select { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--admin-control-border); border-radius: 0; }
@@ -368,15 +370,12 @@
   .staff-workspace :global(button), .staff-list li { min-height: 44px; }
   .staff-workspace :global(.staff-assignment-list li) { min-height: 52px; overflow-wrap: anywhere; }
   .staff-workspace :global(.staff-assignment-controls) { grid-template-columns: minmax(0, 1fr); }
-  @media (max-width: 1199px) {
-    .staff-workspace.has-panel { grid-template-columns: minmax(0, 1fr); }
-  }
   @media (max-width: 600px) {
     .staff-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
     .staff-list-identity { grid-column: 1 / -1; }
     .staff-list li > button { justify-self: end; }
     .staff-filter-toggle { display: inline-flex; justify-content: center; }
-    .staff-list-filters, .has-panel .staff-list-filters { grid-template-columns: minmax(0, 1fr); }
+    .staff-list-filters { grid-template-columns: minmax(0, 1fr); }
     .staff-extra-filters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .staff-extra-filters:not(.is-open) { display: none; }
   }

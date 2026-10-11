@@ -31,8 +31,11 @@
   let manualNote = $state("");
   let manualConfirmed = $state(false);
   let manualResult = $state<HTMLParagraphElement>();
-  let uncertainRefund = $state(false);
-  let uncertainManual = $state(false);
+  let refundLocks = $state<Record<string, { refund?: boolean; manual?: boolean }>>({});
+  const uncertainRefund = $derived(Boolean(refundLocks[selectedId]?.refund));
+  const uncertainManual = $derived(Boolean(refundLocks[selectedId]?.manual));
+  const detailDirty = $derived(Boolean(refundReason || manualReference || manualPaidAt || manualNote || manualConfirmed));
+  let listScroll = 0;
   let detailHeading: HTMLElement | undefined = $state();
 
   async function finishManual() {
@@ -44,16 +47,15 @@
     try {
       await completeManualRefund(accessToken, id, input);
       if (selectedId === id) {
-        uncertainManual = false;
+        delete refundLocks[id]?.manual;
         refundMessage = "Refund manual tercatat dan tiket tetap dinonaktifkan.";
         manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false;
         await openDetail(id);
       }
-      await load(applied);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
       else if (selectedId === id) {
-        uncertainManual = cause instanceof ApiError && (cause.code === "UNKNOWN_OUTCOME" || cause.code === "NETWORK_ERROR" || cause.status >= 500);
+        refundLocks[id] = { ...refundLocks[id], manual: cause instanceof ApiError && (cause.code === "UNKNOWN_OUTCOME" || cause.code === "NETWORK_ERROR" || cause.status >= 500) };
         refundMessage = uncertainManual ? "Hasil pencatatan belum pasti. Periksa detail pesanan sebelum mencoba tindakan lagi." : cause instanceof Error ? cause.message : "Hasil belum pasti. Muat ulang detail pesanan.";
       }
     } finally { refundBusy = false; await tick(); if (selectedId === id) manualResult?.focus(); }
@@ -85,19 +87,30 @@
     } finally { if (current === generation) { loading = false; loadingMore = false; if (request === controller) request = undefined; } }
   }
 
-  function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); closeDetail(); void load(applied); }
-  function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; closeDetail(); void load(applied); }
+  function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); void load(applied); }
+  function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; void load(applied); }
 
-  async function closeDetail() { const id = selectedId; detailRequest?.abort(); detailGeneration++; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; await tick(); (document.getElementById(`order-detail-${id}`) ?? document.getElementById("order-results-title"))?.focus(); }
+  function allowDiscard() { return !detailDirty || window.confirm("Isian refund belum disimpan. Kembali ke daftar dan buang isian?"); }
+  function protectUnsaved(event: BeforeUnloadEvent) { if (detailDirty || refundBusy || Object.values(refundLocks).some(lock => lock.refund || lock.manual)) { event.preventDefault(); event.returnValue = ""; } }
+  async function closeDetail() {
+    if (refundBusy || !allowDiscard()) return;
+    const id = selectedId;
+    detailRequest?.abort(); detailGeneration++; detailLoading = false; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false;
+    await tick();
+    (document.getElementById(`order-detail-${id}`) ?? document.getElementById("order-results-title"))?.focus({ preventScroll: true });
+    window.scrollTo({ top: listScroll, behavior: "instant" });
+  }
 
   async function openDetail(id: string) {
+    if (!selectedId) listScroll = window.scrollY;
     detailRequest?.abort();
     const controller = new AbortController(); detailRequest = controller;
     const current = ++detailGeneration;
-    if (selectedId !== id) { refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; uncertainRefund = false; uncertainManual = false; }
+    if (selectedId !== id) { refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; }
     selectedId = id; selected = null; detailLoading = true; detailError = "";
+    await tick(); detailHeading?.focus();
     try {
-      await applyIfCurrent(() => current === detailGeneration, () => getAdminOrder(accessToken, id, controller.signal), async (result) => { selected = result; await tick(); detailHeading?.focus(); });
+      await applyIfCurrent(() => current === detailGeneration, () => getAdminOrder(accessToken, id, controller.signal), async (result) => { selected = result; items = items.map(item => item.id === result.id ? { ...item, status: result.status } : item); await tick(); detailHeading?.focus(); });
     }
     catch (cause) {
       if (current !== detailGeneration || (cause instanceof DOMException && cause.name === "AbortError")) return;
@@ -118,13 +131,13 @@
     refundBusy = true; refundMessage = "";
     try {
       await applyIfCurrent(() => selectedId === orderId, () => requestAdminRefund(accessToken, orderId, reason), async (result) => {
+        refundReason = "";
         refundMessage = `${refundStatus(result.status).label} · ${money(result.amount)}. ${refundStatus(result.status).next}`;
         await openDetail(orderId);
       });
-      await load(applied);
     } catch (cause) {
       if (selectedId === orderId) {
-        uncertainRefund = cause instanceof ApiError && (cause.code === "UNKNOWN_OUTCOME" || cause.code === "NETWORK_ERROR" || cause.status >= 500);
+        refundLocks[orderId] = { ...refundLocks[orderId], refund: cause instanceof ApiError && (cause.code === "UNKNOWN_OUTCOME" || cause.code === "NETWORK_ERROR" || cause.status >= 500) };
         refundMessage = uncertainRefund ? "Hasil pengajuan belum pasti. Periksa ulang detail pesanan; pengajuan tidak akan diulang otomatis." : cause instanceof ApiError ? cause.message : "Status refund belum dapat dipastikan. Periksa kembali detail pesanan.";
         if (uncertainRefund) await openDetail(orderId);
       }
@@ -139,8 +152,8 @@
     try {
       await openDetail(id);
       if (selectedId === id && selected) {
-        if (kind === "refund" && selected.refund) { uncertainRefund = false; refundMessage = `${refundStatus(selected.refund.status).label} · ${money(selected.refund.amount)}. ${refundStatus(selected.refund.status).next}`; }
-        else if (kind === "manual" && selected.refund?.manualReference) { uncertainManual = false; refundMessage = "Bukti transfer sudah tercatat."; }
+        if (kind === "refund" && selected.refund) { delete refundLocks[id]?.refund; refundMessage = `${refundStatus(selected.refund.status).label} · ${money(selected.refund.amount)}. ${refundStatus(selected.refund.status).next}`; }
+        else if (kind === "manual" && selected.refund?.manualReference) { delete refundLocks[id]?.manual; refundMessage = "Bukti transfer sudah tercatat."; }
         else refundMessage = "Detail terbaru belum membuktikan hasil tindakan. Pengulangan tetap ditahan.";
       }
     } finally { refundBusy = false; }
@@ -151,8 +164,11 @@
 </script>
 
 <svelte:head><title>Pesanan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
+<svelte:window onbeforeunload={protectUnsaved} />
 
-  <AdminLayout page="orders" contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title="Pengelolaan pesanan." description="Telusuri pembayaran dan status tiket pesanan." onLogout={onLogout} loggingOut={loggingOut}>
+  <AdminLayout page="orders" contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title={selectedId ? "Detail pesanan." : "Daftar pesanan."} description={selectedId ? "Periksa pembeli, pembayaran, tiket, dan tindakan pesanan yang dipilih." : "Temukan dan bandingkan pembayaran serta status pesanan."} onLogout={() => { if (!refundBusy && allowDiscard()) onLogout(); }} loggingOut={loggingOut} logoutDisabled={refundBusy || loggingOut}>
+    <div class="order-workspace">
+    {#if !selectedId}
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="order-filter-title">
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="order-filter-title">Cari pesanan</h2></div></div>
       <form id="order-search-form" class="order-filter-form" onsubmit={search} aria-busy={loading}>
@@ -164,7 +180,6 @@
         <div class="history-filter-actions"><button class="scan-submit" type="submit" disabled={loading}>Cari</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
       </form>
     </section>
-    <div class:has-selected={selectedId} class="order-workspace">
     <section class="staff-admin-panel checkin-history-panel order-list-panel" aria-labelledby="order-results-title">
       <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="order-results-title" tabindex="-1">Daftar pesanan</h2></div><button class="staff-text-button" type="button" onclick={() => load(applied)} disabled={loading}>Muat ulang</button></div>
       <p class="staff-muted" role="status" aria-live="polite">{items.length} pesanan dimuat</p>
@@ -176,7 +191,8 @@
       {/if}
       {#if error && items.length}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
     </section>
-    {#if selectedId}<section class="staff-admin-panel checkin-history-panel order-selected-panel" aria-labelledby="order-detail-title" aria-busy={detailLoading}><div class="staff-panel-heading"><div><span class="panel-index">03</span><h2 id="order-detail-title" tabindex="-1" bind:this={detailHeading}>Detail pesanan</h2></div><button class="staff-text-button" type="button" onclick={closeDetail}>Kembali ke daftar</button></div>
+    {:else}<section class="staff-admin-panel checkin-history-panel order-selected-panel" aria-labelledby="order-detail-title" aria-busy={detailLoading}><div class="staff-panel-heading"><div><span class="panel-index">03</span><h2 id="order-detail-title" tabindex="-1" bind:this={detailHeading}>Detail pesanan</h2></div><button class="staff-secondary-button" type="button" disabled={refundBusy} onclick={closeDetail}>Kembali ke daftar</button></div>
+      {#if uncertainRefund || uncertainManual}<p class="staff-form-message" role="status">Hasil tindakan refund sebelumnya belum pasti. Pengulangan ditahan; pilih Periksa detail refund.</p>{/if}
       {#if detailLoading}<p class="staff-muted" role="status">Memuat detail pesanan…</p>
       {:else if detailError}<p class="staff-form-message staff-form-error" role="alert">{detailError} <button class="staff-text-button" type="button" onclick={() => openDetail(selectedId)}>Coba lagi</button></p>
       {:else if selected}<div class="order-detail-grid">

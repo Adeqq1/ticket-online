@@ -193,7 +193,7 @@
 
 <svelte:head><title>Kelola Konser | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-  <AdminLayout page="events" contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title="Kelola konser." description="Atur informasi, jadwal, lineup, poster, dan publikasi konser." onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={{ label: "Tambah konser", onclick: startNew, disabled: saving || mode === "create", id: "event-create-opener" }}>
+  <AdminLayout page="events" contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
     <div class="staff-admin-grid event-admin-grid">
       {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
