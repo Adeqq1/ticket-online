@@ -28,13 +28,14 @@ staff_audit = fixture("staff_audit", "staff-review-check.py").STYLE_AUDIT
 
 
 async def check(browser, base, width):
-    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta", is_mobile=width < 600, has_touch=width < 600)
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta", is_mobile=width < 768, has_touch=width < 768)
     await context.add_init_script(admin.SESSION_INIT)
     page = await context.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     voucher = {"code": "HEMAT10", "kind": "PERCENT", "value": 10, "startsAt": "2020-01-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z", "active": True, "eventId": "", "minimumSubtotal": 0, "quota": 1000000000, "revision": 1, "usage": {"held": 0, "consumed": 0, "released": 0}}
     state = {"settings": {"adminFee": 7500, "revision": 1}, "vouchers": [voucher, {**voucher, "code": "PROMO_LIBURAN_AKHIR_TAHUN_2026", "kind": "FIXED", "value": 100000, "eventId": "nusa-malam", "active": False}], "history": []}
+    state["vouchers"] += [{**voucher, "code": f"PROMO_{i:02d}", "active": False} for i in range(10)]
     state["history"] = [
         {"actor": "Admin Event", "objectId": "admin-fee", "before": {"adminFee": 5000}, "after": {"adminFee": 7500}, "createdAt": "2026-10-11T17:00:07Z"},
         {"actor": "Admin Event", "objectId": "HEMAT10", "before": voucher, "after": {**voucher, "active": False}, "createdAt": "2026-10-12T03:00:07Z"},
@@ -50,7 +51,7 @@ async def check(browser, base, width):
         elif path == "/api/v1/admin/events":
             await route.fulfill(json={"events": [{**admin.EVENT, "artist": "Konser Nusa Malam dan Perayaan Akhir Tahun Bersama"}]})
         elif path == "/api/v1/admin/pricing" and method == "GET":
-            await route.fulfill(json=state)
+            await route.fulfill(json={**state, "vouchers": [v for v in state["vouchers"] if not mode.get("hideSaved") or v["code"] != "DUMMY50"]})
         elif path == "/api/v1/admin/pricing":
             assert route.request.headers["authorization"] == "Bearer " + admin.TOKEN
             saves.append(route.request.post_data_json)
@@ -66,7 +67,8 @@ async def check(browser, base, width):
             assert route.request.headers["authorization"] == "Bearer " + admin.TOKEN
             assert v["eventId"] == "nusa-malam" and v["minimumSubtotal"] == 100000 and v["quota"] == 5
             saved = {**v, "revision": v["revision"] + 1}
-            state["vouchers"] = [{**saved, "usage": {"held": 1, "consumed": 2, "released": 1}}]
+            state["vouchers"] = [item for item in state["vouchers"] if item["code"] != saved["code"]]
+            state["vouchers"].insert(8 if method == "POST" else 0, {**saved, "usage": {"held": 1, "consumed": 2, "released": 1}})
             await route.fulfill(status=201 if method == "POST" else 200, json=saved)
         elif path.endswith("/quote"):
             assert route.request.headers.get("idempotency-key")
@@ -91,10 +93,10 @@ async def check(browser, base, width):
     await expect(fee).to_have_value("7500")
     if width >= 768:
         await expect(page.locator(".voucher-table th")).to_have_text(["Kode voucher", "Diskon", "Konser", "Masa berlaku (WIB)", "Kuota order", "Penggunaan", "Status", "Aksi"])
-        await expect(page.locator(".voucher-table tbody tr")).to_have_count(2)
+        await expect(page.locator(".voucher-table tbody tr")).to_have_count(12)
         assert await page.locator(".voucher-table").evaluate("el => getComputedStyle(el).display") == "table"
         await expect(page.locator(".voucher-table tbody tr").first.locator("td").nth(4)).to_have_text("1.000.000.000")
-        await expect(page.locator(".voucher-table .admin-order-status")).to_have_text(["Aktif", "Nonaktif"])
+        await expect(page.locator(".voucher-table .admin-order-status")).to_have_text(["Aktif"] + ["Nonaktif"] * 11)
         assert await page.locator(".voucher-table button, .voucher-table .admin-order-status").evaluate_all("els => els.every(el => getComputedStyle(el).whiteSpace === 'nowrap')"), "Actions and status labels must stay on one line"
         await expect(page.locator(".voucher-table tbody tr").first.locator("time")).to_have_text(["1 Jan 202007.00 WIB", "1 Jan 209907.00 WIB"])
         manage = page.get_by_role("button", name="Kelola voucher HEMAT10", exact=True)
@@ -135,17 +137,17 @@ async def check(browser, base, width):
         await page.evaluate("() => { for (const [el, size] of window.__historyFonts) el.style.fontSize = size; }")
         await page.locator(".pricing-history > summary").click()
         cards = page.locator(".voucher-list li")
-        await expect(cards).to_have_count(2)
+        await expect(cards).to_have_count(5)
         first = cards.first
         await expect(first.locator(".admin-order-status")).to_have_text("Aktif")
-        await expect(cards.last.locator(".admin-order-status")).to_have_text("Nonaktif")
+        await expect(cards.nth(1).locator(".admin-order-status")).to_have_text("Nonaktif")
         assert await first.locator(".admin-order-status").evaluate("el => el.tagName === 'SPAN' && el.tabIndex === -1")
         await expect(first.locator(".voucher-card-details dt")).to_have_text(["Diskon", "Konser", "Minimum subtotal", "Mulai berlaku", "Berakhir", "Kuota order"])
         await expect(first.locator(".voucher-card-details dd").last).to_have_text("1.000.000.000")
-        await expect(first.locator("time")).to_have_text(["1 Jan 2020, 07.00 WIB", "1 Jan 2099, 07.00 WIB"])
-        await expect(cards.last.locator(".voucher-card-details dd").nth(1)).to_have_text("Konser Nusa Malam dan Perayaan Akhir Tahun Bersama")
+        await expect(first.locator("time")).to_have_text(["1 Jan 202007.00 WIB", "1 Jan 209907.00 WIB"])
+        await expect(cards.nth(1).locator(".voucher-card-details dd").nth(1)).to_have_text("Konser Nusa Malam dan Perayaan Akhir Tahun Bersama")
         await expect(first.get_by_role("button", name="Kelola voucher HEMAT10", exact=True)).to_have_text("Kelola voucher")
-        assert await first.evaluate("el => { const button = el.querySelector('button').getBoundingClientRect(); return button.height >= 44 && Math.abs(button.width - el.getBoundingClientRect().width) < 2; }")
+        assert await first.evaluate("el => { const button = el.querySelector('button').getBoundingClientRect(); return button.height >= 44 && Math.abs(button.width - el.getBoundingClientRect().width + 34) < 2; }")
         await page.locator(".voucher-list-panel").screenshot(path=f"/tmp/phase51-55/pricing/mobile-vouchers-{width}.png")
         await expect(help_buttons).to_have_count(2)
         for explanation in await explanations.all(): await expect(explanation).not_to_be_visible()
@@ -255,17 +257,33 @@ async def check(browser, base, width):
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
     if width < 768:
         await expect(page.locator("#voucher-manage-DUMMY50")).to_be_focused()
-        await expect(page.locator(".voucher-card-usage dd")).to_have_text(["1", "2", "1"])
-        await expect(page.locator(".voucher-card-details dd").last).to_have_text("5")
+        await expect(page.locator("li").filter(has=page.locator("#voucher-manage-DUMMY50")).locator('[aria-label="Penggunaan voucher"] dd')).to_have_text(["1", "2", "1"])
+        await expect(page.locator('.voucher-list-panel [role="status"]')).to_contain_text("6 sampai 10")
+        assert await page.locator("#voucher-manage-DUMMY50").evaluate("el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }")
+        await expect(page.locator("li").filter(has=page.locator("#voucher-manage-DUMMY50")).locator(".voucher-card-details dd").last).to_have_text("5")
         await page.locator("#voucher-manage-DUMMY50").click()
     else:
-        await expect(page.locator(".voucher-table .admin-table-pairs dd")).to_have_text(["1", "2", "1"])
-        await expect(page.locator(".voucher-table tbody td").nth(4)).to_have_text("5")
+        await expect(page.locator(".voucher-table tr").filter(has=page.locator("#voucher-manage-DUMMY50")).locator(".admin-table-pairs dd")).to_have_text(["1", "2", "1"])
+        await expect(page.locator(".voucher-table tr").filter(has=page.locator("#voucher-manage-DUMMY50")).locator("td").nth(4)).to_have_text("5")
     await expect(page.get_by_label("Kode voucher", exact=True)).to_have_attribute("readonly", "")
     await page.get_by_label("Voucher aktif", exact=True).uncheck()
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
     await expect(page.locator(".voucher-list, .voucher-table")).to_contain_text("Nonaktif")
+    if width < 768:
+        await expect(page.locator("#voucher-manage-DUMMY50")).to_be_focused()
+        await expect(page.locator('.voucher-list-panel [role="status"]')).to_contain_text("1 sampai 5")
+        # A successful save can precede the refreshed list: focus the result instead of a missing card.
+        await page.locator("#voucher-manage-DUMMY50").click()
+        await page.get_by_label("Voucher aktif", exact=True).check()
+        mode["hideSaved"] = True
+        page.once("dialog", lambda d: d.accept())
+        await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
+        await expect(page.locator("#pricing-feedback")).to_be_focused()
+        await expect(page.locator("#pricing-feedback")).to_contain_text("belum tersedia di daftar")
+        mode["hideSaved"] = False
+        await page.get_by_role("button", name="Muat ulang", exact=True).click()
+        await expect(page.locator("#voucher-manage-DUMMY50")).to_be_visible()
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "admin overflow"
     assert await page.locator("#voucher-create-opener" if width < 768 else ".voucher-desktop-action").evaluate("el => el.getBoundingClientRect().height >= 44")
 
@@ -302,7 +320,7 @@ async def check(browser, base, width):
 
 
 async def check_recovery(browser, base, width, scenario):
-    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 600, has_touch=width < 600)
+    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 768, has_touch=width < 768)
     page = await context.new_page()
     errors, checkouts, payments, quotes = [], [], [], []
     page.on("pageerror", lambda e: errors.append(str(e)))

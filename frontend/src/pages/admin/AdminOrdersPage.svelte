@@ -1,4 +1,6 @@
 <script lang="ts">
+  import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
+  import { mobileListItems } from "../../lib/mobile-list.ts";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { wibDateTime } from "../../lib/event-changes.ts";
   import { onDestroy, onMount, tick } from "svelte";
@@ -13,8 +15,8 @@
   let mobile = $state(false);
   let searchOpen = $state(false);
   let mobilePage = $state(0);
-  const pageSize = 5;
-  const visibleItems = $derived(mobile ? items.slice(mobilePage * pageSize, (mobilePage + 1) * pageSize) : items);
+  let mobileScroll = $state(0);
+  const visibleItems = $derived(mobileListItems(items, mobilePage, mobile));
   let selected = $state<AdminOrderDetail | null>(null);
   let selectedId = $state("");
   let query = $state("");
@@ -78,7 +80,7 @@
     request?.abort();
     const controller = new AbortController(); request = controller;
     const current = ++generation;
-    if (more) loadingMore = true; else { loading = true; items = []; nextCursor = null; mobilePage = 0; tableScroll = 0; }
+    if (more) loadingMore = true; else { loading = true; items = []; nextCursor = null; mobilePage = 0; mobileScroll = 0; tableScroll = 0; }
     error = "";
     try {
       const result = await getAdminOrders(accessToken, { ...value, ...(more && nextCursor ? { cursor: nextCursor } : {}) }, controller.signal);
@@ -93,20 +95,6 @@
       else if (cause instanceof ApiError && cause.status === 403) error = "Akses pesanan hanya tersedia untuk admin.";
       else error = cause instanceof ApiError ? cause.message : "Pesanan belum dapat dimuat. Periksa koneksi lalu coba lagi.";
     } finally { if (current === generation) { loading = false; loadingMore = false; if (request === controller) request = undefined; } }
-  }
-
-  async function changeMobilePage(direction: -1 | 1) {
-    if (loading || loadingMore) return;
-    const page = mobilePage + direction;
-    if (page < 0) return;
-    if (direction === 1 && (page + 1) * pageSize > items.length && nextCursor) {
-      if (!await load(applied, true)) return;
-    }
-    if (page * pageSize >= items.length) return;
-    mobilePage = page;
-    await tick();
-    if (tableWrap) tableWrap.scrollLeft = 0;
-    document.getElementById("order-results-title")?.focus();
   }
 
   function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); void load(applied); }
@@ -212,15 +200,28 @@
     </section>
     <section class="staff-admin-panel checkin-history-panel order-list-panel" aria-labelledby="order-results-title">
       <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="order-results-title" tabindex="-1">Daftar pesanan</h2></div><button class="staff-text-button" type="button" onclick={() => load(applied)} disabled={loading}>Muat ulang</button></div>
-      <p class="staff-muted" role="status" aria-live="polite">{items.length} pesanan dimuat{#if mobile && visibleItems.length} · Menampilkan {mobilePage * pageSize + 1}–{mobilePage * pageSize + visibleItems.length}{/if}</p>
+      <p class="staff-muted" role="status" aria-live="polite">{items.length} pesanan dimuat</p>
       {#if loading}<p class="staff-muted" role="status">Memuat pesanan…</p>
       {:else if error && !items.length}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => load(applied)}>Coba lagi</button></p>
       {:else if !items.length}<p class="staff-muted" role="status">Belum ada pesanan yang cocok.</p>
-      {:else}{#if mobile}<p id="order-scroll-hint" class="staff-muted">Geser kartu untuk melihat pesanan lainnya.</p>{/if}
+      {:else}<AdminMobileList count={items.length} bind:group={mobilePage} bind:scrollLeft={mobileScroll} headingId="order-results-title" hasMore={Boolean(nextCursor)} loadMore={() => load(applied, true)} disabled={loading || loadingMore}>
+        {#if mobile}<ul class="admin-mobile-list">
+          {#each visibleItems as item (item.id)}<li class="admin-mobile-card">
+            <div class="admin-mobile-card-header"><strong>{item.reference}</strong><span class="admin-order-status" class:is-paid={item.status === "PAID"} class:is-expired={item.status === "EXPIRED"}>Status: {statusLabel(item.status)}</span></div>
+            <dl class="admin-card-fields">
+              <div><dt>Pembeli</dt><dd>{item.buyerName}</dd></div>
+              <div><dt>Konser</dt><dd>{item.eventName}</dd></div>
+              <div><dt>Total</dt><dd>{money(item.total)}</dd></div>
+              <div><dt>Tanggal</dt><dd><time datetime={item.createdAt}>{adminDate.format(new Date(item.createdAt))}</time></dd></div>
+              <div><dt>Waktu</dt><dd>{adminTime.format(new Date(item.createdAt))} WIB</dd></div>
+            </dl>
+            <button id={`order-detail-${item.id}`} class="staff-text-button" type="button" aria-label={`Lihat detail pesanan ${item.reference}`} aria-expanded={selectedId === item.id} onclick={() => openDetail(item.id)}>Lihat detail</button>
+          </li>{/each}
+        </ul>{:else}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (Scrollable orders need keyboard focus for native horizontal scrolling.) -->
-        <div class="history-table-wrap" bind:this={tableWrap} tabindex="0" role="region" aria-labelledby="order-results-title" aria-describedby={mobile ? "order-scroll-hint" : undefined}><table class="history-table"><caption class="visually-hidden">Daftar pesanan terbaru</caption><thead><tr><th scope="col">Nomor pesanan</th><th scope="col">Pembeli</th><th scope="col">Konser</th><th scope="col">Total</th><th scope="col">Status</th><th scope="col">Tanggal (WIB)</th><th scope="col">Aksi</th></tr></thead><tbody>{#each visibleItems as item (item.id)}<tr class:admin-mobile-card={mobile}><td data-label="Nomor pesanan"><code>{item.reference}</code></td><td data-label="Pembeli">{item.buyerName}</td><td data-label="Konser">{item.eventName}</td><td data-label="Total">{money(item.total)}</td><td data-label="Status"><span class="admin-order-status" class:is-paid={item.status === "PAID"} class:is-expired={item.status === "EXPIRED"}>Status: {statusLabel(item.status)}</span></td><td data-label="Tanggal (WIB)"><time datetime={item.createdAt}>{#if mobile}<span class="admin-card-date">{adminDate.format(new Date(item.createdAt))}</span><span class="admin-card-date">{adminTime.format(new Date(item.createdAt))} WIB</span>{:else}{localTime(item.createdAt)}{/if}</time></td><td data-label="Aksi"><button id={`order-detail-${item.id}`} class="staff-text-button" type="button" aria-label={`Lihat detail pesanan ${item.reference}`} aria-expanded={selectedId === item.id} onclick={() => openDetail(item.id)}>Lihat detail</button></td></tr>{/each}</tbody></table></div>
-        {#if mobile}<nav class="order-pagination" aria-label="Halaman daftar pesanan"><button class="staff-secondary-button" type="button" disabled={mobilePage === 0 || loadingMore} onclick={() => changeMobilePage(-1)}>Sebelumnya</button><button class="staff-secondary-button" type="button" disabled={loadingMore || ((mobilePage + 1) * pageSize >= items.length && !nextCursor)} onclick={() => changeMobilePage(1)}>{loadingMore ? "Memuat…" : "Berikutnya"}</button></nav>
-        {:else if nextCursor}<button class="staff-secondary-button order-load-more" type="button" disabled={loadingMore} onclick={() => load(applied, true)}>{loadingMore ? "Memuat…" : "Muat berikutnya"}</button>{/if}
+        <div class="history-table-wrap" bind:this={tableWrap} tabindex="0" role="region" aria-labelledby="order-results-title"><table class="history-table"><caption class="visually-hidden">Daftar pesanan terbaru</caption><thead><tr><th scope="col">Nomor pesanan</th><th scope="col">Pembeli</th><th scope="col">Konser</th><th scope="col">Total</th><th scope="col">Status</th><th scope="col">Tanggal (WIB)</th><th scope="col">Aksi</th></tr></thead><tbody>{#each visibleItems as item (item.id)}<tr><td data-label="Nomor pesanan"><code>{item.reference}</code></td><td data-label="Pembeli">{item.buyerName}</td><td data-label="Konser">{item.eventName}</td><td data-label="Total">{money(item.total)}</td><td data-label="Status"><span class="admin-order-status" class:is-paid={item.status === "PAID"} class:is-expired={item.status === "EXPIRED"}>Status: {statusLabel(item.status)}</span></td><td data-label="Tanggal (WIB)"><time datetime={item.createdAt}>{localTime(item.createdAt)}</time></td><td data-label="Aksi"><button id={`order-detail-${item.id}`} class="staff-text-button" type="button" aria-label={`Lihat detail pesanan ${item.reference}`} aria-expanded={selectedId === item.id} onclick={() => openDetail(item.id)}>Lihat detail</button></td></tr>{/each}</tbody></table></div>
+        {/if}
+      </AdminMobileList>
       {/if}
       {#if error && items.length}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
     </section>

@@ -309,9 +309,9 @@ async def check_workflows(browser, base, output, width):
             if width < 768 and "cursor" in query and sum(1 for method, path, params in requests if path == "admin/orders" and "cursor" in params) == 1:
                 await route.fulfill(status=503, json={"error": {"code": "SERVICE_UNAVAILABLE", "message": "Halaman berikutnya gagal dimuat."}})
                 return
-            rows = orders[10:] if "cursor" in query else orders[:11]
+            rows = orders[10:] if "cursor" in query else orders[:10]
             if query.get("q") == ["absent"]: rows = []
-            await route.fulfill(json={"items": rows, "nextCursor": "cursor-two" if len(rows) == 11 else None, "filterOptions": {"events": [{"id": e["id"], "name": e["artist"]} for e in events]}})
+            await route.fulfill(json={"items": rows, "nextCursor": "cursor-two" if len(rows) == 10 else None, "filterOptions": {"events": [{"id": e["id"], "name": e["artist"]} for e in events]}})
         elif path.startswith("admin/orders/"):
             if method == "POST":
                 refund_calls.append(route.request.post_data_json)
@@ -406,7 +406,7 @@ async def check_workflows(browser, base, output, width):
     await capture("events-edit")
     assert events[-1]["publicationStatus"] == "PUBLISHED" and events[-1]["ticketTiers"][0]["gate"] == "Gate Uji"
     await page.goto(base + "/admin/orders")
-    await expect(page.locator("tbody tr")).to_have_count(5 if width < 768 else 11)
+    await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(5 if width < 768 else 10)
     await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(0 if width < 768 else 1)
     if width >= 768: await expect(page.get_by_role("columnheader", name="Nomor pesanan", exact=True)).to_be_visible()
     if width < 768:
@@ -428,44 +428,44 @@ async def check_workflows(browser, base, output, width):
         await page.get_by_label("Nomor pesanan", exact=True).fill("")
         await toggle.click()
         await expect(page.get_by_role("button", name="Sebelumnya", exact=True)).to_be_disabled()
-        await expect(page.locator("tbody tr.admin-mobile-card")).to_have_count(5)
-        await expect(page.locator("tbody tr").first.locator("time .admin-card-date")).to_have_count(2)
+        await expect(page.locator(".order-list-panel .admin-mobile-card")).to_have_count(5)
+        await expect(page.locator(".order-list-panel li").first.locator("dt").filter(has_text="Tanggal")).to_have_count(1)
         await capture("orders-mobile-first-group")
         await text200("orders-mobile-first-group")
         seen = []
         for index, count in enumerate((5, 5, 5, 5, 2)):
-            await expect(page.locator("tbody tr")).to_have_count(count)
-            references = await page.locator("tbody code").all_text_contents()
+            await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(count)
+            references = await page.locator(".admin-mobile-card-header strong").all_text_contents()
             assert references == [o["reference"] for o in orders[index * 5:index * 5 + count]]
             seen.extend(references)
             if index == 1:
                 # A failed cursor request keeps the current page; retry cannot submit twice.
                 await page.get_by_role("button", name="Berikutnya", exact=True).click()
                 await expect(page.get_by_role("alert")).to_contain_text("Halaman berikutnya gagal dimuat")
-                assert await page.locator("tbody code").all_text_contents() == references
+                assert await page.locator(".admin-mobile-card-header strong").all_text_contents() == references
                 await page.get_by_role("button", name="Berikutnya", exact=True).evaluate("button => { button.click(); button.click(); }")
-                await expect(page.locator(".order-list-panel [role=status]")).to_contain_text("Menampilkan 11–15")
+                await expect(page.locator(".order-list-panel [role=status]").filter(has_text="Menampilkan")).to_contain_text("Menampilkan 11 sampai 15")
                 assert sum(1 for method, path, params in requests if path == "admin/orders" and "cursor" in params) == 2
             elif index < 4:
                 await page.get_by_role("button", name="Berikutnya", exact=True).click()
                 await expect(page.locator("#order-results-title")).to_be_focused()
         assert len(seen) == len(set(seen)) == 22
         await expect(page.get_by_role("button", name="Berikutnya", exact=True)).to_be_disabled()
-        await expect(page.locator(".order-list-panel [role=status]")).to_contain_text("22 pesanan dimuat")
-        table = page.locator(".order-list-panel .history-table-wrap")
-        assert await page.locator("tbody").evaluate("el => getComputedStyle(el).display") == "flex"
-        assert await page.locator("tbody tr").first.evaluate("el => getComputedStyle(el).display") == "grid"
+        await expect(page.locator(".order-list-panel [role=status]").filter(has_text="pesanan dimuat")).to_contain_text("22 pesanan dimuat")
+        table = page.locator(".order-list-panel .mobile-list-viewport")
+        assert await page.locator(".order-list-panel ul").evaluate("el => getComputedStyle(el).display") == "flex"
+        assert await page.locator(".order-list-panel li, .order-list-panel tbody tr").first.evaluate("el => getComputedStyle(el).display") == "grid"
         assert await table.evaluate("el => el.scrollWidth > el.clientWidth")
         await table.focus()
         await page.keyboard.press("ArrowRight")
-        await page.wait_for_function("document.querySelector('.order-list-panel .history-table-wrap').scrollLeft > 0")
+        await page.wait_for_function("document.querySelector('.order-list-panel .mobile-list-viewport').scrollLeft > 0")
         await table.evaluate("el => el.scrollLeft = el.scrollWidth")
         table_scroll = await table.evaluate("el => el.scrollLeft")
     else:
         await page.get_by_role("button", name="Muat berikutnya", exact=True).click()
-        await expect(page.locator("tbody tr")).to_have_count(22)
+        await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(22)
         await expect(page.get_by_text("22 pesanan dimuat", exact=True)).to_be_visible()
-        assert await page.locator("tbody tr").evaluate_all("rows => new Set(rows.map(r => r.querySelector('code').textContent)).size") == 22
+        assert await page.locator(".order-list-panel li, .order-list-panel tbody tr").evaluate_all("rows => new Set(rows.map(r => r.querySelector('code').textContent)).size") == 22
     list_count = 2 if width < 768 else 22
     await capture("orders-list")
     await text200("orders-list")
@@ -482,7 +482,7 @@ async def check_workflows(browser, base, output, width):
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await expect(order_trigger).to_be_focused()
     assert abs(await page.evaluate("scrollY") - list_scroll) <= 2
-    await expect(page.locator("tbody tr")).to_have_count(list_count)
+    await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(list_count)
     # Detail load failures still provide a focused title and a way back to the retained list.
     detail_failed = True
     await order_trigger.click()
@@ -490,13 +490,13 @@ async def check_workflows(browser, base, output, width):
     await expect(page.get_by_role("alert")).to_contain_text("Detail gagal dimuat")
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     detail_failed = False
-    await expect(page.locator("tbody tr")).to_have_count(list_count)
+    await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(list_count)
 
     if width < 768:
         assert abs(await table.evaluate("el => el.scrollLeft") - table_scroll) <= 2
         for _ in range(4):
             await page.get_by_role("button", name="Sebelumnya", exact=True).click()
-        await expect(page.locator("tbody tr")).to_have_count(5)
+        await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(5)
         await expect(page.get_by_role("button", name="Sebelumnya", exact=True)).to_be_disabled()
 
     # Refund drafts require confirmation; unknown mutations stay locked across list/detail switches.
@@ -524,16 +524,16 @@ async def check_workflows(browser, base, output, width):
     await expect(page.locator(".order-selected-panel")).to_contain_text("Permintaan admin")
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
-    await expect(page.locator("tbody tr")).to_have_count(5 if width < 768 else 22)
-    await expect(page.locator("tbody tr").first).to_contain_text("Refund diproses")
+    await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(5 if width < 768 else 22)
+    await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr").first).to_contain_text("Refund diproses")
     if width < 768: await page.get_by_role("button", name="Buka pencarian pesanan", exact=True).click()
     await page.get_by_label("Nomor pesanan", exact=True).fill("absent")
     await page.get_by_role("button", name="Cari", exact=True).click()
-    await expect(page.locator("tbody tr")).to_have_count(0)
+    await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(0)
     await capture("orders-empty")
     assert requests[-1][2].get("q") == ["absent"]
     await page.get_by_role("button", name="Reset", exact=True).click()
-    await expect(page.locator("tbody tr")).to_have_count(5 if width < 768 else 11)
+    await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(5 if width < 768 else 10)
     if width < 768:
         await expect(page.get_by_role("button", name="Sebelumnya", exact=True)).to_be_disabled()
     assert not errors, errors
@@ -543,7 +543,7 @@ async def check_workflows(browser, base, output, width):
 
 
 async def check_mobile_lists(browser, base, output, width):
-    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 768, has_touch=width < 768)
+    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 768, has_touch=width < 768, timezone_id="America/Los_Angeles")
     await context.add_init_script(SESSION_INIT)
     page = await context.new_page()
     errors, cursor_calls, requests, audits = [], {}, [], []
@@ -551,7 +551,7 @@ async def check_mobile_lists(browser, base, output, width):
     endpoints = {
         "/admin/events": ("events", 20), "/admin/staff": ("staff", 20),
         "/admin/payment-cases": ("items", 22), "/admin/email-jobs": ("items", 22),
-        "/admin/check-ins": ("items", 22),
+        "/admin/check-ins": ("items", 22), "/admin/orders": ("items", 22),
     }
 
     async def fixture(route):
@@ -560,10 +560,22 @@ async def check_mobile_lists(browser, base, output, width):
         requests.append((route.request.method, endpoint, url.query))
         assert route.request.method == "GET", "List navigation must not mutate data"
         status, data = body(route.request.url, "standard", "ADMIN")
+        if endpoint == "/admin/pricing":
+            voucher = {"code": "HEMAT10", "kind": "PERCENT", "value": 10, "startsAt": "2020-01-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z", "active": True, "eventId": "", "minimumSubtotal": 0, "quota": 1000000000, "revision": 1, "usage": {"held": 1000, "consumed": 2000, "released": 3000}}
+            status, data = 200, {"settings": {"adminFee": 7500, "revision": 1}, "history": [], "vouchers": [{**voucher, "code": f"PROMO_LIBURAN_AKHIR_TAHUN_{i:02d}"} for i in range(12)]}
+        elif endpoint.startswith("/admin/payment-cases/"):
+            status, data = body(base + "/api/v1/admin/payment-cases/17", "standard", "ADMIN")
+            data["id"] = endpoint.split("/")[-1]
+        elif endpoint.startswith("/admin/email-jobs/"):
+            status, data = body(base + "/api/v1/admin/email-jobs/" + "e" * 32, "standard", "ADMIN")
+            data["id"] = endpoint.split("/")[-1]
+        elif endpoint.startswith("/admin/orders/"):
+            status, data = body(base + "/api/v1/admin/orders/" + ORDER, "standard", "ADMIN")
+            data["id"] = endpoint.split("/")[-1]
         if endpoint in endpoints:
             key, total = endpoints[endpoint]
             seed = data[key][0]
-            rows = [{**deepcopy(seed), "id": (str(i + 100) if endpoint == "/admin/check-ins" else f"concert-{i}" if endpoint == "/admin/events" else f"{i + 100:032x}"), **({"name": f"Petugas {i:02d}", "role": "STAFF"} if key == "staff" else {})} for i in range(total)]
+            rows = [{**deepcopy(seed), "id": (str(i + 100) if endpoint in ("/admin/check-ins", "/admin/payment-cases") else f"concert-{i}" if endpoint == "/admin/events" else f"{i + 100:032x}"), **({"name": f"Petugas {i:02d}", "role": "STAFF"} if key == "staff" else {})} for i in range(total)]
             if endpoint == "/admin/events":
                 rows[0]["artist"] = "Konser dengan nama panjang untuk pemeriksaan kartu mobile"
                 rows[0]["ticketTiers"][0].update(capacity=1000000000, availableQuantity=999999942)
@@ -572,6 +584,12 @@ async def check_mobile_lists(browser, base, output, width):
                     person.update(role="ADMIN" if i == 0 else "STAFF", active=i % 4 != 3,
                                   email="nama.petugas.yang.sangat.panjang@contoh-domain-pengujian.example.test" if i == 1 else f"petugas{i}@example.test",
                                   assignments=[{"eventId": "concert-0", "gate": "Gate B"}] if i % 3 == 2 else [])
+            elif endpoint == "/admin/check-ins":
+                outcomes = ["CHECKED_IN", "TICKET_ALREADY_USED", "INVALID_REQUEST", "TICKET_NOT_FOUND", "ORDER_NOT_PAID", "WRONG_GATE", "FORBIDDEN", "EVENT_CHANGED"]
+                for i, item in enumerate(rows):
+                    item.update(outcome=outcomes[i % len(outcomes)], code=None if i == 2 else TICKET["code"],
+                                eventName="Konser dengan nama panjang untuk pemeriksaan kartu riwayat check-in",
+                                recordedAt="2026-10-09T18:00:37Z", checkedInAt="2026-10-09T18:00:37Z" if i % len(outcomes) in (0, 1) else None)
             if endpoint in ("/admin/events", "/admin/staff"):
                 data[key] = rows
             else:
@@ -587,38 +605,57 @@ async def check_mobile_lists(browser, base, output, width):
 
     await page.route("**/api/v1/**", fixture)
     specs = [("events", "event-list-title", ".event-admin-list li", 20), ("staff", "staff-list-title", "[id^=staff-account-]", 20),
-             ("issues", "case-list-title", "tbody tr", 11), ("issues", "email-list-title", "tbody tr", 11),
-             ("check-ins", "history-results-title", "tbody tr", 11)]
+             ("orders", "order-results-title", ".admin-mobile-list > li, tbody tr", 11),
+             ("pricing", "list-title", ".voucher-list > li, .voucher-table tbody tr", 12),
+             ("issues", "case-list-title", ".admin-mobile-list > li, tbody tr", 11), ("issues", "email-list-title", ".admin-mobile-list > li, tbody tr", 11),
+             ("check-ins", "history-results-title", ".admin-mobile-list > li, tbody tr", 11)]
     for route, heading, row_selector, count in specs:
         await page.goto(base + "/admin/" + route)
         section = page.locator(f'section[aria-labelledby="{heading}"]')
         rows = section.locator(row_selector)
         await expect(rows).to_have_count(5 if width < 768 else count)
         if width < 768:
+            await expect(section.locator(".admin-mobile-card")).to_have_count(5)
+            first = rows.first
+            assert await first.evaluate("el => getComputedStyle(el).borderTopStyle") == "solid"
+            assert await first.locator("dl.admin-card-fields").evaluate_all("els => els.every(el => getComputedStyle(el).gridTemplateColumns.split(' ').length === 1)")
+            await expect(first.locator("dl.admin-card-fields")).to_have_count(2 if route == "pricing" else 1)
+            assert await first.evaluate("el => el.tagName === 'LI' && el.parentElement.tagName === 'UL'")
+            assert await first.evaluate("el => getComputedStyle(el).padding === '16px'")
+            assert await first.locator("dt").count() == await first.locator("dd").count()
+            if route == "events":
+                await expect(first.locator("dd").nth(4)).to_have_text("1.000.000.000")
+                await expect(first.locator("dd").nth(5)).to_have_text("999.999.942")
+            if heading == "email-list-title":
+                await expect(first.locator("time .admin-card-date")).to_have_count(2)
             if route != "check-ins":
-                await expect(section.locator(".admin-mobile-card")).to_have_count(5)
-                first = rows.first
-                assert await first.evaluate("el => getComputedStyle(el).borderTopStyle") == "solid"
-                if route in ("events", "staff"):
-                    await expect(first.locator("dl.admin-card-fields")).to_have_count(1)
-                    assert await first.locator("dt").count() == await first.locator("dd").count()
-                if route == "events":
-                    await expect(first.locator("dd").nth(4)).to_have_text("1.000.000.000")
-                    await expect(first.locator("dd").nth(5)).to_have_text("999.999.942")
-                if heading == "email-list-title":
-                    await expect(first.locator("time .admin-card-date")).to_have_count(2)
-                badges = first.locator(".admin-order-status, .staff-status")
-                assert await badges.count() > 0
-                assert await badges.evaluate_all("els => els.every(el => el.tabIndex < 0 && getComputedStyle(el).cursor !== 'pointer')")
-                # Text enlargement must keep label/value pairs and actions inside each card.
-                await page.evaluate("""() => {
-                  window.__cardFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
-                  for (const [el, , size] of window.__cardFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
-                }""")
-                assert await first.evaluate("el => el.scrollWidth <= el.clientWidth + 1"), (heading, width, "200% text overflows card")
-                assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (heading, width, "200% text overflows viewport")
-                await page.screenshot(path=str(output / f"mobile-cards-{heading}-text200-{width}.png"), full_page=True, animations="disabled")
-                await page.evaluate("() => { for (const [el, original] of window.__cardFonts) el.style.fontSize = original; }")
+                action = rows.nth(1).locator("button").first
+                assert await action.evaluate("el => { const button = el.getBoundingClientRect(), card = el.closest('li').getBoundingClientRect(); return button.height >= 44 && Math.abs(button.width - card.width + 34) <= 2; }")
+            else:
+                await expect(rows.locator("button, a")).to_have_count(0)
+                await expect(first.locator("time .admin-card-date")).to_have_text(["10 Okt 2026", "01.00.37 WIB", "10 Okt 2026", "01.00.37 WIB"])
+                await expect(first.locator(".admin-order-status.is-paid")).to_have_text("Check-in berhasil")
+                await expect(rows.nth(1).locator(".admin-order-status.is-expired")).to_have_text("Tiket sudah digunakan")
+                await expect(rows.nth(2).locator("dd").last).to_have_text("Belum tersedia")
+                await expect(rows.nth(2).locator("strong")).to_have_text("Kode tidak valid")
+            if route == "staff":
+                assert await first.locator(".admin-card-fields > div").last.evaluate("el => { const label = el.querySelector('dt').getBoundingClientRect(), value = el.querySelector('dd').getBoundingClientRect(); return Math.abs(label.y - value.y) <= 1 || getComputedStyle(el).gridTemplateColumns.split(' ').length === 1; }")
+                await expect(first.locator("button")).to_have_count(0)
+                await expect(first.locator("dt")).to_contain_text(["Email", "Peran", "Penugasan"])
+            if route == "pricing":
+                await expect(first.locator('[aria-label="Penggunaan voucher"] dd')).to_have_text(["1.000", "2.000", "3.000"])
+            badges = first.locator(".admin-order-status, .staff-status")
+            assert await badges.count() > 0
+            assert await badges.evaluate_all("els => els.every(el => el.tabIndex < 0 && getComputedStyle(el).cursor !== 'pointer')")
+            # Text enlargement must keep label/value pairs and actions inside each card.
+            await page.evaluate("""() => {
+              window.__cardFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+              for (const [el, , size] of window.__cardFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+            }""")
+            assert await first.evaluate("el => el.scrollWidth <= el.clientWidth + 1"), (heading, width, "200% text overflows card")
+            assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (heading, width, "200% text overflows viewport")
+            await page.screenshot(path=str(output / f"mobile-cards-{heading}-text200-{width}.png"), full_page=True, animations="disabled")
+            await page.evaluate("() => { for (const [el, original] of window.__cardFonts) el.style.fontSize = original; }")
             viewport = section.locator(".mobile-list-viewport")
             await expect(viewport).to_have_attribute("tabindex", "0")
             assert await page.evaluate("innerWidth === document.documentElement.clientWidth && document.documentElement.scrollWidth <= innerWidth"), "Cards expanded the mobile viewport"
@@ -650,21 +687,28 @@ async def check_mobile_lists(browser, base, output, width):
             await expect(page.locator("#" + heading)).to_be_focused()
             await expect(section.get_by_role("status").filter(has_text="Menampilkan")).to_contain_text("6 sampai 10")
             await expect(rows).to_have_count(5)
-            if route in ("events", "staff"):
+            if route != "check-ins":
                 trigger = rows.nth(2).get_by_role("button")
                 await trigger.scroll_into_view_if_needed()
                 await page.wait_for_timeout(150)
                 left = await viewport.evaluate("el => el.scrollLeft")
+                top = await page.evaluate("scrollY")
                 await trigger.click()
-                await expect(page.locator("#event-editor-title" if route == "events" else "#staff-edit-title")).to_be_focused()
+                title = {"events": "event-editor-title", "staff": "staff-edit-title", "orders": "order-detail-title", "issues": "issue-detail-title", "pricing": "voucher-title"}[route]
+                await expect(page.locator("#" + title)).to_be_focused()
                 await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
                 await expect(trigger).to_be_focused()
                 assert abs(await viewport.evaluate("el => el.scrollLeft") - left) <= 2, "Returning from editor moved the selected card"
+                assert abs(await page.evaluate("scrollY") - top) <= 2, "Returning from detail moved the page"
+            if route == "pricing":
+                await section.get_by_role("button", name="Berikutnya", exact=True).click()
+                await expect(rows).to_have_count(2)
+                await expect(section.get_by_role("button", name="Berikutnya", exact=True)).to_be_disabled()
             if count == 11:
                 await section.get_by_role("button", name="Berikutnya", exact=True).click()
                 await expect(rows).to_have_count(1)
                 await expect(section.get_by_role("status").filter(has_text="Menampilkan")).to_contain_text("11 sampai 11")
-                endpoint = "/admin/" + ({"case-list-title": "payment-cases", "email-list-title": "email-jobs"}.get(heading, "check-ins"))
+                endpoint = "/admin/" + ({"case-list-title": "payment-cases", "email-list-title": "email-jobs", "order-results-title": "orders"}.get(heading, "check-ins"))
                 assert endpoint not in cursor_calls, "Remaining loaded cards must not require a request"
                 await section.get_by_role("button", name="Berikutnya", exact=True).click()
                 await expect(page.get_by_role("alert")).to_contain_text("gagal dimuat")
@@ -676,15 +720,119 @@ async def check_mobile_lists(browser, base, output, width):
                 await expect(page.get_by_role("alert")).to_have_count(0)
             await section.get_by_role("button", name="Sebelumnya", exact=True).click()
         else:
-            assert await section.locator(".mobile-list-viewport").evaluate("el => getComputedStyle(el).scrollSnapType === 'none'")
+            assert await section.locator(".history-table-wrap" if route == "pricing" else ".mobile-list-viewport").evaluate("el => getComputedStyle(el).scrollSnapType === 'none'")
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (route, width)
         await page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
+        if width < 768:
+            await page.wait_for_function("id => { const viewport = document.querySelector(`section[aria-labelledby='${id}'] .mobile-list-viewport`); return viewport.scrollLeft === 0; }", arg=heading)
+            await expect(rows.first).to_be_visible()
         await page.screenshot(path=str(output / f"mobile-lists-{heading}-{width}.png"), full_page=True, animations="disabled")
         audits.append(heading)
     assert not errors, errors
     (output / f"mobile-lists-{width}.json").write_text(json.dumps({"width": width, "automated": True, "humanUAT": "not performed", "lists": audits, "requests": requests, "browserErrors": errors}, indent=2))
     await context.close()
     print(f"PASS {width}: " + ("five-card groups, mouse dragging, native touch swipe, keyboard scrolling, focus restoration, partial groups, failed cursor retry, viewport containment" if width < 768 else "full desktop lists, no carousel snapping, viewport containment"))
+
+    await check_worker_cards(browser, base, output, width)
+
+
+async def check_worker_cards(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="America/Los_Angeles")
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    mode, calls, errors = "standard", [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    async def fixture(route):
+        assert route.request.method == "GET", "Operational checks must not mutate data"
+        endpoint = urlparse(route.request.url).path.removeprefix("/api/v1")
+        if endpoint == "/admin/operations":
+            calls.append(mode)
+            if mode == "stale":
+                await route.fulfill(status=503, json={"error": {"message": "Snapshot belum tersedia."}})
+                return
+        status, data = body(route.request.url, "empty" if mode == "empty" else "standard", "ADMIN")
+        if endpoint == "/admin/operations" and mode != "empty":
+            worker = data["workers"][0]
+            data.update(heldTickets=1234, workers=[
+                {**worker, "name": "payment-reconcile-worker-dengan-nama-panjang-untuk-pemeriksaan-mobile", "running": True,
+                 "lastFinishedAt": "2026-10-09T18:00:37Z", "lastSuccessAt": "2026-10-09T18:00:37Z", "consecutiveFailures": 1000},
+                {**worker, "name": "email", "lastFinishedAt": None, "lastSuccessAt": None, "consecutiveFailures": 0},
+            ])
+        await route.fulfill(status=status, json=data)
+
+    await page.route("**/api/v1/**", fixture)
+    await page.goto(base + "/admin/operations")
+    details = page.locator("details").filter(has=page.get_by_role("heading", name="Worker", exact=True))
+    summary = details.locator("summary")
+    await expect(details).not_to_have_attribute("open", "")
+    await summary.focus()
+    await page.keyboard.press("Enter")
+    await expect(details).to_have_attribute("open", "")
+    await expect(details.locator(".report-table-hint")).to_be_hidden()
+    rows = details.locator("li.admin-mobile-card" if width < 768 else "tbody tr")
+    await expect(rows).to_have_count(2)
+    if width < 768:
+        first = rows.first
+        assert await first.evaluate("el => el.parentElement.tagName === 'UL' && getComputedStyle(el).padding === '16px' && getComputedStyle(el).borderTopStyle === 'solid'")
+        assert await first.locator("dt").count() == await first.locator("dd").count() == 3
+        await expect(first.locator("time .admin-card-date")).to_have_text(["10 Okt 2026", "01.00.37 WIB", "10 Okt 2026", "01.00.37 WIB"])
+        await expect(first.locator("dd").last).to_have_text("1.000")
+        await expect(rows.nth(1).locator("dd")).to_have_text(["Belum ada", "Belum ada", "0"])
+        await expect(details.locator(".admin-order-status")).to_have_text(["Memproses", "Menunggu"])
+        assert await details.locator(".admin-order-status").evaluate_all("els => els.every(el => el.tabIndex < 0 && getComputedStyle(el).cursor !== 'pointer')")
+        assert await details.locator("ul").evaluate("el => getComputedStyle(el).display === 'grid' && getComputedStyle(el).gap === '16px' && el.scrollWidth <= el.clientWidth + 1")
+        await expect(details.locator(".mobile-list-viewport, nav, button")).to_have_count(0)
+    else:
+        await expect(details.locator(".admin-mobile-card")).to_have_count(0)
+        await expect(rows.first.locator("td").last).to_have_text("1.000")
+    metrics = page.locator("details").filter(has=page.get_by_role("heading", name="Ringkasan metrik", exact=True))
+    if not await metrics.evaluate("el => el.open"):
+        await metrics.locator("summary").click()
+    await expect(metrics.locator("dd").nth(5)).to_have_text("1.234")
+    assert await summary.evaluate("el => el.getBoundingClientRect().height >= 44")
+    assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    if width < 768:
+        await page.screenshot(path=str(output / f"worker-cards-{width}.png"), full_page=True, animations="disabled")
+    else:
+        # Full-page capture changes media queries and resets desktop disclosure defaults.
+        await details.screenshot(path=str(output / f"worker-cards-{width}.png"), animations="disabled")
+    if width < 768:
+        await page.evaluate("""() => {
+          window.__cardFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__cardFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        assert await rows.evaluate_all("els => els.every(el => el.scrollWidth <= el.clientWidth + 1)")
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (width, "200% worker text overflows viewport")
+        await page.screenshot(path=str(output / f"worker-cards-text200-{width}.png"), full_page=True, animations="disabled")
+        await page.evaluate("() => { for (const [el, original] of window.__cardFonts) el.style.fontSize = original; }")
+    mode = "stale"
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(page.get_by_text("Pembaruan gagal. Data terakhir tetap ditampilkan.")).to_be_visible()
+    await expect(rows).to_have_count(2)
+    await expect(details).to_have_attribute("open", "")
+    mode = "empty"
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await expect(details.get_by_text("Belum ada data worker.")).to_be_visible()
+    await expect(details.locator(".admin-mobile-card")).to_have_count(0)
+    await expect(page.locator(".ops-actions")).to_have_count(0)
+    mode = "standard"
+    await page.clock.install()
+    await page.reload()
+    await expect(rows).to_have_count(2)
+    await summary.click()
+    await page.clock.run_for(50)
+    await expect(details).to_have_attribute("open", "")
+    previous_calls = len(calls)
+    async with page.expect_response(lambda response: urlparse(response.url).path == "/api/v1/admin/operations"):
+        await page.clock.run_for(60_000)
+    await expect(page.get_by_text("Pembaruan gagal. Data terakhir tetap ditampilkan.")).to_have_count(0)
+    assert len(calls) == previous_calls + 1, "Automatic refresh must still run every minute"
+    await expect(details).to_have_attribute("open", "")
+    assert not errors, errors
+    (output / f"worker-cards-{width}.json").write_text(json.dumps({"width": width, "timezone": "America/Los_Angeles", "calls": calls, "browserErrors": errors}, indent=2))
+    await context.close()
+    print(f"PASS {width}: worker cards/table, WIB, localized counts, disclosure, failed refresh retains data, automatic refresh, empty state")
 
 
 async def main():
@@ -724,7 +872,9 @@ async def main():
             await browser.close()
             return
         if args.mobile_lists:
-            for width in (320, 390, 768, 1440): await check_mobile_lists(browser, args.base_url, output, width)
+            for width in (320, 390, 768, 1440):
+                if args.only == "operations": await check_worker_cards(browser, args.base_url, output, width)
+                else: await check_mobile_lists(browser, args.base_url, output, width)
             await browser.close()
             return
         if args.workflows:
@@ -853,7 +1003,10 @@ async def main():
                         await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).wait_for()
                         if fixture_calls.get("POST retry") != 1:
                             raise AssertionError("uncertain retry fixture did not send exactly one POST")
-                        await expect(page.get_by_role("button", name="Kembali ke daftar", exact=True)).to_have_count(0)
+                        if viewport == "mobile":
+                            await expect(page.get_by_role("button", name="Kembali ke daftar", exact=True)).to_be_disabled()
+                        else:
+                            await expect(page.get_by_role("button", name="Kembali ke daftar", exact=True)).to_have_count(0)
                         await expect(page.get_by_role("button", name="Kirim ulang email", exact=True)).to_be_disabled()
                         async with page.expect_response(lambda response: urlparse(response.url).path == f"/api/v1/admin/email-jobs/{'e' * 32}"):
                             await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).click()

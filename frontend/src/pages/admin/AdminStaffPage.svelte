@@ -289,19 +289,17 @@
         {:else if filteredStaff.length === 0}<p class="staff-muted">Tidak ada akun yang cocok. Ubah pencarian atau reset filter.</p>
         {:else}<AdminMobileList count={filteredStaff.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="staff-list-title">{#if mobileList.current}<ul class="staff-list">{#each mobileListItems(filteredStaff, mobileGroup, mobileList.current) as person (person.id)}
           <li id={`staff-account-${person.id}`} class:admin-mobile-card={mobileList.current} tabindex="-1">
-            <div class="staff-list-identity">
                 <div class="admin-mobile-card-header"><strong>{person.name}</strong><span class="staff-status" class:is-active={person.active}>Status: {person.active ? "Aktif" : "Nonaktif"}</span></div>
                 <dl class="admin-card-fields">
                   <div><dt>Email</dt><dd>{person.email}</dd></div>
                   <div><dt>Peran</dt><dd><span class="staff-role">{person.role === "ADMIN" ? "Admin" : "Staff"}</span></dd></div>
-                  <div><dt>Penugasan</dt><dd>
+                  <div><dt>Penugasan</dt><dd class="staff-list-identity">
                     {#each person.assignments.slice(0, 2) as assignment}<span class="admin-card-assignment">{assignmentLabel(assignment)}</span>{/each}
                     {#if person.assignments.length > 2}<details><summary>Lihat semua penugasan ({person.assignments.length.toLocaleString("id-ID")})</summary>{#each person.assignments.slice(2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}</details>{/if}
                     {#if !person.assignments.length}{person.role === "STAFF" ? "Belum ditugaskan. Atur event dan gate melalui Kelola." : "Tanpa penugasan"}{/if}
                   </dd></div>
                 </dl>
                 {#if person.role === "ADMIN"}<span>Akun administrator tidak dapat diubah melalui halaman ini.</span>{/if}
-            </div>
             {#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button" type="button" disabled={saving} onclick={() => selectStaff(person)}>Kelola<span class="visually-hidden"> {person.name}</span></button>{/if}
           </li>
         {/each}</ul>
@@ -412,7 +410,6 @@
   .staff-workspace :global(.staff-assignment-controls) { grid-template-columns: minmax(0, 1fr); }
   @media (max-width: 767px) {
     .staff-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
-    .staff-list-identity { grid-column: 1 / -1; }
     .staff-list li > button { justify-self: end; }
     .staff-filter-toggle { display: inline-flex; justify-content: center; }
     .staff-list-filters { grid-template-columns: minmax(0, 1fr); }

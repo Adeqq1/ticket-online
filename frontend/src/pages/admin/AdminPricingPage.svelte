@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
+  import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
+  import { mobileGroupSize, mobileListItems } from "../../lib/mobile-list.ts";
   const mobile = new MediaQuery("(max-width: 767px)");
+  let voucherGroup = $state(0);
+  let voucherScroll = $state(0);
   let voucherOpen = $state(false);
   let voucherTrigger = "voucher-create-opener";
   let voucherListScroll = 0;
@@ -43,7 +47,6 @@
   const dirty = $derived(Boolean(data) && (fee !== data?.settings.adminFee || voucherState() !== voucherBaseline));
   const money = (v: number) => formatRupiah.format(v);
   const count = new Intl.NumberFormat("id-ID");
-  const voucherTime = new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   function localTime(value: string) { const d = new Date(value); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
   function emptyVoucher(): Voucher { return { code: "", kind: "PERCENT", value: 10, startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 7 * 86400000).toISOString(), active: false, eventId: "", minimumSubtotal: 0, quota: 100, revision: 0 }; }
   function discard() { return !dirty || window.confirm("Perubahan biaya atau voucher belum disimpan. Lanjutkan?"); }
@@ -60,10 +63,18 @@
     if (!saved && (saving || pendingVoucher)) return;
     if (!saved && voucherState() !== voucherBaseline && !window.confirm("Buang perubahan voucher yang belum disimpan?")) return;
     if (!saved) { const before = JSON.parse(voucherBaseline); draft = before.draft; starts = before.starts; ends = before.ends; }
+    const index = data?.vouchers.findIndex(v => v.code === draft.code) ?? -1;
+    if (saved && index >= 0 && voucherGroup !== Math.floor(index / mobileGroupSize)) {
+      voucherGroup = Math.floor(index / mobileGroupSize); voucherScroll = 0;
+      await tick();
+    }
+    if (saved && index < 0) notice = "Voucher tersimpan, tetapi belum tersedia di daftar. Muat ulang untuk memeriksa hasilnya.";
     voucherOpen = false;
     await tick();
-    (document.getElementById(saved ? `voucher-manage-${draft.code}` : voucherTrigger) ?? document.getElementById("pricing-feedback"))?.focus({ preventScroll: true });
+    const trigger = document.getElementById(saved ? `voucher-manage-${draft.code}` : voucherTrigger);
+    trigger?.focus({ preventScroll: !saved });
     window.scrollTo({ top: voucherListScroll, behavior: "instant" });
+    if (!trigger) document.getElementById("pricing-feedback")?.focus();
   }
   function report(cause: unknown) { if (cause instanceof ApiError && cause.status === 401) onUnauthorized(); else error = `Penyimpanan ditolak. ${cause instanceof Error ? cause.message : "Pengaturan belum dapat diproses."}`; }
   function formatSample(event: FocusEvent) {
@@ -176,7 +187,7 @@
 
 <svelte:window onbeforeunload={protect} />
 {#snippet helpHeading(id: string, title: string, description: string)}
-  <div class="pricing-help-heading"><AdminHelp id={`${id}-help`} label={`Penjelasan ${title.toLowerCase()}`} text={description}><h2 id={id}>{title}</h2></AdminHelp></div>
+  <div class="pricing-help-heading"><AdminHelp id={`${id}-help`} label={`Penjelasan ${title.toLowerCase()}`} text={description}><h2 id={id} tabindex="-1">{title}</h2></AdminHelp></div>
 {/snippet}
 {#snippet historyDetails(value: unknown)}
   {@const fields = pricingHistoryFields(value)}
@@ -246,19 +257,19 @@
       {#if eventsError}<p class="staff-form-message staff-form-error" role="alert">{eventsError} <button class="staff-secondary-button" type="button" onclick={loadEvents} disabled={loadingEvents || saving}>Coba lagi katalog</button></p>{/if}
     {/if}
     {#if data?.vouchers.length === 0}<p>Belum ada voucher.</p>{/if}
-    {#if mobile.current}<ul class="voucher-list">
-      {#each data?.vouchers ?? [] as v (v.code)}
-        <li>
-            <div class="voucher-card-heading"><strong>{v.code}</strong><span class="admin-order-status" class:is-paid={v.active}>{v.active ? "Aktif" : "Nonaktif"}</span></div>
-            <dl class="voucher-card-details">
-              <div><dt>Diskon</dt><dd>{v.kind === "PERCENT" ? `${v.value}%` : money(v.value)}</dd></div>
+    {#if mobile.current && data?.vouchers.length}<AdminMobileList count={data.vouchers.length} bind:group={voucherGroup} bind:scrollLeft={voucherScroll} headingId="list-title" disabled={saving || loading || Boolean(pendingVoucher)}><ul class="admin-mobile-list voucher-list">
+      {#each mobileListItems(data.vouchers, voucherGroup, true) as v (v.code)}
+        <li class="admin-mobile-card">
+            <div class="admin-mobile-card-header"><strong>{v.code}</strong><span class="admin-order-status" class:is-paid={v.active}>{v.active ? "Aktif" : "Nonaktif"}</span></div>
+            <dl class="admin-card-fields voucher-card-details">
+              <div><dt>Diskon</dt><dd>{v.kind === "PERCENT" ? `${count.format(v.value)}%` : money(v.value)}</dd></div>
               <div><dt>Konser</dt><dd>{events.find(e => e.id === v.eventId)?.artist ?? (v.eventId || "Semua konser")}</dd></div>
               <div><dt>Minimum subtotal</dt><dd>{money(v.minimumSubtotal)}</dd></div>
-              <div><dt>Mulai berlaku</dt><dd><time datetime={v.startsAt}>{voucherTime.format(new Date(v.startsAt))} WIB</time></dd></div>
-              <div><dt>Berakhir</dt><dd><time datetime={v.endsAt}>{voucherTime.format(new Date(v.endsAt))} WIB</time></dd></div>
+              <div><dt>Mulai berlaku</dt><dd><time datetime={v.startsAt}><span class="admin-card-date">{adminDate.format(new Date(v.startsAt))}</span><span class="admin-card-date">{adminTime.format(new Date(v.startsAt))} WIB</span></time></dd></div>
+              <div><dt>Berakhir</dt><dd><time datetime={v.endsAt}><span class="admin-card-date">{adminDate.format(new Date(v.endsAt))}</span><span class="admin-card-date">{adminTime.format(new Date(v.endsAt))} WIB</span></time></dd></div>
               <div><dt>Kuota order</dt><dd>{count.format(v.quota)}</dd></div>
             </dl>
-            <dl class="voucher-card-usage" aria-label="Penggunaan voucher">
+            <dl class="admin-card-fields" aria-label="Penggunaan voucher">
               <div><dt>Ditahan</dt><dd>{count.format(v.usage.held)}</dd></div>
               <div><dt>Dipakai</dt><dd>{count.format(v.usage.consumed)}</dd></div>
               <div><dt>Dilepas</dt><dd>{count.format(v.usage.released)}</dd></div>
@@ -266,7 +277,7 @@
           <button id={`voucher-manage-${v.code}`} class="staff-secondary-button" type="button" aria-label={`Kelola voucher ${v.code}`} disabled={saving || loading || Boolean(pendingVoucher)} onclick={() => choose(v)}>Kelola voucher</button>
         </li>
       {/each}
-    </ul>
+    </ul></AdminMobileList>
     {:else if data?.vouchers.length}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (The table needs keyboard focus for native horizontal scrolling.) -->
       <div class="history-table-wrap" tabindex="0" role="region" aria-labelledby="list-title">
@@ -343,21 +354,8 @@
   label { display: grid; gap: 8px; min-width: 0; } input,select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 10px; border: 1px solid var(--scan-line); border-radius: 0; background: var(--scan-panel); color: var(--scan-text); font: inherit; }
   .checkbox { display: flex; align-items: center; min-height: 44px; } .checkbox input { width: 20px; min-height: 20px; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } button { min-height: 44px; }
-  .voucher-list,.history { padding: 0; list-style: none; } li { padding: 20px 0; border-top: 1px solid var(--scan-line); overflow-wrap: anywhere; } .voucher-list li { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
-  @media (max-width: 767px) {
-    .voucher-list li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-    .voucher-card-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-    .voucher-card-heading strong { min-width: 0; font-size: 18px; }
-    .voucher-card-details, .voucher-card-usage { margin: 0; line-height: 1.6; }
-    .voucher-card-details { display: grid; gap: 12px; }
-    .voucher-card-details > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7em), 1fr)); gap: 8px 12px; }
-    .voucher-card-usage { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 4.5em), 1fr)); gap: 12px; padding-top: 16px; border-top: 1px solid var(--admin-border); }
-    .voucher-card-usage > div { min-width: 0; }
-    .voucher-list dt { color: var(--admin-secondary); font-size: 14px; }
-    .voucher-list dd { margin: 0; color: var(--admin-text); font-size: 16px; }
-    .voucher-list li > button { width: 100%; }
-  }
+  .history { padding: 0; list-style: none; } .history li { padding: 20px 0; border-top: 1px solid var(--scan-line); overflow-wrap: anywhere; }
   :is(input,select):focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
   @media(max-width: 1000px) { .pricing-grid { grid-template-columns: 1fr; gap: 0; } }
-  @media(max-width: 600px) { .field-row { grid-template-columns: 1fr; } .voucher-list li { display: grid; } button { width: 100%; } }
+  @media(max-width: 600px) { .field-row { grid-template-columns: 1fr; } button { width: 100%; } }
 </style>

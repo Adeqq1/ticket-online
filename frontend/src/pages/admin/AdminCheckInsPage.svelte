@@ -2,7 +2,9 @@
   import { MediaQuery } from "svelte/reactivity";
   import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
   import { mobileListItems } from "../../lib/mobile-list.ts";
+  import { adminDate } from "../../lib/admin-operations.ts";
   const mobileList = new MediaQuery("(max-width: 767px)");
+  const auditTime = new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Jakarta", timeStyle: "medium" });
 
   import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
@@ -79,6 +81,10 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
+{#snippet timestamp(value: string)}
+  <time datetime={value}><span class="admin-card-date">{adminDate.format(new Date(value))}</span><span class="admin-card-date">{auditTime.format(new Date(value))} WIB</span></time>
+{/snippet}
+
   <AdminLayout page="history" contentId="checkin-history-content" skipLabel="Lewati ke riwayat check-in" kicker="OPERASIONAL EVENT • AUDIT" title="Riwayat check-in." description="Periksa hasil scan yang tercatat server beserta petugas dan waktu masuk." onLogout={onLogout} loggingOut={loggingOut} >
     <section class="staff-admin-panel checkin-history-panel" aria-label="Filter riwayat check-in">
       <AdminMobileFilters id="checkin-mobile-filters" title="Filter riwayat">
@@ -96,7 +102,19 @@
       {#if loading}<p class="staff-muted" aria-live="polite">Memuat riwayat check-in…</p>
       {:else if error && !items.length}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => { void load(applied); }}>Coba lagi</button></p>
       {:else if items.length === 0}<p class="staff-muted" role="status">Belum ada percobaan check-in yang cocok.</p>
-      {:else}<AdminMobileList count={items.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="history-results-title" hasMore={Boolean(cursor)} loadMore={() => load(applied, true)} disabled={loadingMore}><div class="history-table-wrap"><table class="history-table"><caption class="visually-hidden">Percobaan check-in terbaru</caption><thead><tr><th scope="col">Waktu</th><th scope="col">Kode tiket</th><th scope="col">Event / gate</th><th scope="col">Petugas</th><th scope="col">Hasil</th><th scope="col">Waktu check-in</th></tr></thead><tbody>{#each mobileListItems(items, mobileGroup, mobileList.current) as item (item.id)}<tr><td data-label="Waktu"><time datetime={item.recordedAt}>{localTime(item.recordedAt)}</time></td><td data-label="Kode tiket"><code>{item.code ?? "Kode tidak valid"}</code></td><td data-label="Event / gate">{item.eventName ?? item.eventId ?? "Belum tersedia"}<small>{item.gate ?? "Belum tersedia"}</small></td><td data-label="Petugas">{item.staff.name}</td><td data-label="Hasil"><span class:history-success={item.outcome === "CHECKED_IN"} class="history-outcome">{outcomeLabel(item.outcome)}</span></td><td data-label="Waktu check-in">{#if item.checkedInAt}<time datetime={item.checkedInAt}>{localTime(item.checkedInAt)}</time>{:else}Belum tersedia{/if}</td></tr>{/each}</tbody></table></div>
+      {:else}<AdminMobileList count={items.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="history-results-title" hasMore={Boolean(cursor)} loadMore={() => load(applied, true)} disabled={loadingMore}>
+        {#if mobileList.current}<ul class="admin-mobile-list" aria-label="Percobaan check-in terbaru">
+          {#each mobileListItems(items, mobileGroup, true) as item (item.id)}<li class="admin-mobile-card">
+            <div class="admin-mobile-card-header"><strong>{item.code ?? "Kode tidak valid"}</strong><span class="admin-order-status" class:is-paid={item.outcome === "CHECKED_IN"} class:is-expired={item.outcome !== "CHECKED_IN"}>{outcomeLabel(item.outcome)}</span></div>
+            <dl class="admin-card-fields">
+              <div><dt>Event</dt><dd>{item.eventName ?? item.eventId ?? "Belum tersedia"}</dd></div>
+              <div><dt>Gate</dt><dd>{item.gate ?? "Belum tersedia"}</dd></div>
+              <div><dt>Petugas</dt><dd>{item.staff.name}</dd></div>
+              <div><dt>Waktu pencatatan</dt><dd>{@render timestamp(item.recordedAt)}</dd></div>
+              <div><dt>Waktu check-in</dt><dd>{#if item.checkedInAt}{@render timestamp(item.checkedInAt)}{:else}Belum tersedia{/if}</dd></div>
+            </dl>
+          </li>{/each}
+        </ul>{:else}<div class="history-table-wrap"><table class="history-table"><caption class="visually-hidden">Percobaan check-in terbaru</caption><thead><tr><th scope="col">Waktu</th><th scope="col">Kode tiket</th><th scope="col">Event / gate</th><th scope="col">Petugas</th><th scope="col">Hasil</th><th scope="col">Waktu check-in</th></tr></thead><tbody>{#each items as item (item.id)}<tr><td data-label="Waktu"><time datetime={item.recordedAt}>{localTime(item.recordedAt)}</time></td><td data-label="Kode tiket"><code>{item.code ?? "Kode tidak valid"}</code></td><td data-label="Event / gate">{item.eventName ?? item.eventId ?? "Belum tersedia"}<small>{item.gate ?? "Belum tersedia"}</small></td><td data-label="Petugas">{item.staff.name}</td><td data-label="Hasil"><span class:history-success={item.outcome === "CHECKED_IN"} class="history-outcome">{outcomeLabel(item.outcome)}</span></td><td data-label="Waktu check-in">{#if item.checkedInAt}<time datetime={item.checkedInAt}>{localTime(item.checkedInAt)}</time>{:else}Belum tersedia{/if}</td></tr>{/each}</tbody></table></div>{/if}
         </AdminMobileList>
         {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
       {/if}
