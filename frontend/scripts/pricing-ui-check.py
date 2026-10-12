@@ -503,6 +503,129 @@ async def check_loading(browser, base, width):
     print(f"PASS {width}: initial/partial/refresh failures, formatting, revision conflict, saved success, unknown fee/voucher verification")
 
 
+async def check_save_recovery(browser, base, width, operation, scenario):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
+    await context.add_init_script(admin.SESSION_INIT)
+    page = await context.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+    errors, requests = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    voucher = {"code": "RECOVER15", "kind": "PERCENT", "value": 10, "startsAt": "2026-10-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z", "active": False, "eventId": "", "minimumSubtotal": 0, "quota": 100, "revision": 1}
+    state = {"settings": {"adminFee": 7500, "revision": 1}, "vouchers": [{**voucher, "usage": {"held": 0, "consumed": 0, "released": 0}}] if operation == "voucher-update" else [], "history": []}
+    mode = {"read": 200, "hold": None, "failAgain": False, "commits": 0}
+
+    def commit(payload):
+        mode["commits"] += 1
+        saved = {**payload, "revision": payload["revision"] + 1}
+        if operation == "fee": state["settings"] = saved
+        else: state["vouchers"] = [{**saved, "usage": {"held": 0, "consumed": 0, "released": 0}}]
+        return saved
+
+    async def api(route):
+        path, method = urlparse(route.request.url).path, route.request.method
+        if path.endswith("/staff/me"): return await route.fulfill(json={"staff": admin.ADMIN})
+        if path.endswith("/admin/events"): return await route.fulfill(json={"events": [admin.EVENT]})
+        if method == "GET":
+            return await route.fulfill(status=mode["read"], json=state if mode["read"] == 200 else {"error": {"message": "Pemeriksaan gagal"}})
+        payload = route.request.post_data_json
+        requests.append((method, path, deepcopy(payload)))
+        if mode["hold"]: await mode["hold"].wait()
+        if len(requests) == 1:
+            if scenario == "concurrent": commit(payload)
+            if operation == "voucher-create": return await route.abort("connectionreset")
+            return await route.fulfill(status=503, json={"error": {"message": "Koneksi penyimpanan terputus"}})
+        if mode["failAgain"]:
+            mode["failAgain"] = False
+            return await route.abort("connectionreset")
+        current = state["settings"] if operation == "fee" else next(iter(state["vouchers"]), None)
+        if method == "POST" and current or method == "PUT" and (not current or current["revision"] != payload["revision"]):
+            return await route.fulfill(status=409, json={"error": {"code": "PRICING_CONFLICT", "message": "Revisi atau kode telah digunakan"}})
+        await route.fulfill(status=201 if method == "POST" else 200, json=commit(payload))
+
+    await page.route("**/api/v1/**", api)
+    await page.goto(base + "/admin/pricing")
+    field = page.get_by_label("Nominal tetap (Rp)", exact=True)
+    await expect(field).to_have_value("7500")
+    if operation == "fee":
+        await field.fill("9000")
+        submit = page.get_by_role("button", name="Simpan biaya admin", exact=True)
+        retry = page.get_by_role("button", name="Coba kirim perubahan biaya yang sama", exact=True)
+        section = page.locator('[aria-labelledby="fee-recovery-title"]')
+    else:
+        if operation == "voucher-update": await page.get_by_role("button", name="Kelola voucher RECOVER15", exact=True).click()
+        elif width < 768: await page.locator("#voucher-create-opener").click()
+        if operation == "voucher-create": await page.get_by_label("Kode voucher", exact=True).fill("RECOVER15")
+        field = page.get_by_label("Nilai diskon (%)", exact=True)
+        await field.fill("15")
+        submit = page.locator(".voucher-editor").get_by_role("button", name="Buat voucher" if operation == "voucher-create" else "Simpan perubahan voucher", exact=True)
+        retry = page.get_by_role("button", name="Coba kirim perubahan voucher yang sama", exact=True)
+        section = page.locator('[aria-labelledby="voucher-recovery-title"]')
+    await submit.click()
+    await expect(retry).to_be_disabled()
+    await expect(field).to_be_disabled()
+    first = requests[0]
+    if scenario == "concurrent":
+        if operation == "fee": state["settings"] = {"adminFee": 10000, "revision": 3}
+        else: state["vouchers"] = [{**state["vouchers"][0], "value": 20, "revision": 3}]
+    verify = page.get_by_role("button", name="Periksa hasil simpan", exact=True)
+    mode["read"] = 503
+    await verify.click()
+    await expect(page.get_by_text("Pembaruan data biaya dan voucher gagal.", exact=False)).to_be_visible()
+    await expect(field).to_have_value("9000" if operation == "fee" else "15")
+    await expect(retry).to_be_disabled()
+    mode["read"] = 200
+    await verify.click()
+    await expect(retry).to_be_enabled()
+    await expect(field).to_be_disabled()  # A GET mismatch alone cannot prove the original request failed.
+    if scenario == "committed": commit(first[2])  # Original request finishes after the verification GET.
+    if scenario == "no-commit":
+        mode["failAgain"] = True
+        await retry.click()
+        await expect(retry).to_be_disabled()
+        await expect(field).to_be_disabled()
+        await verify.click()
+        await expect(retry).to_be_enabled()
+    mode["hold"] = asyncio.Event()
+    await retry.click()
+    await expect(retry).to_be_disabled()
+    await retry.dispatch_event("click")
+    mode["hold"].set()
+    if scenario == "concurrent":
+        accept = section.get_by_role("button", name="Gunakan data server sebagai baseline " + ("biaya" if operation == "fee" else "voucher") + " baru", exact=True)
+        await expect(accept).to_be_enabled()
+        await expect(field).to_be_disabled()
+        await expect(section).to_contain_text("Rp 10.000" if operation == "fee" else "20%")
+        assert mode["commits"] == 1, mode
+        audit = await page.evaluate(staff_audit)
+        assert not audit["failures"] and not audit["overflow"], audit
+        await section.screenshot(path=f"/tmp/phase51-55/pricing/recovery-{operation}-{width}.png")
+        await accept.click()
+        await expect(field).to_be_enabled()
+        await expect(field).to_have_value("9000" if operation == "fee" else "15")
+        await expect(page.locator("#fee-amount" if operation == "fee" else "#voucher-title")).to_be_focused()
+        assert requests[-1] == first, requests  # No automatic revision or operation change on retry.
+        submit = page.get_by_role("button", name="Simpan biaya admin" if operation == "fee" else "Simpan perubahan voucher", exact=True)
+        await submit.click()
+        await expect(page.get_by_role("status").filter(has_text="Biaya admin tersimpan" if operation == "fee" else "Voucher tersimpan")).to_be_visible()
+        await expect(section).to_have_count(0)
+        assert requests[-1][0] == "PUT" and requests[-1][2]["revision"] == 3, requests
+    else:
+        await expect(section).to_have_count(0)
+        assert all(request == first for request in requests), requests
+        assert mode["commits"] == 1, mode
+    assert len(requests) == (3 if scenario in ("no-commit", "concurrent") else 2), requests
+    if operation == "fee": await expect(field).to_be_enabled()
+    elif width < 768:
+        if scenario == "committed": await page.locator(".voucher-editor").get_by_role("button", name="Kembali ke daftar", exact=True).click()
+        await expect(page.locator(".voucher-editor")).not_to_be_visible()
+        await expect(page.locator("#voucher-create-opener")).to_be_enabled()
+        await page.get_by_role("button", name="Kelola voucher RECOVER15", exact=True).click()
+        await expect(page.get_by_label("Nilai diskon (%)", exact=True)).to_be_enabled()
+    assert not errors, errors
+    await context.close()
+    print(f"PASS {width}px recovery {operation}/{scenario}: original payload, revision and method retained; no duplicate commit; conflict resolved explicitly")
+
+
 async def main():
     base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5175"
     async with async_playwright() as p:
@@ -513,6 +636,10 @@ async def main():
                 await check(browser, base, width)
                 for scenario in (("same-quote", "auto-replay", "manual-replay") if width in (1440, 390) else ()):
                     await check_recovery(browser, base, width, scenario)
+                if width in (1440, 320):
+                    for operation in ("fee", "voucher-create", "voucher-update"):
+                        for scenario in ("no-commit", "committed", "concurrent"):
+                            await check_save_recovery(browser, base, width, operation, scenario)
         finally:
             await browser.close()
 

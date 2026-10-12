@@ -21,6 +21,9 @@
   let eventsError = $state("");
   let pendingFee = $state<PricingSettings>();
   let pendingVoucher = $state<Voucher>();
+  let pendingVoucherCreating = $state(false);
+  let feeRecovery = $state<"unverified" | "checked" | "conflict">("unverified");
+  let voucherRecovery = $state<"unverified" | "checked" | "conflict">("unverified");
   let saving = $state(false);
   let error = $state("");
   let notice = $state("");
@@ -68,21 +71,31 @@
     (event.currentTarget as HTMLInputElement).setCustomValidity(sampleError);
     if (sampleValue !== undefined) sample = new Intl.NumberFormat("id-ID").format(sampleValue);
   }
-  async function load() {
+  async function load(conflict?: "fee" | "voucher") {
     loading = true; pricingError = "";
+    let confirmed = false;
     try {
       const current = await getAdminPricing(accessToken);
       if (!data || fee === data.settings.adminFee) fee = current.settings.adminFee;
       data = current;
-      if (pendingFee && current.settings.adminFee === pendingFee.adminFee && current.settings.revision > pendingFee.revision) {
-        fee = current.settings.adminFee; pendingFee = undefined; error = ""; notice = "Biaya admin sesuai hasil penyimpanan pada data terbaru.";
+      if (pendingFee) {
+        if (current.settings.adminFee === pendingFee.adminFee && current.settings.revision > pendingFee.revision) {
+          fee = current.settings.adminFee; pendingFee = undefined; error = ""; notice = "Biaya admin sesuai hasil penyimpanan pada data terbaru."; confirmed = true;
+        } else {
+          feeRecovery = conflict === "fee" || feeRecovery === "conflict" ? "conflict" : "checked";
+          if (conflict === "fee") error = "Konflik biaya: data server berbeda dari draft. Periksa perbandingan sebelum memakai baseline baru.";
+        }
       }
       if (pendingVoucher) {
         const found = current.vouchers.find(v => v.code === pendingVoucher?.code);
-        if (found && sameVoucher(found, pendingVoucher) && (!editing || found.revision > pendingVoucher.revision)) {
-          draft = { ...pendingVoucher, revision: found.revision }; editing = true; starts = localTime(draft.startsAt); ends = localTime(draft.endsAt); baseline = JSON.stringify(draft); voucherBaseline = voucherState(); pendingVoucher = undefined; error = ""; notice = "Voucher sesuai hasil penyimpanan pada data terbaru.";
+        if (found && sameVoucher(found, pendingVoucher) && (pendingVoucherCreating || found.revision > pendingVoucher.revision)) {
+          draft = { ...pendingVoucher, revision: found.revision }; editing = true; starts = localTime(draft.startsAt); ends = localTime(draft.endsAt); baseline = JSON.stringify(draft); voucherBaseline = voucherState(); pendingVoucher = undefined; error = ""; notice = "Voucher sesuai hasil penyimpanan pada data terbaru."; confirmed = true;
+        } else {
+          voucherRecovery = found && (conflict === "voucher" || voucherRecovery === "conflict") ? "conflict" : "checked";
+          if (conflict === "voucher") error = "Konflik voucher: data server berbeda dari draft. Periksa perbandingan sebelum memakai baseline baru.";
         }
       }
+      if (confirmed) { await tick(); document.getElementById("pricing-feedback")?.focus(); }
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
       else pricingError = data ? "Pembaruan data biaya dan voucher gagal. Data terakhir dan draft tetap tersedia. Coba lagi." : "Pengaturan biaya dan voucher gagal dimuat. Coba lagi.";
@@ -97,10 +110,30 @@
   async function saveFee(event: SubmitEvent) {
     event.preventDefault(); if (saving || loading || pendingFee || !data || fee === undefined || !Number.isSafeInteger(fee) || fee < 0 || fee > 1_000_000_000 || sampleValue === undefined) return;
     if (!window.confirm(`Ubah biaya admin per order dari ${money(data.settings.adminFee)} menjadi ${money(fee)}? Hanya order baru yang terpengaruh.`)) return;
-    saving = true; error = ""; notice = "";
     const input = { adminFee: fee, revision: data.settings.revision };
-    try { const next = await saveAdminFee(accessToken, input); data.settings = next; notice = "Biaya admin tersimpan. Order lama tetap memakai nominal sebelumnya."; await load(); }
-    catch (cause) { if (uncertainPricingSave(cause)) { pendingFee = input; error = "Hasil penyimpanan biaya belum pasti. Jangan ulangi penyimpanan; periksa data terbaru."; } else report(cause); } finally { saving = false; }
+    await sendFee(input);
+  }
+  async function sendFee(input: PricingSettings) {
+    if (saving || loading || !data) return;
+    saving = true; error = ""; notice = "";
+    try { const next = await saveAdminFee(accessToken, input); pendingFee = undefined; fee = next.adminFee; data.settings = next; notice = "Biaya admin tersimpan. Order lama tetap memakai nominal sebelumnya."; await load(); }
+    catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
+      else if (pendingFee || uncertainPricingSave(cause)) {
+        pendingFee = input; feeRecovery = "unverified"; error = "Hasil penyimpanan biaya belum pasti. Periksa data terbaru sebelum mengirim perubahan yang sama.";
+        if (cause instanceof ApiError && cause.status === 409) { feeRecovery = "conflict"; await load("fee"); }
+      } else report(cause);
+    } finally { saving = false; }
+  }
+  async function retryFee() {
+    if (saving || loading || pricingError || !pendingFee || feeRecovery !== "checked") return;
+    await sendFee({ ...pendingFee });
+  }
+  async function acceptFeeBaseline() {
+    if (saving || loading || pricingError || !data || !pendingFee || feeRecovery !== "conflict") return;
+    fee = pendingFee.adminFee; pendingFee = undefined; error = "";
+    notice = "Data server menjadi acuan biaya. Draft tetap tersedia; tinjau sebelum menyimpan lagi.";
+    await tick(); document.getElementById("fee-amount")?.focus();
   }
   async function saveVoucher(event: SubmitEvent) {
     event.preventDefault(); if (saving || loading || loadingEvents || eventsError || pendingVoucher || !data) return;
@@ -108,11 +141,35 @@
     const input = { ...draft, code: draft.code.trim().toUpperCase(), startsAt: starts === localTime(draft.startsAt) ? draft.startsAt : new Date(starts).toISOString(), endsAt: ends === localTime(draft.endsAt) ? draft.endsAt : new Date(ends).toISOString() };
     if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) { error = "Akhir masa berlaku harus setelah awal masa berlaku."; return; }
     if (!window.confirm(`Simpan voucher ${input.code}: ${input.kind === "PERCENT" ? input.value + "%" : money(input.value)}, kuota ${input.quota}, ${input.active ? "aktif" : "nonaktif"}? Order yang sudah dibuat tetap memakai snapshot sebelumnya.`)) return;
+    await sendVoucher(input, !editing);
+  }
+  async function sendVoucher(input: Voucher, creating: boolean) {
+    if (saving || loading || !data) return;
     saving = true; error = ""; notice = "";
     let completed = false;
-    try { const saved = await saveAdminVoucher(accessToken, input, !editing); draft = saved; editing = true; starts = localTime(saved.startsAt); ends = localTime(saved.endsAt); baseline = JSON.stringify(saved); voucherBaseline = voucherState(); notice = "Voucher tersimpan."; await load(); completed = true; }
-    catch (cause) { if (uncertainPricingSave(cause)) { pendingVoucher = input; error = "Hasil penyimpanan voucher belum pasti. Jangan ulangi penyimpanan; periksa data terbaru."; } else report(cause); } finally { saving = false; }
+    try { const saved = await saveAdminVoucher(accessToken, input, creating); pendingVoucher = undefined; draft = saved; editing = true; starts = localTime(saved.startsAt); ends = localTime(saved.endsAt); baseline = JSON.stringify(saved); voucherBaseline = voucherState(); notice = "Voucher tersimpan."; await load(); completed = true; }
+    catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
+      else if (pendingVoucher || uncertainPricingSave(cause)) {
+        pendingVoucher = input; pendingVoucherCreating = creating; voucherRecovery = "unverified"; error = "Hasil penyimpanan voucher belum pasti. Periksa data terbaru sebelum mengirim perubahan yang sama.";
+        if (cause instanceof ApiError && cause.status === 409) { voucherRecovery = "conflict"; await load("voucher"); }
+      } else report(cause);
+    } finally { saving = false; }
     if (completed && mobile.current) await closeVoucher(true);
+  }
+  async function retryVoucher() {
+    if (saving || loading || loadingEvents || eventsError || pricingError || !pendingVoucher || voucherRecovery !== "checked") return;
+    await sendVoucher({ ...pendingVoucher }, pendingVoucherCreating);
+  }
+  async function acceptVoucherBaseline() {
+    if (saving || loading || pricingError || !pendingVoucher || voucherRecovery !== "conflict") return;
+    const found = data?.vouchers.find(v => v.code === pendingVoucher?.code);
+    if (!found) return;
+    const { usage, ...server } = found;
+    draft = { ...pendingVoucher, revision: server.revision }; editing = true; starts = localTime(draft.startsAt); ends = localTime(draft.endsAt);
+    baseline = JSON.stringify(server); voucherBaseline = JSON.stringify({ draft: server, starts: localTime(server.startsAt), ends: localTime(server.endsAt) });
+    pendingVoucher = undefined; error = ""; notice = "Data server menjadi acuan voucher. Draft tetap tersedia; tinjau sebelum menyimpan lagi.";
+    await tick(); document.getElementById("voucher-title")?.focus();
   }
   onMount(() => { void load(); void loadEvents(); });
 </script>
@@ -133,13 +190,30 @@
 <AdminLayout page="pricing" contentId="pricing-content" skipLabel="Lewati ke biaya dan voucher" kicker="PENGATURAN BISNIS" title="Biaya dan voucher." description="Atur biaya per order dan promosi tanpa mengubah transaksi lama." onLogout={() => { if (!saving && discard()) onLogout(); }} {loggingOut} logoutDisabled={saving || loggingOut} secondaryAction={{ label: "Muat ulang", disabled: saving || loading, onclick: () => { void load(); } }}>
   <div aria-live="polite">{#if loading}<p role="status">Memuat pengaturan…</p>{/if}{#if notice}<p id="pricing-feedback" tabindex="-1" class="staff-form-message" role="status">{notice}</p>{/if}{#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}{#if dirty}<p>Perubahan belum disimpan.</p>{/if}</div>
   {#if pricingError}<p class="staff-form-message staff-form-error" role="alert">{pricingError} <button class="staff-secondary-button" type="button" disabled={loading || saving} onclick={() => load()}>Coba lagi</button></p>{/if}
-  {#if pendingFee || pendingVoucher}<p class="staff-form-message" role="status">Data terbaru harus sesuai perubahan yang dikirim sebelum tindakan dapat diulang.</p><button class="staff-secondary-button" type="button" disabled={loading || saving} onclick={() => load()}>Periksa hasil simpan</button>{/if}
+  {#if pendingFee || pendingVoucher}<p class="staff-form-message" role="status">Penyimpanan belum terkonfirmasi. Periksa hasilnya; jika belum terbukti, gunakan tindakan di bawah untuk mengirim perubahan awal yang sama.</p><button class="staff-secondary-button" type="button" disabled={loading || saving} onclick={() => load()}>Periksa hasil simpan</button>{/if}
+  {#if pendingFee && data}
+    <section class="staff-admin-panel pricing-recovery" aria-labelledby="fee-recovery-title">
+      <h2 id="fee-recovery-title">Periksa penyimpanan biaya</h2>
+      <div class="pricing-comparison"><div><h3>Draft yang dikirim</h3>{@render historyDetails(pendingFee)}<p>Revisi awal: {pendingFee.revision}</p></div><div><h3>Data server terakhir dimuat</h3>{@render historyDetails(data.settings)}<p>Revisi: {data.settings.revision}</p></div></div>
+      {#if feeRecovery === "conflict"}<p>Data terbaru berbeda. Memakai baseline baru mempertahankan draft dan meminta Anda meninjau serta menyimpan lagi.</p><button class="staff-secondary-button" type="button" disabled={saving || loading || Boolean(pricingError)} onclick={acceptFeeBaseline}>Gunakan data server sebagai baseline biaya baru</button>
+      {:else}<button class="staff-secondary-button" type="button" disabled={saving || loading || Boolean(pricingError) || feeRecovery !== "checked"} onclick={retryFee}>Coba kirim perubahan biaya yang sama</button>{/if}
+    </section>
+  {/if}
+  {#if pendingVoucher && data}
+    {@const server = data.vouchers.find(v => v.code === pendingVoucher?.code)}
+    <section class="staff-admin-panel pricing-recovery" aria-labelledby="voucher-recovery-title">
+      <h2 id="voucher-recovery-title">Periksa penyimpanan voucher {pendingVoucher.code}</h2>
+      <div class="pricing-comparison"><div><h3>Draft yang dikirim</h3>{@render historyDetails(pendingVoucher)}<p>{pendingVoucherCreating ? "Pembuatan voucher" : "Perubahan voucher"} · Revisi awal: {pendingVoucher.revision}</p></div><div><h3>Data server terakhir dimuat</h3>{#if server}{@render historyDetails(server)}<p>Revisi: {server.revision}</p>{:else}<p>Kode voucher belum tersedia pada data terbaru.</p>{/if}</div></div>
+      {#if voucherRecovery === "conflict"}<p>Data terbaru berbeda. Memakai baseline baru mempertahankan draft dan meminta Anda meninjau serta menyimpan lagi.</p><button class="staff-secondary-button" type="button" disabled={saving || loading || Boolean(pricingError)} onclick={acceptVoucherBaseline}>Gunakan data server sebagai baseline voucher baru</button>
+      {:else}<button class="staff-secondary-button" type="button" disabled={saving || loading || loadingEvents || Boolean(eventsError) || Boolean(pricingError) || voucherRecovery !== "checked"} onclick={retryVoucher}>Coba kirim perubahan voucher yang sama</button>{/if}
+    </section>
+  {/if}
   {#if data}
   <div class="pricing-grid" class:voucher-open={voucherOpen}>
     <section class="staff-admin-panel" aria-labelledby="fee-title">
       {@render helpHeading("fee-title", "Biaya admin per order", "Biaya berlaku sekali untuk setiap pesanan baru. Pesanan lama dan refund mengikuti nilai yang tersimpan.")}
       <form onsubmit={saveFee}><fieldset disabled={saving || Boolean(pendingFee)}>
-        <label>Nominal tetap (Rp)<input type="number" inputmode="numeric" min="0" max="1000000000" step="1" required bind:value={fee} /></label>
+        <label>Nominal tetap (Rp)<input id="fee-amount" type="number" inputmode="numeric" min="0" max="1000000000" step="1" required bind:value={fee} /></label>
         <label>Subtotal tiket untuk pratinjau (Rp)<input type="text" inputmode="numeric" required bind:value={sample} onblur={formatSample} oninput={(event) => { sampleError = ""; event.currentTarget.setCustomValidity(""); }} aria-invalid={Boolean(sampleError)} aria-describedby={sampleError ? "preview-error" : undefined} /></label>
         {#if sampleError}<p id="preview-error" role="alert">{sampleError}</p>{/if}
         <p aria-live="polite">{#if fee !== undefined && sampleValue !== undefined}Pratinjau tanpa voucher: {money(sampleValue)} + {money(fee)} = <strong>{money(sampleValue + fee)}</strong>.{/if}</p>
@@ -240,6 +314,7 @@
 </AdminLayout>
 
 <style>
+  .pricing-comparison { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 24px; }
   .pricing-history-table { table-layout: fixed; }
   .pricing-history-table th:nth-child(-n+2) { width: 16%; }
   .history-details { display: grid; gap: 12px; margin: 0; line-height: 1.6; }

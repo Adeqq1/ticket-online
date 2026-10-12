@@ -41,7 +41,7 @@ async def enlarged(page, output, label):
 
 async def fixtures(browser, base, output, width):
     results = []
-    for scenario in ('standard', 'same-id', 'replacement', 'unproven', 'rejected', 'rate-limit', 'expired', 'refresh-error', 'detail-error', 'success-refresh-error', 'recovery-new-request'):
+    for scenario in ('standard', 'same-id', 'replacement', 'unproven', 'rejected', 'rate-limit', 'expired', 'refresh-error', 'detail-error', 'success-refresh-error', 'recovery-new-request', 'queued-same-id', 'queued-replacement'):
         print(f'Checking email: {width}px {scenario}', flush=True)
         context = await browser.new_context(viewport={'width': width, 'height': 900}, timezone_id='Asia/Jakarta')
         await context.add_init_script(common['SESSION_INIT'])
@@ -49,7 +49,7 @@ async def fixtures(browser, base, output, width):
         page.on('dialog', lambda d: d.accept())
         errors = []
         page.on('pageerror', lambda e: errors.append(str(e)))
-        state = {'posts': 0, 'lists': 0, 'details': 0, 'prove': False}
+        state = {'posts': 0, 'lists': 0, 'details': 0, 'prove': False, 'sent': False, 'detailFail': False, 'hold': None}
         original = common['body']('/api/v1/admin/email-jobs/' + JOB, 'standard', 'ADMIN')[1]
         original.update(lastError='SMTP koneksi gagal', history=[], attempts=3)
         if scenario == 'recovery-new-request':
@@ -80,22 +80,26 @@ async def fixtures(browser, base, output, width):
                 if scenario in ('same-id', 'replacement', 'unproven'):
                     return await route.abort('failed')
                 state['prove'] = True
-                return await route.fulfill(json={'jobId': JOB, 'retryJobId': REPLACEMENT if scenario == 'recovery-new-request' else JOB, 'status': 'PENDING'})
+                return await route.fulfill(json={'jobId': JOB, 'retryJobId': REPLACEMENT if scenario in ('recovery-new-request', 'queued-replacement') else JOB, 'status': 'PENDING'})
             if endpoint == '/admin/email-jobs/' + JOB:
                 state['details'] += 1
-                if scenario == 'detail-error':
+                if state['hold']: await state['hold'].wait()
+                if scenario == 'detail-error' and state['details'] == 1 or state['detailFail'] and scenario != 'queued-replacement':
                     return await route.fulfill(status=503, json={'error': {'code': 'SERVICE_UNAVAILABLE', 'message': 'Detail gagal dimuat.'}})
                 data = dict(original)
                 if state['prove']:
                     data.update(status='PENDING', canRetry=False, attempts=0, lastError='', updatedAt='2026-10-11T03:01:00Z', history=[{'action': 'RETRY', 'actorName': 'Admin', 'createdAt': '2026-10-11T03:00:00.000001Z', 'data': {'retryJobId': JOB, 'status': 'PENDING'}}])
-                    if scenario in ('replacement', 'recovery-new-request'):
+                    if scenario in ('replacement', 'recovery-new-request', 'queued-replacement'):
                         data.update(status='FAILED', supersededBy=REPLACEMENT, retryJobId=REPLACEMENT)
                         data['history'][0]['data'] = {'retryJobId': REPLACEMENT, 'status': 'SUPERSEDED'}
+                    elif state['sent']: data.update(status='SENT', attempts=1)
                 return await route.fulfill(json=data)
             if endpoint == '/admin/email-jobs/' + second['id']:
                 return await route.fulfill(json=second)
             if endpoint == '/admin/email-jobs/' + REPLACEMENT:
-                return await route.fulfill(json={**original, 'id': REPLACEMENT, 'status': 'SENT', 'canRetry': False})
+                if state['detailFail']:
+                    return await route.fulfill(status=503, json={'error': {'code': 'SERVICE_UNAVAILABLE', 'message': 'Detail gagal dimuat.'}})
+                return await route.fulfill(json={**original, 'id': REPLACEMENT, 'status': 'PENDING' if scenario == 'queued-replacement' and not state['sent'] else 'SENT', 'canRetry': False})
             status, data = common['body'](urlparse(route.request.url).path, 'standard', 'ADMIN')
             await route.fulfill(status=status, json=data)
 
@@ -127,8 +131,16 @@ async def fixtures(browser, base, output, width):
         heading = page.locator('#issue-detail-title')
         await expect(heading).to_be_focused()
         assert await page.locator('#email-list-title').count() == 0
+        refresh = page.get_by_role('button', name='Periksa status pengiriman', exact=True)
+        await expect(refresh).to_be_visible()
         if scenario == 'detail-error':
             await expect(page.get_by_role('alert')).to_contain_text('Detail gagal dimuat')
+            await refresh.focus()
+            await page.keyboard.press('Enter')
+            await expect(page.get_by_role('heading', name='Rincian pengiriman', exact=True)).to_be_visible()
+            await expect(page.get_by_role('alert')).to_have_count(0)
+            await expect(refresh).to_be_focused()
+            assert state['details'] == 2 and state['posts'] == 0, state
         else:
             retry = page.get_by_role('button', name='Buat permintaan pemulihan baru' if scenario == 'recovery-new-request' else 'Kirim ulang email', exact=True)
             await expect(retry).to_be_visible()
@@ -156,6 +168,31 @@ async def fixtures(browser, base, output, width):
                         await expect(page.get_by_text('Terkirim', exact=True)).to_be_visible() if scenario == 'replacement' else await expect(page.get_by_text('Menunggu pengiriman', exact=True)).to_be_visible()
                 elif scenario in ('rejected', 'rate-limit'):
                     await expect(page.get_by_role('alert')).to_be_visible()
+                elif scenario in ('queued-same-id', 'queued-replacement'):
+                    await expect(page.get_by_text('Pengiriman ulang dijadwalkan.', exact=False).first).to_be_visible()
+                    await expect(page.get_by_text('Menunggu pengiriman', exact=True)).to_be_visible()
+                    assert state['lists'] == 2, state  # Original job has left the failed list.
+                    state['detailFail'] = True
+                    await refresh.click()
+                    await expect(page.get_by_role('alert')).to_be_visible()
+                    await expect(page.get_by_text('Pengiriman ulang dijadwalkan.', exact=False).first).to_be_visible()
+                    await expect(page.get_by_text('Menunggu pengiriman', exact=True)).to_be_visible()
+                    state['detailFail'] = False
+                    state['sent'] = True  # Worker completes after the initial post-retry GET.
+                    state['hold'] = asyncio.Event()
+                    count = state['details']
+                    await refresh.focus()
+                    await page.keyboard.press('Enter')
+                    await expect(refresh).to_be_disabled()
+                    await refresh.dispatch_event('click')
+                    state['hold'].set()
+                    await expect(page.get_by_text('Terkirim', exact=True)).to_be_visible()
+                    await expect(page.get_by_role('alert')).to_have_count(0)
+                    await expect(refresh).to_be_enabled()
+                    await expect(refresh).to_be_focused()
+                    assert state['details'] == count + 1, state
+                    await audit(page)
+                    await page.screenshot(path=str(output / f'{scenario}-sent-{width}.png'), full_page=True)
                 else:
                     await expect(page.get_by_text('Pengiriman ulang dijadwalkan.', exact=False).first).to_be_visible()
                     if scenario == 'success-refresh-error':

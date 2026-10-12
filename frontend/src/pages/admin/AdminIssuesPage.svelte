@@ -20,7 +20,7 @@
   let casesLoaded = $state(false); let emailsLoaded = $state(false);
   let delivery = $state<AdminEmailDetail | null>(null); let deliveryError = $state("");
   let listScroll = 0; let triggerId = "";
-  const queuedMessage = "Pengiriman ulang dijadwalkan. Email belum tentu terkirim. Muat ulang daftar dan detail untuk melihat status terbaru.";
+  const queuedMessage = "Pengiriman ulang dijadwalkan. Email belum tentu terkirim. Gunakan Periksa status pengiriman untuk melihat status terbaru.";
   let note = $state(""); let busy = $state(false); let loading = $state(true); let caseLoading = $state(true); let emailLoading = $state(true); let detailLoading = $state(false); const detailRequests = createRequestVersion(); let error = $state(""); let caseError = $state(""); let emailError = $state(""); let message = $state("");
   type UncertainOperation = { kind: "case" | "email"; id: string; action: "note" | "resolve" | "recheck" | "retry"; baseline: { historyCount: number; lastCheckedAt: string | null; retryJobId: string | null; emailHistory: AdminIssueAudit[] }; noteText: string };
   let uncertainOperation = $state<UncertainOperation | null>(null);
@@ -50,7 +50,7 @@
         selectedEmail = result; deliveryError = "";
         if (result.retryJobId && result.retryJobId !== result.id) {
           try { const latest = await getAdminEmailJob(accessToken, result.retryJobId); if (detailRequests.isCurrent(generation)) delivery = latest; }
-          catch (cause) { if (detailRequests.isCurrent(generation)) { deliveryError = "Status pengiriman ulang gagal dimuat. Muat ulang detail untuk memeriksa pengiriman."; if (cause instanceof ApiError && cause.status === 401) onUnauthorized(); } }
+          catch (cause) { if (detailRequests.isCurrent(generation)) { deliveryError = "Status pengiriman ulang gagal dimuat. Gunakan Periksa status pengiriman untuk mencoba lagi. Status terakhir tetap ditampilkan."; if (cause instanceof ApiError && cause.status === 401) onUnauthorized(); } }
         } else delivery = null;
       } }
     catch (cause) { if (detailRequests.isCurrent(generation)) fail(cause); }
@@ -78,8 +78,13 @@
   }
   async function refreshDetail() {
     if (busy || detailLoading) return;
+    const restoreFocus = document.activeElement?.id === "email-status-refresh";
     error = ""; detailLoading = true; const generation = detailRequests.next();
     if (view === "case") await loadCaseDetail(detailId, generation); else await loadEmailDetail(detailId, generation);
+    if (detailRequests.isCurrent(generation)) {
+      if (view === "email" && !error && !deliveryError) message = "Status pengiriman diperbarui. Periksa status pada rincian pengiriman.";
+      if (restoreFocus) { await tick(); document.getElementById("email-status-refresh")?.focus(); }
+    }
   }
   async function refresh() { await load(); if (view !== "list") await refreshDetail(); }
   async function act(action: "note" | "resolve" | "recheck" | "retry") {
@@ -180,7 +185,9 @@
       </section>
     </div>{:else}
       {#if view === "case"}<button class="staff-secondary-button" disabled={busy || Boolean(uncertainOperation)} onclick={backToList}>Kembali ke daftar</button>{/if}
-      <h2 id="issue-detail-title" tabindex="-1">{view === "email" ? `Email ${selectedEmail?.reference ?? "yang dipilih"}` : `Kasus ${selectedCase?.reference ?? "yang dipilih"}`}</h2>
+      <div class="issue-detail-heading"><h2 id="issue-detail-title" tabindex="-1">{view === "email" ? `Email ${selectedEmail?.reference ?? "yang dipilih"}` : `Kasus ${selectedCase?.reference ?? "yang dipilih"}`}</h2>
+        {#if view === "email" && detailId}<button id="email-status-refresh" class="staff-secondary-button admin-icon-button" type="button" aria-label="Periksa status pengiriman" title="Periksa status pengiriman" disabled={busy || detailLoading} onclick={refreshDetail}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5" /><path d="M4 17v-5h5" /><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" /></svg></button>{/if}
+      </div>
       {#if detailLoading}<p class="staff-muted" role="status">Memuat detail yang dipilih…</p>{/if}
       {#if error && view === "case"}<button class="staff-secondary-button" disabled={detailLoading || busy} onclick={refreshDetail}>Muat ulang detail</button>{/if}
     {/if}
@@ -213,6 +220,7 @@
 </AdminLayout>
 
 <style>
+  .issue-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   #issue-detail-title { margin: 24px 0 16px; overflow-wrap: anywhere; }
   #issue-detail-title:focus { outline: 2px solid var(--scan-lime); outline-offset: 4px; }
   #issue-feedback:focus, .issue-workspace h2:focus { outline: 2px solid var(--scan-lime); outline-offset: 4px; }
