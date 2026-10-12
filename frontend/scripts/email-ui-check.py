@@ -107,7 +107,9 @@ async def fixtures(browser, base, output, width):
         await expect(page.get_by_text('Alamat penerima belum tersedia', exact=True)).to_be_visible()
         await audit(page)
         if scenario == 'standard':
-            await page.get_by_role('button', name='Muat email berikutnya', exact=True).click()
+            await common['check_help'](page, width)
+            assert not state['posts'], 'Help must not schedule email'
+            await page.locator('section[aria-labelledby="email-list-title"]').get_by_role('button', name='Berikutnya' if width < 768 else 'Muat berikutnya', exact=True).click()
             await expect(page.locator('section[aria-labelledby="email-list-title"] tbody tr')).to_have_count(3)
             await expect(page.get_by_text('Terakhir berhasil dimuat:', exact=False)).to_have_count(0)
             await expect(page.locator('.email-scope')).to_have_count(0)

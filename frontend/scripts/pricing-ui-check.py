@@ -33,7 +33,12 @@ async def check(browser, base, width):
     page = await context.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    state = {"settings": {"adminFee": 7500, "revision": 1}, "vouchers": [], "history": []}
+    voucher = {"code": "HEMAT10", "kind": "PERCENT", "value": 10, "startsAt": "2020-01-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z", "active": True, "eventId": "", "minimumSubtotal": 0, "quota": 1000000000, "revision": 1, "usage": {"held": 0, "consumed": 0, "released": 0}}
+    state = {"settings": {"adminFee": 7500, "revision": 1}, "vouchers": [voucher, {**voucher, "code": "PROMO_LIBURAN_AKHIR_TAHUN_2026", "kind": "FIXED", "value": 100000, "eventId": "nusa-malam", "active": False}], "history": []}
+    state["history"] = [
+        {"actor": "Admin Event", "objectId": "admin-fee", "before": {"adminFee": 5000}, "after": {"adminFee": 7500}, "createdAt": "2026-10-11T17:00:07Z"},
+        {"actor": "Admin Event", "objectId": "HEMAT10", "before": voucher, "after": {**voucher, "active": False}, "createdAt": "2026-10-12T03:00:07Z"},
+    ]
     mode = {"save": 422, "hold": None, "role": "ADMIN", "quote": 200, "changed": False}
     saves = []
 
@@ -43,7 +48,7 @@ async def check(browser, base, width):
         if path == "/api/v1/staff/me":
             await route.fulfill(json={"staff": admin.ADMIN if mode["role"] == "ADMIN" else admin.STAFF})
         elif path == "/api/v1/admin/events":
-            await route.fulfill(json={"events": [admin.EVENT]})
+            await route.fulfill(json={"events": [{**admin.EVENT, "artist": "Konser Nusa Malam dan Perayaan Akhir Tahun Bersama"}]})
         elif path == "/api/v1/admin/pricing" and method == "GET":
             await route.fulfill(json=state)
         elif path == "/api/v1/admin/pricing":
@@ -84,6 +89,115 @@ async def check(browser, base, width):
     await page.goto(base + "/admin/pricing")
     fee = page.get_by_label("Nominal tetap (Rp)", exact=True)
     await expect(fee).to_have_value("7500")
+    if width >= 768:
+        await expect(page.locator(".voucher-table th")).to_have_text(["Kode voucher", "Diskon", "Konser", "Masa berlaku (WIB)", "Kuota order", "Penggunaan", "Status", "Aksi"])
+        await expect(page.locator(".voucher-table tbody tr")).to_have_count(2)
+        assert await page.locator(".voucher-table").evaluate("el => getComputedStyle(el).display") == "table"
+        await expect(page.locator(".voucher-table tbody tr").first.locator("td").nth(4)).to_have_text("1.000.000.000")
+        await expect(page.locator(".voucher-table .admin-order-status")).to_have_text(["Aktif", "Nonaktif"])
+        assert await page.locator(".voucher-table button, .voucher-table .admin-order-status").evaluate_all("els => els.every(el => getComputedStyle(el).whiteSpace === 'nowrap')"), "Actions and status labels must stay on one line"
+        await expect(page.locator(".voucher-table tbody tr").first.locator("time")).to_have_text(["1 Jan 202007.00 WIB", "1 Jan 209907.00 WIB"])
+        manage = page.get_by_role("button", name="Kelola voucher HEMAT10", exact=True)
+        await expect(manage.locator("svg[aria-hidden=true]")).to_have_count(1)
+        await expect(manage).to_have_attribute("title", "Kelola voucher HEMAT10")
+        assert await manage.evaluate("el => { const r = el.getBoundingClientRect(); return !el.textContent.trim() && r.width >= 44 && r.height >= 44; }")
+        history = page.locator(".pricing-history-table")
+        await expect(history.locator("th")).to_have_text(["Waktu (WIB)", "Admin", "Sebelum", "Sesudah"])
+        await expect(history.locator("tbody tr")).to_have_count(2)
+        await expect(history.locator("tbody tr").first.locator("td").first).to_have_text("12 Okt 202600.00.07 WIB")
+        await expect(history.locator("tbody tr").first.locator("dt")).to_have_text(["Biaya admin", "Biaya admin"])
+        await expect(history.locator("tbody tr").first.locator("dd")).to_have_text(["Rp 5.000", "Rp 7.500"])
+        await expect(history.locator("tbody tr").last.locator(".admin-order-status")).to_have_text(["Aktif", "Nonaktif"])
+        await expect(history.locator("tbody tr").last.locator("td").nth(3).locator("dd").nth(3)).to_have_text("1.000.000.000")
+        if width == 768:
+            scroll = page.locator('.pricing-history .history-table-wrap')
+            await scroll.focus()
+            await page.keyboard.press("ArrowRight")
+            await page.wait_for_function("document.querySelector('.pricing-history .history-table-wrap').scrollLeft > 0")
+            await scroll.evaluate("el => el.scrollLeft = 0")
+        await page.locator(".pricing-history").screenshot(path=f"/tmp/phase51-55/pricing/desktop-history-{width}.png")
+        await page.locator(".voucher-list-panel").screenshot(path=f"/tmp/phase51-55/pricing/desktop-vouchers-{width}.png")
+    help_buttons = page.locator(".admin-help-button")
+    explanations = page.locator(".pricing-explanation")
+    if width < 768:
+        await page.locator(".pricing-history > summary").click()
+        history = page.locator(".pricing-history .history")
+        await expect(history.locator("li").first.locator("dd")).to_have_text(["Rp 5.000", "Rp 7.500"])
+        await expect(history.locator("li").last.locator(".admin-order-status")).to_have_text(["Aktif", "Nonaktif"])
+        await page.locator(".pricing-history").screenshot(path=f"/tmp/phase51-55/pricing/mobile-history-{width}.png")
+        await page.evaluate("""() => {
+          window.__historyFonts = [...document.querySelectorAll('.pricing-history *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__historyFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        audit = await page.evaluate(staff_audit)
+        assert not audit["failures"] and not audit["overflow"], (width, "history-text200", audit)
+        await page.locator(".pricing-history").screenshot(path=f"/tmp/phase51-55/pricing/mobile-history-text200-{width}.png")
+        await page.evaluate("() => { for (const [el, size] of window.__historyFonts) el.style.fontSize = size; }")
+        await page.locator(".pricing-history > summary").click()
+        cards = page.locator(".voucher-list li")
+        await expect(cards).to_have_count(2)
+        first = cards.first
+        await expect(first.locator(".admin-order-status")).to_have_text("Aktif")
+        await expect(cards.last.locator(".admin-order-status")).to_have_text("Nonaktif")
+        assert await first.locator(".admin-order-status").evaluate("el => el.tagName === 'SPAN' && el.tabIndex === -1")
+        await expect(first.locator(".voucher-card-details dt")).to_have_text(["Diskon", "Konser", "Minimum subtotal", "Mulai berlaku", "Berakhir", "Kuota order"])
+        await expect(first.locator(".voucher-card-details dd").last).to_have_text("1.000.000.000")
+        await expect(first.locator("time")).to_have_text(["1 Jan 2020, 07.00 WIB", "1 Jan 2099, 07.00 WIB"])
+        await expect(cards.last.locator(".voucher-card-details dd").nth(1)).to_have_text("Konser Nusa Malam dan Perayaan Akhir Tahun Bersama")
+        await expect(first.get_by_role("button", name="Kelola voucher HEMAT10", exact=True)).to_have_text("Kelola voucher")
+        assert await first.evaluate("el => { const button = el.querySelector('button').getBoundingClientRect(); return button.height >= 44 && Math.abs(button.width - el.getBoundingClientRect().width) < 2; }")
+        await page.locator(".voucher-list-panel").screenshot(path=f"/tmp/phase51-55/pricing/mobile-vouchers-{width}.png")
+        await expect(help_buttons).to_have_count(2)
+        for explanation in await explanations.all(): await expect(explanation).not_to_be_visible()
+        opener = page.locator("#voucher-create-opener")
+        await expect(opener.locator("svg[aria-hidden=true]")).to_have_count(1)
+        assert await opener.evaluate("el => { const icon = el.querySelector('svg').getBoundingClientRect(); const text = el.querySelector('span').getBoundingClientRect(); const button = el.getBoundingClientRect(); return Math.abs((icon.left + text.right) / 2 - (button.left + button.right) / 2) < 2 && Math.abs(icon.y + icon.height / 2 - text.y - text.height / 2) < 2; }")
+        for help_id in ("fee-title", "list-title"):
+            trigger = page.locator(f'[aria-controls="{help_id}-help"]')
+            popup = page.locator(f"#{help_id}-help")
+            await expect(popup).not_to_be_visible()
+            await trigger.tap()
+            await expect(trigger).to_have_attribute("aria-expanded", "true")
+            await expect(popup).to_be_visible()
+            await trigger.tap()
+            await expect(popup).not_to_be_visible()
+            await trigger.focus()
+            await page.keyboard.press("Tab")
+            await page.keyboard.press("Shift+Tab")
+            await expect(trigger).to_be_focused()
+            await expect(popup).to_be_visible()
+            await page.keyboard.press("Escape")
+            await expect(popup).not_to_be_visible()
+            await trigger.hover()
+            await expect(popup).to_be_visible()
+            await popup.hover()
+            await expect(popup).to_be_visible()
+            await page.mouse.move(0, 0)
+            await fee.focus()
+            await expect(popup).not_to_be_visible()
+            await trigger.tap()
+            await page.get_by_role("heading", level=1).tap()
+            await expect(popup).not_to_be_visible()
+        assert not saves, "Help must not submit the fee or voucher forms"
+        await expect(fee).to_have_value("7500")
+        await page.locator('[aria-controls="list-title-help"]').tap()
+        await page.evaluate("""() => {
+          window.__helpFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__helpFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        await expect(page.locator("#list-title-help")).to_be_visible()
+        audit = await page.evaluate(staff_audit)
+        assert not audit["failures"] and not audit["overflow"], (width, "help-text200", audit)
+        assert await page.locator("#list-title-help").evaluate("el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }")
+        await page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
+        await page.screenshot(path=f"/tmp/phase51-55/pricing/mobile-help-text200-{width}.png", full_page=True)
+        await expect(page.locator("#list-title-help")).to_be_visible()
+        await page.evaluate("() => { for (const [el, size] of window.__helpFonts) el.style.fontSize = size; }")
+        await page.keyboard.press("Escape")
+    else:
+        await expect(page.locator(".voucher-card-details")).to_have_count(0)
+        for trigger in await help_buttons.all(): await expect(trigger).not_to_be_visible()
+        for explanation in await explanations.all(): await expect(explanation).to_be_visible()
     await fee.fill("9000")
     await expect(page.get_by_text("Perubahan belum disimpan.", exact=True)).to_be_visible()
     await expect(page.get_by_text("Pratinjau tanpa voucher:", exact=False)).to_contain_text("109.000")
@@ -141,13 +255,17 @@ async def check(browser, base, width):
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
     if width < 768:
         await expect(page.locator("#voucher-manage-DUMMY50")).to_be_focused()
+        await expect(page.locator(".voucher-card-usage dd")).to_have_text(["1", "2", "1"])
+        await expect(page.locator(".voucher-card-details dd").last).to_have_text("5")
         await page.locator("#voucher-manage-DUMMY50").click()
+    else:
+        await expect(page.locator(".voucher-table .admin-table-pairs dd")).to_have_text(["1", "2", "1"])
+        await expect(page.locator(".voucher-table tbody td").nth(4)).to_have_text("5")
     await expect(page.get_by_label("Kode voucher", exact=True)).to_have_attribute("readonly", "")
-    await expect(page.locator(".voucher-list")).to_contain_text("Ditahan 1 · Dipakai 2 · Dilepas 1 · Kuota 5")
     await page.get_by_label("Voucher aktif", exact=True).uncheck()
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
-    await expect(page.locator(".voucher-list")).to_contain_text("Nonaktif")
+    await expect(page.locator(".voucher-list, .voucher-table")).to_contain_text("Nonaktif")
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "admin overflow"
     assert await page.locator("#voucher-create-opener" if width < 768 else ".voucher-desktop-action").evaluate("el => el.getBoundingClientRect().height >= 44")
 

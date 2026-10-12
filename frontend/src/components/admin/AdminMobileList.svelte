@@ -9,6 +9,21 @@
   const mobile = new MediaQuery("(max-width: 767px)");
   let viewport: HTMLDivElement;
   let pending = $state(false);
+  let dragging = $state(false);
+  let drag: { pointer: number; x: number; left: number } | null = null;
+  function startDrag(event: PointerEvent) {
+    if (!mobile.current || event.pointerType !== "mouse" || event.button !== 0 || viewport.scrollWidth <= viewport.clientWidth ||
+      (event.target as Element).closest("button, a, input, select, textarea, summary, [contenteditable]")) return;
+    event.preventDefault();
+    drag = { pointer: event.pointerId, x: event.clientX, left: viewport.scrollLeft };
+    dragging = true;
+    viewport.setPointerCapture(event.pointerId);
+    viewport.focus({ preventScroll: true });
+  }
+  function moveDrag(event: PointerEvent) {
+    if (drag?.pointer === event.pointerId) viewport.scrollLeft = drag.left + drag.x - event.clientX;
+  }
+  function endDrag() { drag = null; dragging = false; }
   let previousGroup = group;
   $effect(() => { group = clampMobileGroup(group, count); });
   $effect(() => {
@@ -40,7 +55,7 @@
   {#if Math.min(mobileGroupSize, count - group * mobileGroupSize) > 1}<p class="staff-muted">Geser kartu untuk melihat item lainnya.</p>{/if}
 {/if}
 <!-- svelte-ignore a11y_no_noninteractive_tabindex (Native horizontal scrolling needs keyboard focus.) -->
-<div class="mobile-list-viewport" bind:this={viewport} tabindex="0" role="region" aria-labelledby={headingId} onscroll={(event) => { scrollLeft = event.currentTarget.scrollLeft; }}>
+<div class="mobile-list-viewport" class:dragging bind:this={viewport} tabindex="0" role="region" aria-labelledby={headingId} onpointerdown={startDrag} onpointermove={moveDrag} onpointerup={endDrag} onpointercancel={endDrag} onlostpointercapture={endDrag} onscroll={(event) => { scrollLeft = event.currentTarget.scrollLeft; }}>
   {@render children()}
 </div>
 {#if mobile.current}
@@ -53,7 +68,8 @@
   .mobile-list-viewport { position: relative; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
   .mobile-list-viewport:focus-visible { outline: 3px solid var(--admin-accent); outline-offset: 3px; }
   @media (max-width: 767px) {
-    .mobile-list-viewport { scroll-snap-type: x mandatory; }
+    .mobile-list-viewport { scroll-snap-type: x mandatory; cursor: grab; }
+    .mobile-list-viewport.dragging { scroll-snap-type: none; cursor: grabbing; user-select: none; }
     .mobile-list-viewport :global(.history-table-wrap) { overflow: visible; }
     .mobile-list-viewport :global(.history-table) { display: block; width: 100%; min-width: 0; white-space: normal; }
     .mobile-list-viewport :global(thead) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); }

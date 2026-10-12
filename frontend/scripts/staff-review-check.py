@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+from runpy import run_path
 from pathlib import Path
 
 from playwright.async_api import async_playwright, expect
@@ -116,7 +117,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
         nonlocal created
         created = None
         await page.goto(base_url + "/admin/staff")
-        await expect(page.locator(".staff-list li")).to_have_count(len(rows))
+        await expect(page.locator("[id^=staff-account-]")).to_have_count(len(rows))
 
     async def audit(label):
         result = await page.evaluate(STYLE_AUDIT)
@@ -147,7 +148,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
     await page.route("**/api/v1/**", fixture)
     await visit()
     await expect(panel).to_have_count(0)
-    await expect(page.locator(".staff-role").first).to_have_text("Peran: Admin")
+    await expect(page.locator(".staff-role").first).to_have_text("Admin")
     await expect(page.locator(".staff-status").last).to_have_text("Status: Nonaktif")
     await audit("list")
     await page.screenshot(path=str(output / f"list-{width}.png"), full_page=True)
@@ -256,7 +257,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
                 await page.get_by_role("button", name="Muat ulang", exact=True).click()
             else:
                 await expect(page.locator(f"#staff-account-{created['id']}")).to_be_focused()
-            await expect(page.locator(".staff-list")).to_contain_text("nadia@example.com")
+            await expect(page.locator(".staff-list, .staff-list-table")).to_contain_text("nadia@example.com")
             await opener.click()
             await expect(panel.get_by_label("Password awal")).to_have_value("")
             await cancel.click()
@@ -327,6 +328,7 @@ async def verify_management_flow(page, admin, width, base_url):
                          assignments=[] if index % 4 == 0 else [dict(eventId="musik", gate="Gate A")] if index % 2 else [dict(eventId="teater", gate="Gate Utama")]) for index, name in enumerate(names, 1)]]
     rows[1]["assignments"] = [dict(eventId="musik", gate=f"Gate {letter}") for letter in "ABCDEFG"]
     output = Path(os.environ.get("STAFF_REVIEW_OUTPUT", "/tmp/phase51-55/staff"))
+    output.mkdir(parents=True, exist_ok=True)
     (output / f"fixture20-{width}.json").write_text(json.dumps(dict(staff=rows, events=events), indent=2))
     mutations, errors, audits = [], [], []
     reads = 0
@@ -394,9 +396,18 @@ async def verify_management_flow(page, admin, width, base_url):
 
     await page.route("**/api/v1/**", fixture)
     await page.goto(base_url + "/admin/staff")
-    await expect(page.locator(".staff-list li")).to_have_count(5 if width < 768 else 20)
+    await expect(page.locator("[id^=staff-account-]")).to_have_count(5 if width < 768 else 20)
+    await run_path(str(Path(__file__).with_name("admin-ui-check.py")))["check_help"](page, width)
+    assert not mutations, "Help must not mutate accounts"
+    if width >= 768:
+        await expect(page.locator(".staff-list-table th")).to_have_text(["Nama", "Email", "Peran", "Status", "Penugasan", "Aksi"])
+        assert await page.locator(".staff-list-table").evaluate("el => getComputedStyle(el).display") == "table"
+        assert await page.locator(".staff-list-table tbody tr").first.evaluate("el => getComputedStyle(el).display") == "table-row"
+        icons = page.locator('.staff-list-table [id^="staff-manage-"]')
+        await expect(icons).to_have_count(19)
+        assert await icons.evaluate_all("buttons => buttons.every(el => { const r = el.getBoundingClientRect(); return !el.textContent.trim() && el.querySelector('svg[aria-hidden=true]') && el.getAttribute('aria-label') === el.title && r.width >= 44 && r.height >= 44; })")
     await expect(page.locator(".staff-filter-results")).to_contain_text("20 dari 20 akun")
-    assert await page.locator(".staff-list li").evaluate_all("rows => rows.map(row => row.id.replace('staff-account-', ''))") == [row["id"] for row in (rows[:5] if width < 768 else rows)]
+    assert await page.locator("[id^=staff-account-]").evaluate_all("rows => rows.map(row => row.id.replace('staff-account-', ''))") == [row["id"] for row in (rows[:5] if width < 768 else rows)]
     await expect(page.get_by_role("button", name="Kelola", exact=False)).to_have_count(4 if width < 768 else 19)
     await expect(page.locator(f"#staff-account-{admin['id']}")).to_contain_text("Akun administrator tidak dapat diubah melalui halaman ini.")
     assert await page.locator(".staff-status").evaluate_all("badges => badges.every(b => b.tabIndex === -1 && b.tagName === 'SPAN' && getComputedStyle(b).cursor !== 'pointer' && !b.closest('button,a'))")
@@ -421,7 +432,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await search.fill("  AYU  ")
     await page.get_by_role("combobox", name="Status akun", exact=True).select_option("active")
     await page.get_by_role("combobox", name="Event penugasan", exact=True).select_option("musik")
-    await expect(page.locator(".staff-list li")).to_have_count(1)
+    await expect(page.locator("[id^=staff-account-]")).to_have_count(1)
     await page.get_by_label("Hanya akun tanpa penugasan", exact=True).check()
     if width <= 600:
         await page.get_by_role("button", name="Filter lainnya (3 aktif)", exact=True).click()
@@ -438,7 +449,7 @@ async def verify_management_flow(page, admin, width, base_url):
     editor = page.locator(".staff-edit-panel")
     await expect(page.locator("#staff-edit-title")).to_be_focused()
     await expect(editor).to_contain_text(rows[1]["email"])
-    await expect(page.locator(".staff-list")).to_have_count(0)
+    await expect(page.locator(".staff-list, .staff-list-table")).to_have_count(0)
     await expect(search).to_have_count(0)
     await expect(page.locator("#staff-create-opener")).to_have_count(0)
     await editor.get_by_label("Nama", exact=True).fill("Draft Ayu")
@@ -478,7 +489,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await trigger.scroll_into_view_if_needed()
     scroll = await page.evaluate("scrollY")
     await trigger.click()
-    await expect(page.locator(".staff-list")).to_have_count(0)
+    await expect(page.locator(".staff-list, .staff-list-table")).to_have_count(0)
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await expect(trigger).to_be_focused()
     assert abs(await page.evaluate("scrollY") - scroll) <= 2

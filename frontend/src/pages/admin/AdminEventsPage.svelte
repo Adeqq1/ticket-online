@@ -11,6 +11,7 @@
   import { onDestroy, onMount, tick } from "svelte";
   import { ApiError, createAdminEvent, createAdminTier, createAdminZone, getAdminEvents, updateAdminEvent, updateAdminTier, updateAdminZone, type AdminEventInput, type AdminApiEvent, type AdminTierInput, type PublicationStatus } from "../../lib/api.ts";
   import { suggestAdminId } from "../../lib/admin-id.ts";
+  import { adminDate, adminTime, adminNumber } from "../../lib/admin-operations.ts";
 
   let searchOpen = $state(false);
   let mobileGroup = $state(0);
@@ -206,7 +207,7 @@
 
 <svelte:head><title>Kelola Konser | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-  <AdminLayout page="events" contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
+  <AdminLayout page="events" mobileDescriptionHelp={mode === "list"} contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
     <div class="staff-admin-grid event-admin-grid">
       {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
@@ -216,7 +217,20 @@
         {#if loading}<p class="staff-muted" role="status">Memuat konser…</p>
         {:else if !events.length && !listError}<p class="staff-muted" role="status">Belum ada konser. Pilih Tambah konser untuk membuat draf pertama.</p>
         {:else if !visible.length && events.length}<p class="staff-muted" role="status">Tidak ada konser yang cocok dengan pencarian atau filter.</p>
-        {:else}<AdminMobileList count={visible.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="event-list-title"><ul class="event-admin-list">{#each mobileListItems(visible, mobileGroup, mobileList.current) as item (item.id)}<li><div><strong>{item.artist || item.id}</strong><small>{item.startsAt ? `${new Date(item.startsAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : "Jadwal belum diatur"}</small><small>{item.city || "Kota belum diatur"} · {item.venue || "Venue belum diatur"}</small></div><span class={`event-publication event-${item.publicationStatus.toLowerCase()}`}>{publicationLabel[item.publicationStatus]}</span><button id={`event-manage-${item.id}`} class="staff-secondary-button" type="button" aria-label={`Kelola konser ${item.artist || item.id}`} onclick={() => select(item)}>Kelola konser</button></li>{/each}</ul></AdminMobileList>{/if}
+        {:else}<AdminMobileList count={visible.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="event-list-title"><ul class="event-admin-list">{#each mobileListItems(visible, mobileGroup, mobileList.current) as item (item.id)}<li class:admin-mobile-card={mobileList.current}>
+          {#if mobileList.current}
+            <div class="admin-mobile-card-header"><strong>{item.artist || item.id}</strong><span class="admin-order-status" class:is-paid={item.publicationStatus === "PUBLISHED"}>{publicationLabel[item.publicationStatus]}</span></div>
+            <dl class="admin-card-fields">
+              <div><dt>Tanggal</dt><dd>{#if item.startsAt}<time datetime={item.startsAt}>{adminDate.format(new Date(item.startsAt))}</time>{:else}Jadwal belum diatur{/if}</dd></div>
+              <div><dt>Waktu</dt><dd>{item.startsAt ? `${adminTime.format(new Date(item.startsAt))} WIB` : "Belum diatur"}</dd></div>
+              <div><dt>Kota</dt><dd>{item.city || "Kota belum diatur"}</dd></div>
+              <div><dt>Venue</dt><dd>{item.venue || "Venue belum diatur"}</dd></div>
+              <div><dt>Kuota tiket</dt><dd>{adminNumber.format(item.ticketTiers.reduce((sum, tier) => sum + tier.capacity, 0))}</dd></div>
+              <div><dt>Tiket tersedia</dt><dd>{adminNumber.format(item.ticketTiers.reduce((sum, tier) => sum + tier.availableQuantity, 0))}</dd></div>
+            </dl>
+          {:else}<div><strong>{item.artist || item.id}</strong><small>{item.startsAt ? `${new Date(item.startsAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : "Jadwal belum diatur"}</small><small>{item.city || "Kota belum diatur"} · {item.venue || "Venue belum diatur"}</small></div><span class={`event-publication event-${item.publicationStatus.toLowerCase()}`}>{publicationLabel[item.publicationStatus]}</span>{/if}
+          <button id={`event-manage-${item.id}`} class="staff-secondary-button" type="button" aria-label={`Kelola konser ${item.artist || item.id}`} onclick={() => select(item)}>Kelola konser</button>
+        </li>{/each}</ul></AdminMobileList>{/if}
       </section>
       {:else}
       <section class="staff-admin-panel event-editor-panel" aria-labelledby="event-editor-title">
@@ -269,8 +283,8 @@
               {#if !tierSelected && tierDraft.id && currentEvent?.ticketTiers.some((item) => item.id === tierDraft.id)}<p class="staff-form-message staff-form-error" role="alert">ID kategori sudah digunakan pada konser ini. Ubah ID sebelum menyimpan.</p>{/if}
               <label>Nama kategori<input bind:value={tierDraft.name} oninput={suggestTierId} maxlength="100" required disabled={saving} /></label>
               <label>Zona<select bind:value={tierDraft.zoneId} required disabled={saving || !currentEvent?.zones.length}><option value="">Pilih zona</option>{#each currentEvent?.zones ?? [] as zone}<option value={zone.id}>{zone.name}</option>{/each}</select></label>
-              <div class="event-form-row"><label>Harga (rupiah)<input type="number" min="1" step="1" bind:value={tierDraft.price} required disabled={saving} /></label><label>Kapasitas<input type="number" min="0" step="1" bind:value={tierDraft.capacity} required disabled={saving} /></label></div>
-              <div class="event-form-row"><label>Batas pembelian<input type="number" min="1" step="1" bind:value={tierDraft.maxPerOrder} required disabled={saving} /></label><label>Gate<input bind:value={tierDraft.gate} maxlength="100" required disabled={saving || Boolean(currentEvent?.ticketTiers.find((item) => item.id === tierSelected)?.gateLocked)} /></label></div>
+              <div class="event-form-row"><label>Harga (rupiah)<input type="number" inputmode="numeric" min="1" step="1" bind:value={tierDraft.price} required disabled={saving} /></label><label>Kapasitas<input type="number" inputmode="numeric" min="0" step="1" bind:value={tierDraft.capacity} required disabled={saving} /></label></div>
+              <div class="event-form-row"><label>Batas pembelian<input type="number" inputmode="numeric" min="1" step="1" bind:value={tierDraft.maxPerOrder} required disabled={saving} /></label><label>Gate<input bind:value={tierDraft.gate} maxlength="100" required disabled={saving || Boolean(currentEvent?.ticketTiers.find((item) => item.id === tierSelected)?.gateLocked)} /></label></div>
               {#if currentEvent?.ticketTiers.find((item) => item.id === tierSelected)?.gateLocked}<small class="event-lock-note">Gate dikunci setelah reservasi pertama untuk kategori ini.</small>{/if}
               <label>Benefit<input bind:value={tierDraft.benefit} maxlength="255" disabled={saving} /></label>
               <label>Seating<select bind:value={tierDraft.seating} disabled={saving}><option value="free-standing">Berdiri</option><option value="assigned">Tempat duduk</option></select></label>

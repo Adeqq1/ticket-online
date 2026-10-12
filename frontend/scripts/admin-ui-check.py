@@ -171,6 +171,99 @@ def body(path, mode, role):
     return 200, {}
 
 
+async def check_help(page, width):
+    buttons = page.locator(".admin-help-button")
+    description = page.locator(".mobile-help-description")
+    if width >= 768:
+        for button in await buttons.all(): await expect(button).not_to_be_visible()
+        for paragraph in await description.all(): await expect(paragraph).to_be_visible()
+        return
+    await expect(description).not_to_be_visible()
+    state = """() => [...document.querySelectorAll('main input, main select, main textarea, .mobile-list-viewport, .order-list-panel .history-table-wrap')].map(el => [el.value, el.checked, el.scrollLeft])"""
+    before = await page.evaluate(state)
+    for button in await buttons.all():
+        popup = page.locator("#" + await button.get_attribute("aria-controls"))
+        await button.click()
+        await expect(popup).to_be_visible()
+        await expect(button).to_have_attribute("aria-expanded", "true")
+        assert await popup.inner_text()
+        assert await button.evaluate("el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }")
+        await button.click()
+        await expect(popup).not_to_be_visible()
+        await button.focus()
+        await page.keyboard.press("Tab")
+        await page.keyboard.press("Shift+Tab")
+        await expect(button).to_be_focused()
+        await expect(popup).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(popup).not_to_be_visible()
+        await page.mouse.move(0, 0)
+        await button.hover()
+        await expect(popup).to_be_visible()
+        await popup.hover()
+        await expect(popup).to_be_visible()
+        await page.get_by_role("heading", level=1).click()
+        await expect(popup).not_to_be_visible()
+    assert await page.evaluate(state) == before, "Help changed filters or the selected card"
+    if await buttons.count() > 1:
+        await buttons.first.click()
+        await buttons.last.click()
+        await expect(page.locator('.admin-help-popup:visible')).to_have_count(1)
+        await page.keyboard.press("Escape")
+
+
+async def check_help_pages(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 768, has_touch=width < 768)
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, requests = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    audit_js = run_path(str(Path(__file__).with_name("staff-review-check.py")))["STYLE_AUDIT"]
+
+    async def fixture(route):
+        requests.append((route.request.method, urlparse(route.request.url).path))
+        status, data = body(route.request.url, "standard", "ADMIN")
+        await route.fulfill(status=status, json=data)
+
+    await page.route("**/api/v1/**", fixture)
+    for name in ("events", "staff", "orders", "issues"):
+        await page.goto(base + "/admin/" + name)
+        await page.wait_for_load_state("networkidle")
+        await expect(page.locator(".admin-help-button")).to_have_count(2 if name == "staff" else 1)
+        await check_help(page, width)
+        if name == "staff":
+            await expect(page.locator(".staff-list-explanation")).to_be_visible(visible=width >= 768)
+        if width < 768:
+            await page.locator(".admin-help-button").first.click()
+            popup = page.locator('.admin-help-popup:visible')
+            await expect(popup).to_have_count(1)
+            await page.screenshot(path=str(output / f"help-{name}-{width}.png"), full_page=True)
+            await page.evaluate("""() => {
+                window.helpFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+                for (const [el, , size] of window.helpFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+            }""")
+            result = await page.evaluate(audit_js)
+            assert not result["failures"] and not result["overflow"], (name, width, result)
+            assert await page.locator(".admin-help h1, .admin-help h2").evaluate_all("headings => headings.every(el => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).fontSize) * 3)"), "Enlarged headings collapsed into narrow columns"
+            assert await popup.evaluate("el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }")
+            await page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
+            await page.screenshot(path=str(output / f"help-{name}-text200-{width}.png"), full_page=True)
+            await expect(popup).to_be_visible()
+            await page.evaluate("() => { for (const [el, size] of window.helpFonts) el.style.fontSize = size; }")
+            await page.mouse.move(0, 0)
+            await page.set_viewport_size({"width": 768, "height": 900})
+            await expect(page.locator(".admin-help-button").first).to_have_attribute("aria-expanded", "false")
+            await expect(page.locator('.admin-help-popup:visible')).to_have_count(0)
+            await page.set_viewport_size({"width": width, "height": 900})
+            await expect(page.locator('.admin-help-popup:visible')).to_have_count(0)
+        else:
+            await page.screenshot(path=str(output / f"help-{name}-{width}.png"), full_page=True)
+    assert all(method == "GET" for method, _ in requests) and not errors, (requests, errors)
+    (output / f"help-{width}.json").write_text(json.dumps({"automated": True, "humanUAT": "not performed", "width": width, "pages": ["events", "staff", "orders", "issues"], "requests": requests, "browserErrors": errors}, indent=2))
+    await context.close()
+    print(f"PASS {width}: mobile help tap/hover/keyboard, one popup, unchanged filters/cards, 200% text, desktop descriptions")
+
+
 async def check_workflows(browser, base, output, width):
     context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
     await context.add_init_script(SESSION_INIT)
@@ -253,6 +346,11 @@ async def check_workflows(browser, base, output, width):
     except AssertionError: raise AssertionError({"url": page.url, "errors": errors, "requests": requests, "text": await page.locator("body").inner_text()})
     await expect(page.locator("#event-form")).to_have_count(0)
     await expect(page.get_by_role("heading", level=1)).to_have_text("Daftar konser.")
+    if width < 768:
+        opener_box = await page.locator("#event-create-opener").bounding_box()
+        panel_box = await page.locator('section[aria-labelledby="event-list-title"]').bounding_box()
+        assert abs(opener_box["x"] - panel_box["x"]) < 2 and abs(opener_box["width"] - panel_box["width"]) < 2, "Tambah konser must fill the mobile content width"
+        assert await page.locator("#event-create-opener").evaluate("el => getComputedStyle(el).textAlign") == "center"
     await capture("events-list")
     await text200("events-list")
     if width < 768:
@@ -330,6 +428,8 @@ async def check_workflows(browser, base, output, width):
         await page.get_by_label("Nomor pesanan", exact=True).fill("")
         await toggle.click()
         await expect(page.get_by_role("button", name="Sebelumnya", exact=True)).to_be_disabled()
+        await expect(page.locator("tbody tr.admin-mobile-card")).to_have_count(5)
+        await expect(page.locator("tbody tr").first.locator("time .admin-card-date")).to_have_count(2)
         await capture("orders-mobile-first-group")
         await text200("orders-mobile-first-group")
         seen = []
@@ -464,6 +564,14 @@ async def check_mobile_lists(browser, base, output, width):
             key, total = endpoints[endpoint]
             seed = data[key][0]
             rows = [{**deepcopy(seed), "id": (str(i + 100) if endpoint == "/admin/check-ins" else f"concert-{i}" if endpoint == "/admin/events" else f"{i + 100:032x}"), **({"name": f"Petugas {i:02d}", "role": "STAFF"} if key == "staff" else {})} for i in range(total)]
+            if endpoint == "/admin/events":
+                rows[0]["artist"] = "Konser dengan nama panjang untuk pemeriksaan kartu mobile"
+                rows[0]["ticketTiers"][0].update(capacity=1000000000, availableQuantity=999999942)
+            elif endpoint == "/admin/staff":
+                for i, person in enumerate(rows):
+                    person.update(role="ADMIN" if i == 0 else "STAFF", active=i % 4 != 3,
+                                  email="nama.petugas.yang.sangat.panjang@contoh-domain-pengujian.example.test" if i == 1 else f"petugas{i}@example.test",
+                                  assignments=[{"eventId": "concert-0", "gate": "Gate B"}] if i % 3 == 2 else [])
             if endpoint in ("/admin/events", "/admin/staff"):
                 data[key] = rows
             else:
@@ -478,7 +586,7 @@ async def check_mobile_lists(browser, base, output, width):
         await route.fulfill(status=status, json=data)
 
     await page.route("**/api/v1/**", fixture)
-    specs = [("events", "event-list-title", ".event-admin-list li", 20), ("staff", "staff-list-title", ".staff-list li", 20),
+    specs = [("events", "event-list-title", ".event-admin-list li", 20), ("staff", "staff-list-title", "[id^=staff-account-]", 20),
              ("issues", "case-list-title", "tbody tr", 11), ("issues", "email-list-title", "tbody tr", 11),
              ("check-ins", "history-results-title", "tbody tr", 11)]
     for route, heading, row_selector, count in specs:
@@ -487,9 +595,54 @@ async def check_mobile_lists(browser, base, output, width):
         rows = section.locator(row_selector)
         await expect(rows).to_have_count(5 if width < 768 else count)
         if width < 768:
+            if route != "check-ins":
+                await expect(section.locator(".admin-mobile-card")).to_have_count(5)
+                first = rows.first
+                assert await first.evaluate("el => getComputedStyle(el).borderTopStyle") == "solid"
+                if route in ("events", "staff"):
+                    await expect(first.locator("dl.admin-card-fields")).to_have_count(1)
+                    assert await first.locator("dt").count() == await first.locator("dd").count()
+                if route == "events":
+                    await expect(first.locator("dd").nth(4)).to_have_text("1.000.000.000")
+                    await expect(first.locator("dd").nth(5)).to_have_text("999.999.942")
+                if heading == "email-list-title":
+                    await expect(first.locator("time .admin-card-date")).to_have_count(2)
+                badges = first.locator(".admin-order-status, .staff-status")
+                assert await badges.count() > 0
+                assert await badges.evaluate_all("els => els.every(el => el.tabIndex < 0 && getComputedStyle(el).cursor !== 'pointer')")
+                # Text enlargement must keep label/value pairs and actions inside each card.
+                await page.evaluate("""() => {
+                  window.__cardFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+                  for (const [el, , size] of window.__cardFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+                }""")
+                assert await first.evaluate("el => el.scrollWidth <= el.clientWidth + 1"), (heading, width, "200% text overflows card")
+                assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (heading, width, "200% text overflows viewport")
+                await page.screenshot(path=str(output / f"mobile-cards-{heading}-text200-{width}.png"), full_page=True, animations="disabled")
+                await page.evaluate("() => { for (const [el, original] of window.__cardFonts) el.style.fontSize = original; }")
             viewport = section.locator(".mobile-list-viewport")
             await expect(viewport).to_have_attribute("tabindex", "0")
             assert await page.evaluate("innerWidth === document.documentElement.clientWidth && document.documentElement.scrollWidth <= innerWidth"), "Cards expanded the mobile viewport"
+            await rows.first.locator("strong, code, td").first.scroll_into_view_if_needed()
+            box = await viewport.bounding_box()
+            target = await rows.first.locator("strong, code, td").first.bounding_box()
+            start, end, y = box["x"] + box["width"] - 20, box["x"] + 20, target["y"] + target["height"] / 2
+            # Mouse dragging in mobile simulators must work as well as native touch.
+            await page.mouse.move(start, y)
+            await page.mouse.down()
+            await page.mouse.move(end, y, steps=20)
+            await page.mouse.up()
+            await page.wait_for_function("id => document.querySelector(`section[aria-labelledby='${id}'] .mobile-list-viewport`).scrollLeft > 0", arg=heading)
+            await expect(page.locator("#event-editor-title, #staff-edit-title, #case-detail-title, #email-detail-title")).to_have_count(0)
+            await viewport.evaluate("el => el.scrollTo({left: 0, behavior: 'instant'})")
+            client = await context.new_cdp_session(page)
+            await client.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": start, "y": y}]})
+            for step in range(1, 21):
+                await client.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": start + (end - start) * step / 20, "y": y}]})
+                await page.wait_for_timeout(15)
+            await client.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            await page.wait_for_function("id => document.querySelector(`section[aria-labelledby='${id}'] .mobile-list-viewport`).scrollLeft > 0", arg=heading)
+            await client.detach()
+            await viewport.evaluate("el => el.scrollTo({left: 0, behavior: 'instant'})")
             await viewport.focus()
             await page.keyboard.press("ArrowRight")
             await page.wait_for_function("id => document.querySelector(`section[aria-labelledby='${id}'] .mobile-list-viewport`).scrollLeft > 0", arg=heading)
@@ -531,7 +684,7 @@ async def check_mobile_lists(browser, base, output, width):
     assert not errors, errors
     (output / f"mobile-lists-{width}.json").write_text(json.dumps({"width": width, "automated": True, "humanUAT": "not performed", "lists": audits, "requests": requests, "browserErrors": errors}, indent=2))
     await context.close()
-    print(f"PASS {width}: " + ("five-card groups, keyboard scrolling, focus restoration, partial groups, failed cursor retry, viewport containment" if width < 768 else "full desktop lists, no carousel snapping, viewport containment"))
+    print(f"PASS {width}: " + ("five-card groups, mouse dragging, native touch swipe, keyboard scrolling, focus restoration, partial groups, failed cursor retry, viewport containment" if width < 768 else "full desktop lists, no carousel snapping, viewport containment"))
 
 
 async def main():
@@ -543,6 +696,7 @@ async def main():
     parser.add_argument("--phase35", action="store_true", help="Capture tablet, landscape, reduced-height keyboard, and enlarged-text layouts")
     parser.add_argument("--inject-pageerror", action="store_true", help="Inject a non-blocking browser exception to verify failure reporting")
     parser.add_argument("--mobile-lists", action="store_true", help="Check shared mobile list groups, native scroll, and cursor recovery")
+    parser.add_argument("--mobile-help", action="store_true", help="Check mobile help on concert, staff, order, and issue lists")
     parser.add_argument("--workflows", action="store_true", help="Verify the phase 55 concert/order workflows with larger fixtures")
     args = parser.parse_args()
     output = args.output_dir if args.output_dir and args.output_dir.is_absolute() else ROOT / args.output_dir if args.output_dir else OUTPUT
@@ -565,6 +719,10 @@ async def main():
             parser.error(f"unknown route key: {args.only}")
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        if args.mobile_help:
+            for width in (320, 390, 768, 1440): await check_help_pages(browser, args.base_url, output, width)
+            await browser.close()
+            return
         if args.mobile_lists:
             for width in (320, 390, 768, 1440): await check_mobile_lists(browser, args.base_url, output, width)
             await browser.close()

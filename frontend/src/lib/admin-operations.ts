@@ -1,5 +1,9 @@
 import type { AdminEmailDetail, AdminIssueAudit, OrderStatus, PaymentStatus } from "./api.ts";
 
+export const adminDate = new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium" });
+export const adminTime = new Intl.DateTimeFormat("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
+export const adminNumber = new Intl.NumberFormat("id-ID");
+
 export function orderStatusLabel(status: OrderStatus | string) {
   if (!status) return "Tidak terkait pesanan";
   return ({ PENDING: "Menunggu pembayaran", PAID: "Lunas", CANCELLED: "Dibatalkan", EXPIRED: "Kedaluwarsa", REFUND_PENDING: "Refund diproses", REFUNDED: "Refund berhasil" } as Record<string, string>)[status] ?? "Status belum dikenali";

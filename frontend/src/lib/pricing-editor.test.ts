@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test";
 import { ApiError, type Voucher } from "./api.ts";
-import { parseRupiahInput, sameVoucher, uncertainPricingSave } from "./pricing-editor.ts";
+import { parseRupiahInput, pricingHistoryFields, sameVoucher, uncertainPricingSave } from "./pricing-editor.ts";
+
+test("pricing history keeps readable values, WIB dates, zero amounts, and explicit status without guessing malformed data", () => {
+  expect(pricingHistoryFields({ adminFee: 7500 })).toEqual([["Biaya admin", "Rp\u00a07.500"]]);
+  const fields = Object.fromEntries(pricingHistoryFields({ code: "HEMAT10", kind: "PERCENT", value: 10, active: false, quota: 1000000000, minimumSubtotal: 0, eventId: "", startsAt: "2026-10-11T17:00:00Z", endsAt: "invalid" }));
+  expect(fields).toEqual({ "Kode voucher": "HEMAT10", Diskon: "10%", Status: "Nonaktif", "Kuota order": "1.000.000.000", "Minimum subtotal": "Rp\u00a00", Konser: "Semua konser", "Mulai berlaku": "12 Okt 2026, 00.00 WIB", Berakhir: "Tidak tersedia" });
+  for (const value of [null, [], "bad", {}, { unrelated: true }]) expect(pricingHistoryFields(value)).toEqual([]);
+  expect(pricingHistoryFields({ adminFee: -1 })).toEqual([["Biaya admin", "Tidak tersedia"]]);
+  const malformed = Object.fromEntries(pricingHistoryFields({ code: "TEST", active: "false", kind: "FUTURE", quota: Infinity }));
+  for (const field of ["Status", "Diskon", "Kuota order", "Mulai berlaku"]) expect(malformed[field]).toBe("Tidak tersedia");
+  expect(Object.fromEntries(pricingHistoryFields({ code: "TEST", kind: "FIXED", value: 100000 })).Diskon).toBe("Rp\u00a0100.000");
+});
 
 test("rupiah preview accepts Indonesian integer grouping and rejects ambiguous or invalid amounts", () => {
   for (const text of ["100000", "100.000", " 100.000 "]) expect(parseRupiahInput(text)).toBe(100000);

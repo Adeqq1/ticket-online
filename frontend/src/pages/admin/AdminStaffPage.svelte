@@ -5,6 +5,7 @@
   const mobileList = new MediaQuery("(max-width: 767px)");
 
   import AdminLayout from "../../layouts/AdminLayout.svelte";
+  import AdminHelp from "../../components/admin/AdminHelp.svelte";
   import { onMount, tick } from "svelte";
   import StaffAssignmentsEditor from "../../components/admin/StaffAssignmentsEditor.svelte";
   import { ApiError, createStaff, getAdminEvents, listStaff, resetStaffPassword, updateStaff, replaceStaffAssignments, type Staff, type StaffAssignment } from "../../lib/api.ts";
@@ -260,7 +261,7 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-  <AdminLayout page="staff" contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title={mode === "list" ? "Daftar petugas." : mode === "create" ? "Tambah petugas." : "Edit petugas."} description={mode === "list" ? "Temukan akun dan periksa akses tim pada event dan gate." : mode === "create" ? "Buat akun petugas beserta penugasan awalnya." : "Ubah profil, penugasan, atau password akun yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah petugas", onclick: openCreate, disabled: saving, id: "staff-create-opener" } : undefined} secondaryAction={mode === "edit" ? { label: "Muat ulang", onclick: () => { void loadStaff(); }, disabled: loadingStaff || saving } : undefined}>
+  <AdminLayout page="staff" mobileDescriptionHelp={mode === "list"} contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title={mode === "list" ? "Daftar petugas." : mode === "create" ? "Tambah petugas." : "Edit petugas."} description={mode === "list" ? "Temukan akun dan periksa akses tim pada event dan gate." : mode === "create" ? "Buat akun petugas beserta penugasan awalnya." : "Ubah profil, penugasan, atau password akun yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah petugas", onclick: openCreate, disabled: saving, id: "staff-create-opener" } : undefined} secondaryAction={mode === "edit" ? { label: "Muat ulang", onclick: () => { void loadStaff(); }, disabled: loadingStaff || saving } : undefined}>
     <div id="staff-result" role="status" aria-live="polite" tabindex="-1">
       {#if notice}<p class="staff-form-message staff-form-success">{notice}</p>{/if}
     </div>
@@ -270,8 +271,8 @@
     <div class="staff-workspace">
       {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="staff-list-title">
-        <div class="staff-panel-heading"><h2 id="staff-list-title" tabindex="-1">Akun petugas</h2><button class="staff-text-button" type="button" onclick={() => { if (!saving) void loadStaff(); }} disabled={loadingStaff || saving}>{loadingStaff ? "Memuat…" : "Muat ulang"}</button></div>
-        <p class="staff-list-help">Pilih Kelola untuk mengubah profil, penugasan event/gate, atau status akun petugas.</p>
+        <div class="staff-panel-heading"><AdminHelp id="staff-list-help" label="Penjelasan pengelolaan petugas" text="Pilih Kelola untuk mengubah profil, penugasan event/gate, atau status akun petugas."><h2 id="staff-list-title" tabindex="-1">Akun petugas</h2><button class="staff-text-button" type="button" onclick={() => { if (!saving) void loadStaff(); }} disabled={loadingStaff || saving}>{loadingStaff ? "Memuat…" : "Muat ulang"}</button></AdminHelp></div>
+        <p class="staff-list-help staff-list-explanation">Pilih Kelola untuk mengubah profil, penugasan event/gate, atau status akun petugas.</p>
         <div class="staff-form staff-list-filters" role="search" aria-label="Cari dan filter akun">
           <label>Cari nama atau email<input id="staff-search" type="search" bind:value={filters.query} autocomplete="off" /></label>
           <button class="staff-secondary-button staff-filter-toggle" type="button" aria-expanded={showFilters} aria-controls="staff-extra-filters" onclick={() => { showFilters = !showFilters; }}>Filter lainnya{activeFilterCount ? ` (${activeFilterCount} aktif)` : ""}</button>
@@ -286,19 +287,42 @@
         {:else if staffError}<p class="staff-form-message staff-form-error" role="alert">{staffError}</p>
         {:else if staff.length === 0}<p class="staff-muted">Belum ada akun petugas.</p>
         {:else if filteredStaff.length === 0}<p class="staff-muted">Tidak ada akun yang cocok. Ubah pencarian atau reset filter.</p>
-        {:else}<AdminMobileList count={filteredStaff.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="staff-list-title"><ul class="staff-list">{#each mobileListItems(filteredStaff, mobileGroup, mobileList.current) as person (person.id)}
-          <li id={`staff-account-${person.id}`} tabindex="-1">
+        {:else}<AdminMobileList count={filteredStaff.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="staff-list-title">{#if mobileList.current}<ul class="staff-list">{#each mobileListItems(filteredStaff, mobileGroup, mobileList.current) as person (person.id)}
+          <li id={`staff-account-${person.id}`} class:admin-mobile-card={mobileList.current} tabindex="-1">
             <div class="staff-list-identity">
-              <strong>{person.name}</strong><span>{person.email}</span>
-              {#each person.assignments.slice(0, 2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}
-              {#if person.assignments.length > 2}<details><summary>Lihat semua penugasan ({person.assignments.length})</summary>{#each person.assignments.slice(2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}</details>{/if}
-              {#if !person.assignments.length}<span>{person.role === "STAFF" ? "Belum ditugaskan. Atur event dan gate melalui Kelola." : "Tanpa penugasan"}</span>{/if}
-              {#if person.role === "ADMIN"}<span>Akun administrator tidak dapat diubah melalui halaman ini.</span>{/if}
+                <div class="admin-mobile-card-header"><strong>{person.name}</strong><span class="staff-status" class:is-active={person.active}>Status: {person.active ? "Aktif" : "Nonaktif"}</span></div>
+                <dl class="admin-card-fields">
+                  <div><dt>Email</dt><dd>{person.email}</dd></div>
+                  <div><dt>Peran</dt><dd><span class="staff-role">{person.role === "ADMIN" ? "Admin" : "Staff"}</span></dd></div>
+                  <div><dt>Penugasan</dt><dd>
+                    {#each person.assignments.slice(0, 2) as assignment}<span class="admin-card-assignment">{assignmentLabel(assignment)}</span>{/each}
+                    {#if person.assignments.length > 2}<details><summary>Lihat semua penugasan ({person.assignments.length.toLocaleString("id-ID")})</summary>{#each person.assignments.slice(2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}</details>{/if}
+                    {#if !person.assignments.length}{person.role === "STAFF" ? "Belum ditugaskan. Atur event dan gate melalui Kelola." : "Tanpa penugasan"}{/if}
+                  </dd></div>
+                </dl>
+                {#if person.role === "ADMIN"}<span>Akun administrator tidak dapat diubah melalui halaman ini.</span>{/if}
             </div>
-            <div class="staff-account-meta"><span class="staff-role">Peran: {person.role === "ADMIN" ? "Admin" : "Staff"}</span><span class="staff-status" class:is-active={person.active}>Status: {person.active ? "Aktif" : "Nonaktif"}</span></div>
             {#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button" type="button" disabled={saving} onclick={() => selectStaff(person)}>Kelola<span class="visually-hidden"> {person.name}</span></button>{/if}
           </li>
-        {/each}</ul></AdminMobileList>{/if}
+        {/each}</ul>
+        {:else}
+            <table class="history-table admin-list-table staff-list-table">
+              <caption class="visually-hidden">Daftar akun petugas dan penugasannya</caption>
+              <thead><tr><th scope="col">Nama</th><th scope="col">Email</th><th scope="col">Peran</th><th scope="col">Status</th><th scope="col">Penugasan</th><th scope="col">Aksi</th></tr></thead>
+              <tbody>{#each filteredStaff as person (person.id)}<tr id={`staff-account-${person.id}`} tabindex="-1">
+                <td><strong>{person.name}</strong></td>
+                <td>{person.email}</td>
+                <td><span class="staff-role">{person.role === "ADMIN" ? "Admin" : "Staff"}</span></td>
+                <td><span class="staff-status" class:is-active={person.active}>Status: {person.active ? "Aktif" : "Nonaktif"}</span></td>
+                <td><div class="staff-list-identity">
+                  {#each person.assignments.slice(0, 2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}
+                  {#if person.assignments.length > 2}<details><summary>Lihat semua penugasan ({person.assignments.length.toLocaleString("id-ID")})</summary>{#each person.assignments.slice(2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}</details>{/if}
+                  {#if !person.assignments.length}<span>{person.role === "STAFF" ? "Belum ditugaskan. Atur event dan gate melalui Kelola." : "Tanpa penugasan"}</span>{/if}
+                </div></td>
+                <td>{#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button admin-icon-button" type="button" aria-label={`Kelola ${person.name}`} title={`Kelola ${person.name}`} disabled={saving} onclick={() => selectStaff(person)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z" /><path d="m14 5 5 5" /></svg></button>{:else}<small>Akun administrator tidak dapat diubah melalui halaman ini.</small>{/if}</td>
+              </tr>{/each}</tbody>
+            </table>
+        {/if}</AdminMobileList>{/if}
       </section>
       {:else if creating}<section id="staff-work-panel" class="staff-admin-panel staff-create-panel" aria-labelledby="staff-create-title">
         <div class="staff-panel-heading"><h2 id="staff-create-title" tabindex="-1">Tambah petugas</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
@@ -355,6 +379,7 @@
   .staff-list li { grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px 16px; padding-block: 12px; }
   .staff-list li > button { justify-self: end; }
   .staff-list-help { margin: 0 0 16px; color: var(--scan-muted); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+  @media (max-width: 767px) { .staff-list-explanation { display: none; } }
   .staff-section-nav { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 20px; }
   .staff-section-nav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--scan-text); font-size: 14px; }
   .staff-list-identity details span { display: block; margin-top: 4px; }
@@ -368,7 +393,6 @@
   .staff-filter-toggle { display: none; }
   .staff-filter-results { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; margin-bottom: 8px; }
   .staff-filter-results p { margin: 0; }
-  .staff-account-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
   .staff-role { color: var(--admin-secondary); font-size: 14px; }
   .staff-status { display: inline-block; padding: 4px 8px; border-radius: 2px; color: var(--admin-text); background: var(--admin-neutral-bg); font-size: 14px; line-height: 1.5; cursor: default; }
   .staff-status.is-active { background: var(--admin-active-bg); color: var(--admin-active-text); }

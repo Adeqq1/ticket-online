@@ -1,10 +1,11 @@
 <script lang="ts">
   import { tick, type Snippet } from "svelte";
+  import AdminHelp from "../components/admin/AdminHelp.svelte";
 
   type Action = { label: string; onclick?: () => void; form?: string; disabled?: boolean; id?: string; controls?: string; expanded?: boolean };
   type Page = "pricing" | "events" | "staff" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "history";
-  let { page, contentId, skipLabel, kicker, title, description, onLogout, loggingOut, logoutDisabled, primaryAction, secondaryAction, children }: {
-    page: Page; contentId: string; skipLabel: string; kicker: string; title: string; description: string;
+  let { page, contentId, skipLabel, kicker, title, description, mobileDescriptionHelp = false, onLogout, loggingOut, logoutDisabled, primaryAction, secondaryAction, children }: {
+    page: Page; contentId: string; skipLabel: string; kicker: string; title: string; description: string; mobileDescriptionHelp?: boolean;
     onLogout: () => void; loggingOut: boolean; logoutDisabled?: boolean; primaryAction?: Action; secondaryAction?: Action; children: Snippet;
   } = $props();
 
@@ -69,7 +70,7 @@
     </aside>
 
     <main id={contentId} class="staff-admin-content" tabindex="-1">
-      <div class="staff-admin-heading admin-page-heading"><div><p class="scan-kicker">{kicker}</p><h1>{title}</h1><p>{description}</p></div><div class="admin-heading-actions">{#if primaryAction}<button class="scan-submit staff-submit" id={primaryAction.id} aria-controls={primaryAction.controls} aria-expanded={primaryAction.expanded} type={primaryAction.form ? "submit" : "button"} form={primaryAction.form} onclick={primaryAction.onclick} disabled={primaryAction.disabled}>{primaryAction.label}</button>{/if}{#if secondaryAction}<button class="staff-secondary-button" type="button" onclick={secondaryAction.onclick} disabled={secondaryAction.disabled}>{secondaryAction.label}</button>{/if}</div></div>
+      <div class="staff-admin-heading admin-page-heading"><div><p class="scan-kicker">{kicker}</p>{#if mobileDescriptionHelp}<AdminHelp id={`${contentId}-description-help`} label={`Penjelasan ${title.replace(/\.$/, "").toLowerCase()}`} text={description}><h1>{title}</h1></AdminHelp>{:else}<h1>{title}</h1>{/if}<p class:mobile-help-description={mobileDescriptionHelp}>{description}</p></div><div class="admin-heading-actions">{#if primaryAction}<button class="scan-submit staff-submit" id={primaryAction.id} aria-controls={primaryAction.controls} aria-expanded={primaryAction.expanded} type={primaryAction.form ? "submit" : "button"} form={primaryAction.form} onclick={primaryAction.onclick} disabled={primaryAction.disabled}>{primaryAction.label}</button>{/if}{#if secondaryAction}<button class="staff-secondary-button" type="button" onclick={secondaryAction.onclick} disabled={secondaryAction.disabled}>{secondaryAction.label}</button>{/if}</div></div>
       {@render children()}
     </main>
   </div>
@@ -78,6 +79,7 @@
 <svelte:window onresize={closeOnDesktop} />
 
 <style>
+  .admin-layout .skip-link:not(:focus) { top: 0; transform: translateY(-100%); }
   .admin-topbar { width: min(100% - 56px, 1500px); }
   .admin-topbar .scan-brand { min-height: 44px; }
   .admin-menu-trigger { display: none; }
@@ -126,6 +128,12 @@
     .admin-heading-actions { justify-content: stretch; }
     .admin-heading-actions > * { flex: 1 1 auto; }
     .admin-mobile-menu { margin: 10px 10px auto auto; }
+  }
+  @media (max-width: 767px) { .mobile-help-description { display: none; } }
+  @media (max-width: 767px) {
+    .admin-page-heading { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .admin-heading-actions { width: 100%; justify-content: stretch; }
+    .admin-heading-actions > * { flex: 1; min-width: 0; width: 100%; text-align: center; }
   }
   @media (prefers-reduced-motion: reduce) { .admin-layout * { scroll-behavior: auto; } }
 </style>
