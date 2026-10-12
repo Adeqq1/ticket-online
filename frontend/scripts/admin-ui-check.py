@@ -8,11 +8,13 @@ import asyncio
 import json
 import re
 import subprocess
+from copy import deepcopy
+from runpy import run_path
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,7 +115,7 @@ def body(path, mode, role):
     if endpoint in ("/admin/payment-cases/17/notes", "/admin/payment-cases/17/resolve"): return 204, {}
     if endpoint == "/admin/email-jobs":
         job = {"id": "e" * 32, "kind": "TICKETS", "status": "FAILED", "reference": "TO-0123456789abcdef0123",
-            "recipient": "nadia@example.test", "attempts": 2, "lastError": "SMTP belum merespons", "updatedAt": "2026-10-10T02:00:00Z", "supersededBy": None}
+            "recipient": "n***@example.test", "attempts": 2, "lastError": "SMTP koneksi gagal", "updatedAt": "2026-10-10T02:00:00Z", "supersededBy": None}
         other_job = {**job, "id": "g" * 32, "reference": "TO-9876543210fedcba9876", "recipient": "raka@example.test"}
         return 200, {"items": [] if empty else [job, other_job], "nextCursor": None}
     if endpoint == f"/admin/email-jobs/{'e' * 32}":
@@ -169,6 +171,522 @@ def body(path, mode, role):
     return 200, {}
 
 
+async def check_help(page, width):
+    buttons = page.locator(".admin-help-button")
+    description = page.locator(".mobile-help-description")
+    if width >= 768:
+        for button in await buttons.all(): await expect(button).not_to_be_visible()
+        for paragraph in await description.all(): await expect(paragraph).to_be_visible()
+        return
+    await expect(description).not_to_be_visible()
+    state = """() => [...document.querySelectorAll('main input, main select, main textarea, .mobile-list-viewport, .order-list-panel .history-table-wrap')].map(el => [el.value, el.checked, el.scrollLeft])"""
+    before = await page.evaluate(state)
+    for button in await buttons.all():
+        popup = page.locator("#" + await button.get_attribute("aria-controls"))
+        await button.click()
+        await expect(popup).to_be_visible()
+        await expect(button).to_have_attribute("aria-expanded", "true")
+        assert await popup.inner_text()
+        assert await button.evaluate("el => { const r = el.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; }")
+        await button.click()
+        await expect(popup).not_to_be_visible()
+        await button.focus()
+        await page.keyboard.press("Tab")
+        await page.keyboard.press("Shift+Tab")
+        await expect(button).to_be_focused()
+        await expect(popup).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(popup).not_to_be_visible()
+        await page.mouse.move(0, 0)
+        await button.hover()
+        await expect(popup).to_be_visible()
+        await popup.hover()
+        await expect(popup).to_be_visible()
+        await page.get_by_role("heading", level=1).click()
+        await expect(popup).not_to_be_visible()
+    assert await page.evaluate(state) == before, "Help changed filters or the selected card"
+    if await buttons.count() > 1:
+        await buttons.first.click()
+        await buttons.last.click()
+        await expect(page.locator('.admin-help-popup:visible')).to_have_count(1)
+        await page.keyboard.press("Escape")
+
+
+async def check_help_pages(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 768, has_touch=width < 768)
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, requests = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    audit_js = run_path(str(Path(__file__).with_name("staff-review-check.py")))["STYLE_AUDIT"]
+
+    async def fixture(route):
+        requests.append((route.request.method, urlparse(route.request.url).path))
+        status, data = body(route.request.url, "standard", "ADMIN")
+        await route.fulfill(status=status, json=data)
+
+    await page.route("**/api/v1/**", fixture)
+    for name in ("events", "staff", "orders", "issues"):
+        await page.goto(base + "/admin/" + name)
+        await page.wait_for_load_state("networkidle")
+        await expect(page.locator(".admin-help-button")).to_have_count(2 if name == "staff" else 1)
+        await check_help(page, width)
+        if name == "staff":
+            await expect(page.locator(".staff-list-explanation")).to_be_visible(visible=width >= 768)
+        if width < 768:
+            await page.locator(".admin-help-button").first.click()
+            popup = page.locator('.admin-help-popup:visible')
+            await expect(popup).to_have_count(1)
+            await page.screenshot(path=str(output / f"help-{name}-{width}.png"), full_page=True)
+            await page.evaluate("""() => {
+                window.helpFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+                for (const [el, , size] of window.helpFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+            }""")
+            result = await page.evaluate(audit_js)
+            assert not result["failures"] and not result["overflow"], (name, width, result)
+            assert await page.locator(".admin-help h1, .admin-help h2").evaluate_all("headings => headings.every(el => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).fontSize) * 3)"), "Enlarged headings collapsed into narrow columns"
+            assert await popup.evaluate("el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }")
+            await page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
+            await page.screenshot(path=str(output / f"help-{name}-text200-{width}.png"), full_page=True)
+            await expect(popup).to_be_visible()
+            await page.evaluate("() => { for (const [el, size] of window.helpFonts) el.style.fontSize = size; }")
+            await page.mouse.move(0, 0)
+            await page.set_viewport_size({"width": 768, "height": 900})
+            await expect(page.locator(".admin-help-button").first).to_have_attribute("aria-expanded", "false")
+            await expect(page.locator('.admin-help-popup:visible')).to_have_count(0)
+            await page.set_viewport_size({"width": width, "height": 900})
+            await expect(page.locator('.admin-help-popup:visible')).to_have_count(0)
+        else:
+            await page.screenshot(path=str(output / f"help-{name}-{width}.png"), full_page=True)
+    assert all(method == "GET" for method, _ in requests) and not errors, (requests, errors)
+    (output / f"help-{width}.json").write_text(json.dumps({"automated": True, "humanUAT": "not performed", "width": width, "pages": ["events", "staff", "orders", "issues"], "requests": requests, "browserErrors": errors}, indent=2))
+    await context.close()
+    print(f"PASS {width}: mobile help tap/hover/keyboard, one popup, unchanged filters/cards, 200% text, desktop descriptions")
+
+
+async def check_workflows(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, requests, mutations, audits = [], [], [], []
+    refund_calls = []
+    refund_found = False
+    detail_failed = False
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    events = [{**deepcopy(EVENT), "id": f"konser-{i}", "artist": f"Konser {i:02d}" + (" dengan nama sangat panjang untuk operasional acara" if i == 19 else ""), "publicationStatus": ["DRAFT", "PUBLISHED", "ARCHIVED"][i % 3]} for i in range(20)]
+    _, detail = body(base + f"/api/v1/admin/orders/{ORDER}", "standard", "ADMIN")
+    orders = [{"id": f"{i + 100:032x}", "reference": f"TO-{i:020d}", "buyerName": "Pembeli dengan nama panjang " + str(i), "eventName": events[i % 20]["artist"], "eventId": events[i % 20]["id"], "status": ["PAID", "PENDING", "EXPIRED", "CANCELLED", "REFUND_PENDING", "REFUNDED"][i % 6], "total": 100000 + i, "createdAt": "2026-10-01T10:00:00Z", "ticketCount": 2} for i in range(22)]
+    audit_js = run_path(str(Path(__file__).with_name("staff-review-check.py")))["STYLE_AUDIT"]
+
+    async def fixture(route):
+        url = urlparse(route.request.url)
+        path, method = url.path.removeprefix("/api/v1/"), route.request.method
+        requests.append((method, path, parse_qs(url.query)))
+        if path == "staff/me": await route.fulfill(json={"staff": ADMIN})
+        elif path == "admin/events" and method == "GET": await route.fulfill(json={"events": events})
+        elif path.endswith("/changes") and method == "GET": await route.fulfill(json=[])
+        elif path.startswith("admin/events"):
+            value = route.request.post_data_json
+            mutations.append((method, path, value))
+            if path == "admin/events":
+                event = {**deepcopy(EVENT), **value, "zones": [], "ticketTiers": []}
+                events.append(event)
+                await route.fulfill(status=201, json=event)
+            else:
+                event = next(e for e in events if e["id"] == path.split("/")[2])
+                if path.endswith("/zones"):
+                    event["zones"].append(value)
+                    await route.fulfill(status=201, json=value)
+                elif path.endswith("/ticket-tiers"):
+                    tier = {**value, "availableQuantity": value["capacity"], "boundQuantity": 0, "gateLocked": False}
+                    event["ticketTiers"].append(tier)
+                    await route.fulfill(status=201, json=tier)
+                else:
+                    event.update(value)
+                    await route.fulfill(json=event)
+        elif path == "admin/orders":
+            query = parse_qs(url.query)
+            if width < 768 and "cursor" in query and sum(1 for method, path, params in requests if path == "admin/orders" and "cursor" in params) == 1:
+                await route.fulfill(status=503, json={"error": {"code": "SERVICE_UNAVAILABLE", "message": "Halaman berikutnya gagal dimuat."}})
+                return
+            rows = orders[10:] if "cursor" in query else orders[:11]
+            if query.get("q") == ["absent"]: rows = []
+            await route.fulfill(json={"items": rows, "nextCursor": "cursor-two" if len(rows) == 11 else None, "filterOptions": {"events": [{"id": e["id"], "name": e["artist"]} for e in events]}})
+        elif path.startswith("admin/orders/"):
+            if method == "POST":
+                refund_calls.append(route.request.post_data_json)
+                await route.abort("connectionreset")
+            elif detail_failed:
+                await route.fulfill(status=503, json={"error": {"message": "Detail gagal dimuat."}})
+            else:
+                value = {**detail, **next(o for o in orders if o["id"] == path.split("/")[-1])}
+                if refund_found: value.update(status="REFUND_PENDING", refund={"status": "REQUESTED", "amount": value["total"], "reason": "Permintaan admin"})
+                await route.fulfill(json=value)
+        else: raise AssertionError((method, path))
+
+    async def capture(name):
+        result = await page.evaluate(audit_js)
+        if result["overflow"]:
+            result["overflowElements"] = await page.evaluate("() => [...document.querySelectorAll('body *')].filter(el => el.getBoundingClientRect().right > innerWidth + 1).slice(-20).map(el => ({tag: el.tagName, classes: el.className, text: el.textContent.slice(0, 60), right: el.getBoundingClientRect().right}))")
+        assert not result["failures"] and not result["overflow"], (name, width, result)
+        audits.append({"state": name, **result})
+        await page.screenshot(path=str(output / f"workflow-{name}-{width}.png"), full_page=True, animations="disabled")
+
+    async def text200(name):
+        await page.evaluate("""() => {
+          window.__phase55Fonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__phase55Fonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        await capture(name + "-text200")
+        await page.evaluate("() => { for (const [el, original] of window.__phase55Fonts) el.style.fontSize = original; }")
+
+    await page.route("**/api/v1/**", fixture)
+    await page.goto(base + "/admin/events")
+    try: await expect(page.locator(".event-admin-list li")).to_have_count(5 if width < 768 else 20, timeout=15000)
+    except AssertionError: raise AssertionError({"url": page.url, "errors": errors, "requests": requests, "text": await page.locator("body").inner_text()})
+    await expect(page.locator("#event-form")).to_have_count(0)
+    await expect(page.get_by_role("heading", level=1)).to_have_text("Daftar konser.")
+    if width < 768:
+        opener_box = await page.locator("#event-create-opener").bounding_box()
+        panel_box = await page.locator('section[aria-labelledby="event-list-title"]').bounding_box()
+        assert abs(opener_box["x"] - panel_box["x"]) < 2 and abs(opener_box["width"] - panel_box["width"]) < 2, "Tambah konser must fill the mobile content width"
+        assert await page.locator("#event-create-opener").evaluate("el => getComputedStyle(el).textAlign") == "center"
+    await capture("events-list")
+    await text200("events-list")
+    if width < 768:
+        await page.get_by_role("button", name="Buka pencarian dan filter", exact=True).click()
+    await page.get_by_label("Cari konser", exact=True).fill("Konser 19")
+    await page.get_by_role("button", name="Kelola konser Konser 19", exact=False).click()
+    await expect(page.locator("#event-editor-title")).to_be_focused()
+    await expect(page.locator(".event-admin-list")).to_have_count(0)
+    await expect(page.locator(".event-list-filters")).to_have_count(0)
+    await expect(page.locator("#event-create-opener")).to_have_count(0)
+    await expect(page.get_by_role("heading", level=1)).to_have_text("Edit konser.")
+    await page.get_by_label("Nama konser / artis", exact=True).fill("Draft tidak disimpan")
+    page.once("dialog", lambda d: d.dismiss())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(page.locator("#event-form")).to_have_count(1)
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(page.get_by_label("Cari konser", exact=True)).to_have_value("Konser 19")
+    await expect(page.locator("#event-manage-konser-19")).to_be_focused()
+    await page.locator("#event-create-opener").click()
+    await expect(page.locator("#event-editor-title")).to_be_focused()
+    await expect(page.get_by_role("heading", level=1)).to_have_text("Tambah konser.")
+    await expect(page.locator(".event-list-filters")).to_have_count(0)
+    name = page.get_by_label("Nama konser / artis", exact=True)
+    await name.fill("Konser Uji Baru")
+    await expect(page.locator("#event-id")).to_have_value("konser-uji-baru")
+    await page.locator("#event-id").fill("id-manual")
+    await name.fill("Nama setelah ID manual")
+    await expect(page.locator("#event-id")).to_have_value("id-manual")
+    await capture("events-create")
+    await page.get_by_role("button", name="Buat konser", exact=True).click()
+    await expect(page.locator("#event-editor-title")).to_contain_text("Edit konser")
+    await expect(page.get_by_text("Draf konser dibuat.", exact=False)).to_be_visible()
+    await expect(page.locator("#event-id")).to_have_count(0)
+    await page.get_by_label("Nama zona", exact=True).fill("Zona Uji")
+    await page.get_by_role("button", name="Tambah zona", exact=True).click()
+    await expect(page.get_by_text("Zona tersimpan.", exact=True)).to_be_visible()
+    await page.get_by_label("Nama kategori", exact=True).fill("Kategori Uji")
+    await page.locator(".event-inventory-editor form").last.get_by_role("combobox").first.select_option("zona-uji")
+    await page.get_by_label("Harga (rupiah)", exact=True).fill("100000")
+    await page.get_by_label("Kapasitas", exact=True).fill("20")
+    await page.get_by_label("Gate", exact=True).fill("Gate Uji")
+    await page.get_by_role("button", name="Tambah kategori", exact=True).click()
+    await expect(page.get_by_text("Kategori tiket tersimpan.", exact=True)).to_be_visible()
+    await page.get_by_label("Jadwal (WIB)", exact=True).fill("2027-12-01T19:00")
+    for label, value in [("Kota", "Jakarta"), ("Venue", "Venue Uji"), ("Alamat", "Alamat Uji"), ("Deskripsi", "Deskripsi konser uji"), ("Lineup", "Artis Uji")]:
+        await page.get_by_label(label, exact=label != "Lineup").fill(value)
+    await page.get_by_role("radio", name="Gunakan URL gambar", exact=True).check()
+    await page.get_by_label("URL poster", exact=True).fill("https://example.test/poster.jpg")
+    await page.get_by_role("combobox", name="Status publikasi", exact=True).select_option("PUBLISHED")
+    await page.get_by_role("button", name="Simpan perubahan", exact=True).click()
+    await expect(page.get_by_text("Perubahan konser tersimpan.", exact=True)).to_be_visible()
+    await capture("events-edit")
+    assert events[-1]["publicationStatus"] == "PUBLISHED" and events[-1]["ticketTiers"][0]["gate"] == "Gate Uji"
+    await page.goto(base + "/admin/orders")
+    await expect(page.locator("tbody tr")).to_have_count(5 if width < 768 else 11)
+    await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(0 if width < 768 else 1)
+    if width >= 768: await expect(page.get_by_role("columnheader", name="Nomor pesanan", exact=True)).to_be_visible()
+    if width < 768:
+        await expect(page.locator("#order-search-form")).to_be_hidden()
+        await capture("orders-search-collapsed")
+        await text200("orders-search-collapsed")
+        toggle = page.locator(".order-search-toggle")
+        await toggle.focus()
+        await page.keyboard.press("Enter")
+        await expect(toggle).to_have_attribute("aria-expanded", "true")
+        await page.get_by_label("Nomor pesanan", exact=True).fill("Draft pencarian")
+        await capture("orders-search-expanded")
+        await toggle.focus()
+        await page.keyboard.press("Enter")
+        await expect(page.locator("#order-search-form")).to_be_hidden()
+        await expect(toggle).to_be_focused()
+        await toggle.click()
+        await expect(page.get_by_label("Nomor pesanan", exact=True)).to_have_value("Draft pencarian")
+        await page.get_by_label("Nomor pesanan", exact=True).fill("")
+        await toggle.click()
+        await expect(page.get_by_role("button", name="Sebelumnya", exact=True)).to_be_disabled()
+        await expect(page.locator("tbody tr.admin-mobile-card")).to_have_count(5)
+        await expect(page.locator("tbody tr").first.locator("time .admin-card-date")).to_have_count(2)
+        await capture("orders-mobile-first-group")
+        await text200("orders-mobile-first-group")
+        seen = []
+        for index, count in enumerate((5, 5, 5, 5, 2)):
+            await expect(page.locator("tbody tr")).to_have_count(count)
+            references = await page.locator("tbody code").all_text_contents()
+            assert references == [o["reference"] for o in orders[index * 5:index * 5 + count]]
+            seen.extend(references)
+            if index == 1:
+                # A failed cursor request keeps the current page; retry cannot submit twice.
+                await page.get_by_role("button", name="Berikutnya", exact=True).click()
+                await expect(page.get_by_role("alert")).to_contain_text("Halaman berikutnya gagal dimuat")
+                assert await page.locator("tbody code").all_text_contents() == references
+                await page.get_by_role("button", name="Berikutnya", exact=True).evaluate("button => { button.click(); button.click(); }")
+                await expect(page.locator(".order-list-panel [role=status]")).to_contain_text("Menampilkan 11–15")
+                assert sum(1 for method, path, params in requests if path == "admin/orders" and "cursor" in params) == 2
+            elif index < 4:
+                await page.get_by_role("button", name="Berikutnya", exact=True).click()
+                await expect(page.locator("#order-results-title")).to_be_focused()
+        assert len(seen) == len(set(seen)) == 22
+        await expect(page.get_by_role("button", name="Berikutnya", exact=True)).to_be_disabled()
+        await expect(page.locator(".order-list-panel [role=status]")).to_contain_text("22 pesanan dimuat")
+        table = page.locator(".order-list-panel .history-table-wrap")
+        assert await page.locator("tbody").evaluate("el => getComputedStyle(el).display") == "flex"
+        assert await page.locator("tbody tr").first.evaluate("el => getComputedStyle(el).display") == "grid"
+        assert await table.evaluate("el => el.scrollWidth > el.clientWidth")
+        await table.focus()
+        await page.keyboard.press("ArrowRight")
+        await page.wait_for_function("document.querySelector('.order-list-panel .history-table-wrap').scrollLeft > 0")
+        await table.evaluate("el => el.scrollLeft = el.scrollWidth")
+        table_scroll = await table.evaluate("el => el.scrollLeft")
+    else:
+        await page.get_by_role("button", name="Muat berikutnya", exact=True).click()
+        await expect(page.locator("tbody tr")).to_have_count(22)
+        await expect(page.get_by_text("22 pesanan dimuat", exact=True)).to_be_visible()
+        assert await page.locator("tbody tr").evaluate_all("rows => new Set(rows.map(r => r.querySelector('code').textContent)).size") == 22
+    list_count = 2 if width < 768 else 22
+    await capture("orders-list")
+    await text200("orders-list")
+    order_trigger = page.locator(f"#order-detail-{orders[-1]['id']}")
+    await order_trigger.scroll_into_view_if_needed()
+    list_scroll = await page.evaluate("scrollY")
+    await order_trigger.click()
+    await expect(page.locator("#order-detail-title")).to_be_focused()
+    await expect(page.locator(".order-list-panel")).to_have_count(0)
+    await expect(page.locator("#order-search-form")).to_have_count(0)
+    await expect(page.locator(".order-detail-grid")).to_be_visible()
+    await capture("orders-detail")
+    await text200("orders-detail")
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(order_trigger).to_be_focused()
+    assert abs(await page.evaluate("scrollY") - list_scroll) <= 2
+    await expect(page.locator("tbody tr")).to_have_count(list_count)
+    # Detail load failures still provide a focused title and a way back to the retained list.
+    detail_failed = True
+    await order_trigger.click()
+    await expect(page.locator("#order-detail-title")).to_be_focused()
+    await expect(page.get_by_role("alert")).to_contain_text("Detail gagal dimuat")
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    detail_failed = False
+    await expect(page.locator("tbody tr")).to_have_count(list_count)
+
+    if width < 768:
+        assert abs(await table.evaluate("el => el.scrollLeft") - table_scroll) <= 2
+        for _ in range(4):
+            await page.get_by_role("button", name="Sebelumnya", exact=True).click()
+        await expect(page.locator("tbody tr")).to_have_count(5)
+        await expect(page.get_by_role("button", name="Sebelumnya", exact=True)).to_be_disabled()
+
+    # Refund drafts require confirmation; unknown mutations stay locked across list/detail switches.
+    await page.locator(f"#order-detail-{orders[0]['id']}").click()
+    reason = page.get_by_label("Alasan refund", exact=True)
+    await reason.fill("Permintaan admin")
+    page.once("dialog", lambda d: d.dismiss())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(reason).to_have_value("Permintaan admin")
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Ajukan refund", exact=True).click()
+    await expect(page.get_by_role("button", name="Ajukan refund", exact=True)).to_be_disabled()
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await page.locator(f"#order-detail-{orders[0]['id']}").click()
+    await expect(reason).to_have_value("")
+    await reason.fill("Permintaan ulang ditahan")
+    await expect(page.get_by_role("button", name="Ajukan refund", exact=True)).to_be_disabled()
+    await page.locator(".recovery-panel").dispatch_event("submit")
+    assert len(refund_calls) == 1
+    await page.get_by_role("button", name="Periksa detail refund", exact=True).click()
+    await expect(page.get_by_role("button", name="Ajukan refund", exact=True)).to_be_disabled()
+    refund_found = True
+    await page.get_by_role("button", name="Periksa detail refund", exact=True).click()
+    await expect(page.locator(".order-selected-panel")).to_contain_text("Permintaan admin")
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await expect(page.locator("tbody tr")).to_have_count(5 if width < 768 else 22)
+    await expect(page.locator("tbody tr").first).to_contain_text("Refund diproses")
+    if width < 768: await page.get_by_role("button", name="Buka pencarian pesanan", exact=True).click()
+    await page.get_by_label("Nomor pesanan", exact=True).fill("absent")
+    await page.get_by_role("button", name="Cari", exact=True).click()
+    await expect(page.locator("tbody tr")).to_have_count(0)
+    await capture("orders-empty")
+    assert requests[-1][2].get("q") == ["absent"]
+    await page.get_by_role("button", name="Reset", exact=True).click()
+    await expect(page.locator("tbody tr")).to_have_count(5 if width < 768 else 11)
+    if width < 768:
+        await expect(page.get_by_role("button", name="Sebelumnya", exact=True)).to_be_disabled()
+    assert not errors, errors
+    (output / f"workflow-{width}.json").write_text(json.dumps({"automated": True, "humanUAT": "not performed", "events": 20, "orders": 22, "audits": audits, "browserErrors": errors, "mutations": mutations}, indent=2))
+    await context.close()
+    print(f"PASS {width}: 20 concerts, create/inventory/publish, preserved drafts/focus, 2 cursor pages, 22 unique orders, table/mobile detail")
+
+
+async def check_mobile_lists(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 768, has_touch=width < 768)
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, cursor_calls, requests, audits = [], {}, [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    endpoints = {
+        "/admin/events": ("events", 20), "/admin/staff": ("staff", 20),
+        "/admin/payment-cases": ("items", 22), "/admin/email-jobs": ("items", 22),
+        "/admin/check-ins": ("items", 22),
+    }
+
+    async def fixture(route):
+        url = urlparse(route.request.url)
+        endpoint = url.path.removeprefix("/api/v1")
+        requests.append((route.request.method, endpoint, url.query))
+        assert route.request.method == "GET", "List navigation must not mutate data"
+        status, data = body(route.request.url, "standard", "ADMIN")
+        if endpoint in endpoints:
+            key, total = endpoints[endpoint]
+            seed = data[key][0]
+            rows = [{**deepcopy(seed), "id": (str(i + 100) if endpoint == "/admin/check-ins" else f"concert-{i}" if endpoint == "/admin/events" else f"{i + 100:032x}"), **({"name": f"Petugas {i:02d}", "role": "STAFF"} if key == "staff" else {})} for i in range(total)]
+            if endpoint == "/admin/events":
+                rows[0]["artist"] = "Konser dengan nama panjang untuk pemeriksaan kartu mobile"
+                rows[0]["ticketTiers"][0].update(capacity=1000000000, availableQuantity=999999942)
+            elif endpoint == "/admin/staff":
+                for i, person in enumerate(rows):
+                    person.update(role="ADMIN" if i == 0 else "STAFF", active=i % 4 != 3,
+                                  email="nama.petugas.yang.sangat.panjang@contoh-domain-pengujian.example.test" if i == 1 else f"petugas{i}@example.test",
+                                  assignments=[{"eventId": "concert-0", "gate": "Gate B"}] if i % 3 == 2 else [])
+            if endpoint in ("/admin/events", "/admin/staff"):
+                data[key] = rows
+            else:
+                cursor = bool(url.query)
+                if cursor:
+                    cursor_calls[endpoint] = cursor_calls.get(endpoint, 0) + 1
+                    if cursor_calls[endpoint] == 1:
+                        await route.fulfill(status=503, json={"error": {"message": "Halaman berikutnya gagal dimuat."}})
+                        return
+                data[key] = rows[10:] if cursor else rows[:11]
+                data["nextCursor"] = None if cursor else "100" if endpoint == "/admin/check-ins" else "next-page"
+        await route.fulfill(status=status, json=data)
+
+    await page.route("**/api/v1/**", fixture)
+    specs = [("events", "event-list-title", ".event-admin-list li", 20), ("staff", "staff-list-title", "[id^=staff-account-]", 20),
+             ("issues", "case-list-title", "tbody tr", 11), ("issues", "email-list-title", "tbody tr", 11),
+             ("check-ins", "history-results-title", "tbody tr", 11)]
+    for route, heading, row_selector, count in specs:
+        await page.goto(base + "/admin/" + route)
+        section = page.locator(f'section[aria-labelledby="{heading}"]')
+        rows = section.locator(row_selector)
+        await expect(rows).to_have_count(5 if width < 768 else count)
+        if width < 768:
+            if route != "check-ins":
+                await expect(section.locator(".admin-mobile-card")).to_have_count(5)
+                first = rows.first
+                assert await first.evaluate("el => getComputedStyle(el).borderTopStyle") == "solid"
+                if route in ("events", "staff"):
+                    await expect(first.locator("dl.admin-card-fields")).to_have_count(1)
+                    assert await first.locator("dt").count() == await first.locator("dd").count()
+                if route == "events":
+                    await expect(first.locator("dd").nth(4)).to_have_text("1.000.000.000")
+                    await expect(first.locator("dd").nth(5)).to_have_text("999.999.942")
+                if heading == "email-list-title":
+                    await expect(first.locator("time .admin-card-date")).to_have_count(2)
+                badges = first.locator(".admin-order-status, .staff-status")
+                assert await badges.count() > 0
+                assert await badges.evaluate_all("els => els.every(el => el.tabIndex < 0 && getComputedStyle(el).cursor !== 'pointer')")
+                # Text enlargement must keep label/value pairs and actions inside each card.
+                await page.evaluate("""() => {
+                  window.__cardFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+                  for (const [el, , size] of window.__cardFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+                }""")
+                assert await first.evaluate("el => el.scrollWidth <= el.clientWidth + 1"), (heading, width, "200% text overflows card")
+                assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (heading, width, "200% text overflows viewport")
+                await page.screenshot(path=str(output / f"mobile-cards-{heading}-text200-{width}.png"), full_page=True, animations="disabled")
+                await page.evaluate("() => { for (const [el, original] of window.__cardFonts) el.style.fontSize = original; }")
+            viewport = section.locator(".mobile-list-viewport")
+            await expect(viewport).to_have_attribute("tabindex", "0")
+            assert await page.evaluate("innerWidth === document.documentElement.clientWidth && document.documentElement.scrollWidth <= innerWidth"), "Cards expanded the mobile viewport"
+            await rows.first.locator("strong, code, td").first.scroll_into_view_if_needed()
+            box = await viewport.bounding_box()
+            target = await rows.first.locator("strong, code, td").first.bounding_box()
+            start, end, y = box["x"] + box["width"] - 20, box["x"] + 20, target["y"] + target["height"] / 2
+            # Mouse dragging in mobile simulators must work as well as native touch.
+            await page.mouse.move(start, y)
+            await page.mouse.down()
+            await page.mouse.move(end, y, steps=20)
+            await page.mouse.up()
+            await page.wait_for_function("id => document.querySelector(`section[aria-labelledby='${id}'] .mobile-list-viewport`).scrollLeft > 0", arg=heading)
+            await expect(page.locator("#event-editor-title, #staff-edit-title, #case-detail-title, #email-detail-title")).to_have_count(0)
+            await viewport.evaluate("el => el.scrollTo({left: 0, behavior: 'instant'})")
+            client = await context.new_cdp_session(page)
+            await client.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": start, "y": y}]})
+            for step in range(1, 21):
+                await client.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": start + (end - start) * step / 20, "y": y}]})
+                await page.wait_for_timeout(15)
+            await client.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            await page.wait_for_function("id => document.querySelector(`section[aria-labelledby='${id}'] .mobile-list-viewport`).scrollLeft > 0", arg=heading)
+            await client.detach()
+            await viewport.evaluate("el => el.scrollTo({left: 0, behavior: 'instant'})")
+            await viewport.focus()
+            await page.keyboard.press("ArrowRight")
+            await page.wait_for_function("id => document.querySelector(`section[aria-labelledby='${id}'] .mobile-list-viewport`).scrollLeft > 0", arg=heading)
+            await section.get_by_role("button", name="Berikutnya", exact=True).click()
+            await expect(page.locator("#" + heading)).to_be_focused()
+            await expect(section.get_by_role("status").filter(has_text="Menampilkan")).to_contain_text("6 sampai 10")
+            await expect(rows).to_have_count(5)
+            if route in ("events", "staff"):
+                trigger = rows.nth(2).get_by_role("button")
+                await trigger.scroll_into_view_if_needed()
+                await page.wait_for_timeout(150)
+                left = await viewport.evaluate("el => el.scrollLeft")
+                await trigger.click()
+                await expect(page.locator("#event-editor-title" if route == "events" else "#staff-edit-title")).to_be_focused()
+                await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+                await expect(trigger).to_be_focused()
+                assert abs(await viewport.evaluate("el => el.scrollLeft") - left) <= 2, "Returning from editor moved the selected card"
+            if count == 11:
+                await section.get_by_role("button", name="Berikutnya", exact=True).click()
+                await expect(rows).to_have_count(1)
+                await expect(section.get_by_role("status").filter(has_text="Menampilkan")).to_contain_text("11 sampai 11")
+                endpoint = "/admin/" + ({"case-list-title": "payment-cases", "email-list-title": "email-jobs"}.get(heading, "check-ins"))
+                assert endpoint not in cursor_calls, "Remaining loaded cards must not require a request"
+                await section.get_by_role("button", name="Berikutnya", exact=True).click()
+                await expect(page.get_by_role("alert")).to_contain_text("gagal dimuat")
+                await expect(rows).to_have_count(1)
+                await expect(section.get_by_role("status").filter(has_text="Menampilkan")).to_contain_text("11 sampai 11")
+                await section.get_by_role("button", name="Berikutnya", exact=True).click()
+                await expect(rows).to_have_count(5)
+                await expect(section.get_by_role("status").filter(has_text="Menampilkan")).to_contain_text("11 sampai 15")
+                await expect(page.get_by_role("alert")).to_have_count(0)
+            await section.get_by_role("button", name="Sebelumnya", exact=True).click()
+        else:
+            assert await section.locator(".mobile-list-viewport").evaluate("el => getComputedStyle(el).scrollSnapType === 'none'")
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (route, width)
+        await page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
+        await page.screenshot(path=str(output / f"mobile-lists-{heading}-{width}.png"), full_page=True, animations="disabled")
+        audits.append(heading)
+    assert not errors, errors
+    (output / f"mobile-lists-{width}.json").write_text(json.dumps({"width": width, "automated": True, "humanUAT": "not performed", "lists": audits, "requests": requests, "browserErrors": errors}, indent=2))
+    await context.close()
+    print(f"PASS {width}: " + ("five-card groups, mouse dragging, native touch swipe, keyboard scrolling, focus restoration, partial groups, failed cursor retry, viewport containment" if width < 768 else "full desktop lists, no carousel snapping, viewport containment"))
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
@@ -177,6 +695,9 @@ async def main():
     parser.add_argument("--phase", type=int, default=29, help="Phase number recorded in the manifest")
     parser.add_argument("--phase35", action="store_true", help="Capture tablet, landscape, reduced-height keyboard, and enlarged-text layouts")
     parser.add_argument("--inject-pageerror", action="store_true", help="Inject a non-blocking browser exception to verify failure reporting")
+    parser.add_argument("--mobile-lists", action="store_true", help="Check shared mobile list groups, native scroll, and cursor recovery")
+    parser.add_argument("--mobile-help", action="store_true", help="Check mobile help on concert, staff, order, and issue lists")
+    parser.add_argument("--workflows", action="store_true", help="Verify the phase 55 concert/order workflows with larger fixtures")
     args = parser.parse_args()
     output = args.output_dir if args.output_dir and args.output_dir.is_absolute() else ROOT / args.output_dir if args.output_dir else OUTPUT
     output.mkdir(parents=True, exist_ok=True)
@@ -198,6 +719,18 @@ async def main():
             parser.error(f"unknown route key: {args.only}")
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        if args.mobile_help:
+            for width in (320, 390, 768, 1440): await check_help_pages(browser, args.base_url, output, width)
+            await browser.close()
+            return
+        if args.mobile_lists:
+            for width in (320, 390, 768, 1440): await check_mobile_lists(browser, args.base_url, output, width)
+            await browser.close()
+            return
+        if args.workflows:
+            for width in (1440, 320, 390, 768): await check_workflows(browser, args.base_url, output, width)
+            await browser.close()
+            return
         for viewport, size in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
             for name, route, role in routes:
                 modes = ("standard", "loading", "empty", "error") + (("rejected", "unknown-checkedin", "camera-exit") if name == "scanner" else ())
@@ -294,10 +827,16 @@ async def main():
                         await page.get_by_role("button", name="Terapkan", exact=True).click()
                         await page.wait_for_timeout(400)
                     if name == "operations" and mode == "stale":
-                        await page.get_by_role("heading", name="Penanganan yang tersedia").wait_for()
+                        await page.get_by_role("heading", name="Ringkasan metrik").wait_for()
                         await page.get_by_role("button", name="Muat ulang", exact=True).click()
-                        await page.get_by_role("alert").wait_for()
-                        await page.get_by_text("Snapshot terakhir yang berhasil dimuat.", exact=False).wait_for()
+                        await page.locator("p[role=alert]").wait_for()
+                        await page.get_by_text("Pembaruan gagal. Data terakhir tetap ditampilkan.", exact=False).wait_for()
+                    if name == "operations" and mode in ("standard", "empty", "stale"):
+                        await expect(page.get_by_role("heading", name="Penanganan yang tersedia", exact=True)).to_have_count(0)
+                        await expect(page.get_by_role("link", name="Periksa daftar email gagal", exact=False)).to_have_count(0)
+                        await expect(page.locator(".ops-scope")).to_have_count(0)
+                        if mode == "empty":
+                            await expect(page.locator(".ops-actions")).to_have_count(0)
                     if name == "operations" and mode == "standard":
                         for href in ("/admin/issues", "/admin/orders"):
                             if not await page.locator(f".ops-action-list a[href='{href}']").count():
@@ -308,15 +847,14 @@ async def main():
                     if name == "issues" and mode == "uncertain":
                         page.on("dialog", lambda dialog: dialog.accept())
                         email_panel = page.locator(".checkin-history-panel").nth(1)
-                        await email_panel.get_by_role("button", name="Detail", exact=True).first.click()
+                        await email_panel.get_by_role("button", name="Lihat detail email TO-0123456789abcdef0123", exact=True).click()
                         await page.get_by_role("heading", name="Email TO-0123456789abcdef0123").wait_for()
                         await page.get_by_role("button", name="Kirim ulang email", exact=True).click()
                         await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).wait_for()
                         if fixture_calls.get("POST retry") != 1:
                             raise AssertionError("uncertain retry fixture did not send exactly one POST")
-                        other_detail = email_panel.get_by_role("button", name="Detail", exact=True).nth(1)
-                        if await other_detail.is_enabled():
-                            raise AssertionError("another email detail remained navigable while retry result was uncertain")
+                        await expect(page.get_by_role("button", name="Kembali ke daftar", exact=True)).to_have_count(0)
+                        await expect(page.get_by_role("button", name="Kirim ulang email", exact=True)).to_be_disabled()
                         async with page.expect_response(lambda response: urlparse(response.url).path == f"/api/v1/admin/email-jobs/{'e' * 32}"):
                             await page.get_by_role("button", name="Periksa hasil tindakan", exact=True).click()
                         await page.get_by_text("belum membuktikan hasil tindakan", exact=False).wait_for()
@@ -345,6 +883,8 @@ async def main():
                             if fixture_calls["report queries"] != [failed_query, failed_query]:
                                 raise AssertionError(f"attendance retry changed its failed event/gate query: {fixture_calls['report queries']}")
                         else:
+                            if viewport == "mobile":
+                                await page.locator(".mobile-filter-heading button").click()
                             if name == "sales":
                                 await page.locator(".sales-report-filters select").first.select_option(EVENT["id"])
                             else:
@@ -361,18 +901,45 @@ async def main():
                             if fixture_calls["report queries"][-2:] != [failed_query, failed_query]:
                                 raise AssertionError(f"{name} retry changed its failed filter query: {fixture_calls['report queries']}")
                     mobile_order_list = None
+                    if name == "orders" and mode == "standard" and viewport == "desktop":
+                        await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+                        cells = page.locator(".order-list-panel .history-table :is(th, td)")
+                        await expect(page.locator(".order-list-panel .history-table tbody tr")).not_to_have_count(0)
+                        wrapped = await cells.evaluate_all("""cells => cells.flatMap(cell => {
+                            const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+                            for (let node; node = walker.nextNode();) {
+                                if (!node.textContent.trim()) continue;
+                                const range = document.createRange(); range.selectNodeContents(node);
+                                if (range.getClientRects().length > 1) return [cell.textContent.trim()];
+                            }
+                            return [];
+                        })""")
+                        assert not wrapped, f"Order table text wrapped: {wrapped}"
+                        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Order table overflows the page"
+                        await page.screenshot(path=str(output / "orders-list-desktop.png"), full_page=True, animations="disabled")
+                        await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123", exact=True).click()
+                        await page.get_by_role("heading", name="Detail pesanan", exact=True).wait_for()
                     if name == "orders" and mode == "standard" and viewport == "mobile":
+                        await expect(page.locator("#order-search-form")).to_be_hidden()
+                        await page.screenshot(path=str(output / "orders-search-collapsed-mobile.png"), full_page=True, animations="disabled")
+                        toggle = page.locator(".order-search-toggle")
+                        await toggle.focus()
+                        await page.keyboard.press("Enter")
+                        await expect(toggle).to_have_attribute("aria-expanded", "true")
                         search_input = page.locator("#order-search-form input").first
                         await search_input.fill("TO-0123456789abcdef0123")
                         await page.locator("#order-search-form").get_by_role("button", name="Cari", exact=True).click()
-                        await page.get_by_role("button", name="Buka pesanan TO-0123456789abcdef0123").wait_for()
+                        await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123").wait_for()
                         mobile_order_list = "orders-filtered-list-mobile.png"
                         await page.locator(".order-list-panel").scroll_into_view_if_needed()
                         await page.screenshot(path=str(output / mobile_order_list), full_page=False, animations="disabled")
-                        await page.get_by_role("button", name="Buka pesanan TO-0123456789abcdef0123").click()
-                        await page.get_by_role("heading", name="Detail pesanan").wait_for()
+                        await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123").click()
+                        await page.get_by_role("heading", name="Detail pesanan", exact=True).wait_for()
+                        await expect(search_input).to_have_count(0)
+                        await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
                         if await search_input.input_value() != "TO-0123456789abcdef0123":
                             raise AssertionError("mobile order selection discarded the active search filter")
+                        await page.get_by_role("button", name="Lihat detail pesanan TO-0123456789abcdef0123").click()
                     if name == "login" and mode in ("loading", "error"):
                         await page.get_by_label("Email", exact=True).fill("admin@example.test")
                         await page.get_by_label("Password", exact=True).fill("fixture-password")
@@ -465,7 +1032,14 @@ async def main():
                         if capture["audit"]["visibleEmDashCount"]:
                             raise AssertionError(f"visible em-dash copy needs rewriting on {route}: {capture['audit']['visibleEmDashCount']}")
                         action = page.locator(".admin-page-heading .admin-heading-actions > button").first
-                        if name not in ("login", "scanner"):
+                        if name == "orders":
+                            await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(1 if await page.locator("#order-search-form").is_visible() else 0)
+                            assert not await action.count(), "Order search belongs in its filter form"
+                        elif name == "check-ins":
+                            assert not await action.count(), "Check-in search belongs in its filter form"
+                        elif name == "issues" and await page.locator('#email-detail-title').count():
+                            assert not await action.count(), "Email detail has no heading action"
+                        elif name not in ("login", "scanner"):
                             if not await action.count():
                                 raise AssertionError(f"admin heading action missing on {route}")
                             action_info = await action.evaluate("button => ({label:button.innerText.trim(),type:button.type,formId:button.form?.id||'',disabled:button.disabled})")
@@ -480,8 +1054,14 @@ async def main():
                                 capture["audit"]["mobileOrderSelection"] = {"filteredListCaptured": True, "selectedDetailOpened": True, "searchValuePreserved": True}
                             if role == "ADMIN":
                                 menu_button = page.get_by_role("button", name="Menu", exact=True)
+                                await expect(menu_button).to_have_attribute("aria-expanded", "false")
+                                nav_controls = await page.locator(".admin-topbar :is(.scan-brand, .admin-menu-trigger, .admin-logout)").evaluate_all("elements => elements.map(el => { const r = el.getBoundingClientRect(); return {width:r.width, height:r.height, left:r.left, right:r.right, centerY:r.top+r.height/2}; })")
+                                assert all(control["width"] >= 44 and control["height"] >= 44 for control in nav_controls), nav_controls
+                                assert all(abs(control["centerY"] - nav_controls[0]["centerY"]) <= 1 for control in nav_controls), nav_controls
+                                assert nav_controls[0]["right"] <= nav_controls[1]["left"] and nav_controls[1]["right"] <= nav_controls[2]["left"], nav_controls
                                 await menu_button.focus()
                                 await page.keyboard.press("Enter")
+                                await expect(menu_button).to_have_attribute("aria-expanded", "true")
                                 dialog = page.locator("#admin-mobile-menu")
                                 if not await dialog.evaluate("dialog => dialog.open"):
                                     details = await dialog.evaluate("dialog => ({open:dialog.open,html:dialog.outerHTML,button:document.querySelector('.admin-menu-trigger')?.outerHTML})")
@@ -492,6 +1072,8 @@ async def main():
                                 current_links = dialog.locator('a[aria-current="page"]')
                                 if await current_links.count() != 1:
                                     raise AssertionError(f"mobile menu needs one active destination on {route}")
+                                if name == "orders":
+                                    await page.screenshot(path=str(output / "orders-mobile-navigation.png"), animations="disabled")
                                 await dialog.get_by_role("link").last.focus()
                                 await page.keyboard.press("Tab")
                                 focus_trapped = await dialog.evaluate("dialog => dialog.contains(document.activeElement)")
@@ -499,6 +1081,7 @@ async def main():
                                     active = await page.evaluate("() => document.activeElement?.outerHTML")
                                     raise AssertionError(f"mobile menu focus escaped its dialog on {route}: {active}")
                                 await page.keyboard.press("Escape")
+                                await expect(menu_button).to_have_attribute("aria-expanded", "false")
                                 focus_restored = await menu_button.evaluate("button => button === document.activeElement")
                                 if not focus_restored:
                                     raise AssertionError(f"mobile menu did not restore focus on {route}")
@@ -602,6 +1185,8 @@ async def main():
                 async def denied_fixture(request):
                     if request.request.url.endswith("/staff/me"):
                         await request.fulfill(json={"staff": STAFF})
+                    elif "/api/v1/admin/" in request.request.url:
+                        await request.fulfill(status=403, json={"error": {"code": "FORBIDDEN", "message": "Akses administrator diperlukan."}})
                     else:
                         await request.fulfill(json={"events": [EVENT]})
 

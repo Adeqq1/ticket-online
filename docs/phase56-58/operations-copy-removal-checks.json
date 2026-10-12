@@ -1,0 +1,12 @@
+{
+  "scope": "Remove selected Operations heading, disclosure, zero message and email follow-up link",
+  "tests": 126,
+  "assertions": 577,
+  "check": "0 errors, 0 warnings",
+  "build": "passed",
+  "browserCaptures": 14,
+  "browserErrors": [],
+  "runtime": "localhost:5173 serves requested deletion",
+  "screenshots": "/tmp/operations-copy-removal/",
+  "humanUAT": "Not performed"
+}

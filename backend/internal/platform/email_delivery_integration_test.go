@@ -376,4 +376,8 @@ func TestEmailFailureWebhookReplayAndCrossDeviceRecovery(t *testing.T) {
 	if err := json.Unmarshal(current.Body.Bytes(), &view); err != nil || view.EventStartsAt != start {
 		t.Fatalf("current order schedule=%s, error=%v", view.EventStartsAt, err)
 	}
+	stopNotices()
+	<-noticeDone
+	verifyAdminEmailHandling(t, db, ctx, secret, orderID, reference, adminToken, port, mails)
+
 }

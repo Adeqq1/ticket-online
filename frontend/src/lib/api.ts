@@ -207,7 +207,13 @@ export function addAdminPaymentCaseNote(accessToken: string, id: string, note: s
 export function resolveAdminPaymentCase(accessToken: string, id: string, note: string) { return adminIssueRequest<void>(accessToken, `/api/v1/admin/payment-cases/${encodeURIComponent(id)}/resolve`, undefined, "POST", { note }); }
 export function getAdminEmailJobs(accessToken: string, signal?: AbortSignal, cursor?: string) { const query = new URLSearchParams(); if (cursor) query.set("cursor", cursor); return adminIssueRequest<{ items: AdminEmailJob[]; nextCursor: string | null }>(accessToken, `/api/v1/admin/email-jobs${query.size ? `?${query}` : ""}`, signal); }
 export function getAdminEmailJob(accessToken: string, id: string, signal?: AbortSignal) { return adminIssueRequest<AdminEmailDetail>(accessToken, `/api/v1/admin/email-jobs/${encodeURIComponent(id)}`, signal); }
-export function retryAdminEmailJob(accessToken: string, id: string) { return adminIssueRequest<{ jobId: string; retryJobId: string; status: string }>(accessToken, `/api/v1/admin/email-jobs/${encodeURIComponent(id)}/retry`, undefined, "POST"); }
+export async function retryAdminEmailJob(accessToken: string, id: string) {
+  const result = await adminIssueRequest<{ jobId: string; retryJobId: string; status: string } | null>(accessToken, `/api/v1/admin/email-jobs/${encodeURIComponent(id)}/retry`, undefined, "POST");
+  if (!result || result.jobId !== id || typeof result.retryJobId !== "string" || !/^[0-9a-f]{32}$/.test(result.retryJobId) || result.status !== "PENDING") {
+    throw new ApiError("Respons penjadwalan belum dapat dipastikan. Periksa detail terbaru sebelum mencoba lagi.", 200, "UNKNOWN_OUTCOME");
+  }
+  return result;
+}
 export function getAdminOperations(accessToken: string, signal?: AbortSignal) { return adminIssueRequest<AdminOperations>(accessToken, "/api/v1/admin/operations", signal); }
 export function getAdminSalesReport(accessToken: string, filters: { eventId?: string; dateFrom?: string; dateTo?: string } = {}, signal?: AbortSignal) {
   const query = new URLSearchParams();

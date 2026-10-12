@@ -84,8 +84,9 @@ async def check(browser, base, width):
 
     await page.route("**/api/v1/**", api)
     await page.goto(base + "/admin/events")
+    await expect(page.locator("#event-form")).to_have_count(0)
+    await page.get_by_role("button", name="Kelola konser Nusa Malam", exact=True).click()
     await expect(page.get_by_role("radio", name="Unggah dari perangkat")).to_be_checked()
-    await page.get_by_role("button", name="Nusa Malam").click()
     await expect(page.locator(".poster-preview img")).to_have_attribute("src", event["image"])
     picker = page.get_by_label("Pilih file poster")
     save = page.get_by_role("button", name="Simpan perubahan", exact=True)
@@ -129,7 +130,8 @@ async def check(browser, base, width):
     await expect(page.get_by_role("button", name="Mengunggah poster…", exact=True)).to_be_disabled()
     await page.get_by_role("button", name="Mengunggah poster…", exact=True).dispatch_event("click")
     await expect(save).to_be_disabled()
-    await page.get_by_role("button", name="Konser Kedua").click()
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await page.get_by_role("button", name="Kelola konser Konser Kedua", exact=True).click()
     state["hold"].set()
     await expect(page.locator(".poster-preview img")).to_have_attribute("src", other["image"])
     assert calls["upload"] == before + 1
@@ -174,6 +176,7 @@ async def check(browser, base, width):
 
     # Both sources also work when creating a new draft concert.
     for source in ("file", "url"):
+        await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
         await page.get_by_role("button", name="Tambah konser", exact=True).click()
         await expect(page.get_by_role("radio", name="Unggah dari perangkat")).to_be_checked()
         await page.get_by_label("Nama konser / artis", exact=True).fill("Konser Baru " + source)

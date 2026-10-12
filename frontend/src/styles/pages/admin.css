@@ -1,0 +1,84 @@
+.admin-layout {
+  --admin-sidebar: #080e0b;
+  --admin-canvas: #141e1b;
+  --admin-card: #23302c;
+  --admin-input: #0e1714;
+  --admin-border: #596e63;
+  --admin-control-border: #84988f;
+  --admin-text: #edf3ef;
+  --admin-secondary: #c0cfc6;
+  --admin-accent: #b9f36d;
+  --admin-active-bg: #2b4939;
+  --admin-active-text: #b8dfc6;
+  --admin-neutral-bg: #38453f;
+  --admin-warning-bg: #493d28;
+  --admin-warning-text: #f1d29a;
+  --scan-bg: var(--admin-canvas);
+  --scan-panel: var(--admin-card);
+  --scan-line: var(--admin-border);
+  --scan-muted: var(--admin-secondary);
+  --scan-text: var(--admin-text);
+  --scan-lime: var(--admin-accent);
+  color-scheme: dark;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.admin-layout .staff-admin-content :is(input:not([type="checkbox"]), select, textarea) { background: var(--admin-input); border-color: var(--admin-control-border); color: var(--admin-text); font-size: 16px; line-height: 1.5; }
+.admin-layout :is(input, textarea)::placeholder { color: var(--admin-secondary); opacity: 1; }
+.admin-layout :is(label, legend) { font-size: 16px; line-height: 1.5; }
+.admin-layout :is(small, .staff-login-label, .panel-index, .history-table th, .history-table code, .sales-metric h2, .sales-chart-labels, .sales-legend, .sales-period) { font-size: 14px; line-height: 1.5; }
+.admin-layout .staff-text-button { color: var(--admin-secondary); }
+.admin-layout .staff-secondary-button { border-color: var(--admin-control-border); background: var(--admin-input); color: var(--admin-text); }
+.admin-layout .admin-icon-button { width: 44px; min-width: 44px; min-height: 44px; padding: 10px; }
+.admin-layout .scan-submit { transition: none; white-space: normal; }
+.admin-layout .skip-link { background: var(--admin-accent); color: var(--admin-canvas); }
+.admin-layout :is(.staff-secondary-button, .staff-text-button):hover:not(:disabled) { border-color: var(--admin-secondary); background: var(--admin-neutral-bg); color: var(--admin-text); }
+.admin-layout :is(button, input, select, textarea):disabled { opacity: 1; color: var(--admin-secondary); border-color: var(--admin-control-border); background: var(--admin-card); cursor: not-allowed; }
+.admin-layout button:disabled { border: 1px solid var(--admin-control-border); }
+.admin-layout :is(a, button, input, select, textarea, [tabindex]):focus-visible { outline: 3px solid var(--admin-accent); outline-offset: 3px; }
+.admin-layout .staff-form-success { border-color: var(--admin-active-text); color: var(--admin-active-text); }
+.admin-layout .scan-footer { font-size: 14px; line-height: 1.5; }
+.admin-layout .sales-metric { background: var(--admin-card); }
+.admin-layout .issue-history pre { background: var(--admin-input); }
+.admin-layout .admin-list-table { min-width: 800px; font-size: 16px; }
+.admin-layout .admin-list-table td { padding: 12px 8px; max-width: 22rem; font-size: 16px; overflow-wrap: anywhere; }
+.admin-layout .admin-list-table th { padding: 12px 8px; }
+.admin-layout .admin-list-table :is(button, summary) { min-height: 44px; }
+.admin-layout .admin-list-table :is(button, .staff-status, .admin-order-status, time) { white-space: nowrap; }
+.admin-layout .admin-table-number { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.admin-layout .admin-table-stack { display: grid; gap: 12px; }
+.admin-layout .admin-table-pairs { display: grid; gap: 8px; margin: 0; }
+.admin-layout .admin-table-pairs > div { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px; }
+.admin-layout .admin-table-pairs dt { color: var(--admin-secondary); font-size: 14px; }
+.admin-layout .admin-table-pairs dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 767px) {
+  .admin-layout .staff-admin-content :is(.event-admin-list, .staff-list, .history-table) .admin-mobile-card {
+    display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px;
+    box-sizing: border-box; padding: 16px; border: 1px solid var(--admin-border); background: var(--admin-input);
+  }
+  .admin-layout .admin-mobile-card-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .admin-layout .admin-mobile-card-header strong { min-width: 0; color: var(--admin-text); font-size: 18px; overflow-wrap: anywhere; }
+  .admin-layout .staff-admin-content .admin-card-fields { display: grid; gap: 12px; margin: 0; line-height: 1.6; }
+  .admin-layout .staff-admin-content .admin-card-fields > div,
+  .admin-layout .staff-admin-content .admin-mobile-card > td {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7em), 1fr)); gap: 8px 12px; min-width: 0; padding: 0; border: 0;
+  }
+  .admin-layout .admin-card-fields dt,
+  .admin-layout .admin-mobile-card > td::before { color: var(--admin-secondary); font-size: 14px; line-height: 1.6; }
+  .admin-layout .staff-admin-content .admin-card-fields dd,
+  .admin-layout .staff-admin-content .admin-card-fields dd span,
+  .admin-layout .staff-admin-content .admin-mobile-card > td { margin: 0; color: var(--admin-text); font-size: 16px; line-height: 1.6; overflow-wrap: anywhere; }
+  .admin-layout .admin-card-assignment, .admin-layout .admin-card-date { display: block; }
+  .admin-layout .admin-card-assignment + .admin-card-assignment { margin-top: 8px; }
+  .admin-layout .staff-admin-content .admin-mobile-card .staff-list-identity { gap: 16px; }
+  .admin-layout .staff-admin-content .admin-mobile-card :is(.admin-order-status, .staff-status) { width: fit-content; height: fit-content; max-width: 100%; box-sizing: border-box; font-size: 14px; }
+  .admin-layout .admin-card-statuses { display: grid; justify-items: start; gap: 8px; }
+  .admin-layout .staff-admin-content .admin-mobile-card > td[data-label="Aksi"] { display: block; border-top: 1px solid var(--admin-border); padding-top: 16px; }
+  .admin-layout .admin-mobile-card > td[data-label="Aksi"]::before { display: none; }
+  .admin-layout .staff-admin-content .admin-mobile-card > button,
+  .admin-layout .staff-admin-content .admin-mobile-card > td[data-label="Aksi"] > button {
+    width: 100%; min-height: 44px; justify-content: center; justify-self: stretch; text-align: center;
+    border: 1px solid var(--admin-control-border); background: var(--admin-card); color: var(--admin-text);
+  }
+}

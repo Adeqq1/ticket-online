@@ -1,0 +1,80 @@
+{
+  "width": 768,
+  "automated": true,
+  "humanUAT": "not performed",
+  "lists": [
+    "event-list-title",
+    "staff-list-title",
+    "case-list-title",
+    "email-list-title",
+    "history-results-title"
+  ],
+  "requests": [
+    [
+      "GET",
+      "/staff/me",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/events",
+      ""
+    ],
+    [
+      "GET",
+      "/staff/me",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/staff",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/events",
+      ""
+    ],
+    [
+      "GET",
+      "/staff/me",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/payment-cases",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/email-jobs",
+      ""
+    ],
+    [
+      "GET",
+      "/staff/me",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/payment-cases",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/email-jobs",
+      ""
+    ],
+    [
+      "GET",
+      "/staff/me",
+      ""
+    ],
+    [
+      "GET",
+      "/admin/check-ins",
+      ""
+    ]
+  ],
+  "browserErrors": []
+}

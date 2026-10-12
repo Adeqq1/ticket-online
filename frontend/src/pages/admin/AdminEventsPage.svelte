@@ -1,14 +1,29 @@
 <script lang="ts">
+  import { MediaQuery } from "svelte/reactivity";
+  import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
+  import { mobileListItems } from "../../lib/mobile-list.ts";
+  const mobileList = new MediaQuery("(max-width: 767px)");
+
+  import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import PosterEditor from "../../components/admin/PosterEditor.svelte";
   import EventChangePanel from "../../components/admin/EventChangePanel.svelte";
   import { onDestroy, onMount, tick } from "svelte";
   import { ApiError, createAdminEvent, createAdminTier, createAdminZone, getAdminEvents, updateAdminEvent, updateAdminTier, updateAdminZone, type AdminEventInput, type AdminApiEvent, type AdminTierInput, type PublicationStatus } from "../../lib/api.ts";
   import { suggestAdminId } from "../../lib/admin-id.ts";
+  import { adminDate, adminTime, adminNumber } from "../../lib/admin-operations.ts";
 
+  let searchOpen = $state(false);
+  let mobileGroup = $state(0);
+  let mobileScroll = $state(0);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let events = $state<AdminApiEvent[]>([]);
   let selectedId = $state("");
+  let mode = $state<"list" | "create" | "edit">("list");
+  let listScroll = 0;
+  let listTrigger = "event-create-opener";
+  let listError = $state("");
+  const publicationLabel = { DRAFT: "Draf", PUBLISHED: "Terbit", ARCHIVED: "Diarsipkan" };
   const selectedEvent = $derived(events.find((event) => event.id === selectedId));
   const scheduleLocked = $derived(Boolean(selectedEvent?.scheduleLocked || (selectedEvent?.currentEvent?.version ?? 0) > 0));
   let query = $state("");
@@ -38,14 +53,14 @@
   const eventState = () => JSON.stringify({ draft, lineupText });
   const zoneState = () => JSON.stringify(zoneDraft);
   const tierState = () => JSON.stringify(tierDraft);
-  const hasUnsaved = $derived(eventState() !== eventBaseline || posterPending || posterUploading || changePanelDirty || (Boolean(selectedId) && (zoneState() !== zoneBaseline || tierState() !== tierBaseline)));
+  const hasUnsaved = $derived(mode !== "list" && (eventState() !== eventBaseline || posterPending || posterUploading || changePanelDirty || (Boolean(selectedId) && (zoneState() !== zoneBaseline || tierState() !== tierBaseline))));
 
   function emptyEvent(): AdminEventInput { return { id: "", artist: "", city: "", venue: "", address: "", startsAt: "", genre: "Pop", status: "Presale", publicationStatus: "DRAFT", image: "", description: "", lineup: [] }; }
   function protectUnsaved(event: BeforeUnloadEvent) {
-    if (hasUnsaved) { event.preventDefault(); event.returnValue = ""; }
+    if (hasUnsaved || saving) { event.preventDefault(); event.returnValue = ""; }
   }
   function allowDiscard() { return !hasUnsaved || window.confirm("Perubahan yang belum disimpan akan hilang. Lanjutkan?"); }
-  function requestLogout() { if (allowDiscard()) onLogout(); }
+  function requestLogout() { if (!saving && allowDiscard()) onLogout(); }
   function setChangePanelDirty(dirty: boolean) { changePanelDirty = dirty; }
   function suggestEventId() { if (!eventIdManual) draft.id = suggestAdminId(draft.artist); }
   function suggestZoneId() { if (!zoneIdManual) zoneDraft.id = suggestAdminId(zoneDraft.name); }
@@ -62,8 +77,12 @@
   }
   const visible = $derived(events.filter((event) => (!publicationFilter || event.publicationStatus === publicationFilter) && `${event.artist} ${event.city} ${event.venue}`.toLowerCase().includes(query.trim().toLowerCase())));
 
+  $effect(() => { query; publicationFilter; mobileGroup = 0; mobileScroll = 0; });
+
   function select(event: AdminApiEvent, discardChecked = false) {
     if ((saving && !discardChecked) || event.id === selectedId || (!discardChecked && !allowDiscard())) return;
+    if (mode === "list") { listScroll = window.scrollY; listTrigger = `event-manage-${event.id}`; }
+    mode = "edit";
     selectedId = event.id;
     draft = { id: event.id, artist: event.artist, city: event.city, venue: event.venue, address: event.address, startsAt: localDateTime(event.startsAt), genre: event.genre, status: event.status, publicationStatus: event.publicationStatus, image: event.image, description: event.description, lineup: event.lineup };
     lineupText = event.lineup.join("\n");
@@ -74,29 +93,42 @@
     posterGeneration++; posterPending = false; posterUploading = false;
     changePanelDirty = false;
     error = ""; notice = "";
+    void tick().then(() => document.getElementById("event-editor-title")?.focus());
   }
   async function startNew() {
     if (saving || !allowDiscard()) return;
+    if (mode === "list") listScroll = window.scrollY;
+    listTrigger = "event-create-opener"; mode = "create";
     selectedId = ""; draft = emptyEvent(); lineupText = ""; eventIdManual = false; zoneIdManual = false; tierIdManual = false;
     eventBaseline = eventState(); zoneBaseline = ""; tierBaseline = ""; posterGeneration++; posterPending = false; posterUploading = false; changePanelDirty = false; error = ""; notice = "";
     await tick();
-    document.getElementById("event-form")?.scrollIntoView({ block: "start" });
-    document.querySelector<HTMLInputElement>("#event-form input")?.focus({ preventScroll: true });
+    document.getElementById("event-editor-title")?.focus();
+  }
+  async function backToList() {
+    if (saving || !allowDiscard()) return;
+    const index = visible.findIndex(item => `event-manage-${item.id}` === listTrigger);
+    if (mobileList.current && index >= 0 && Math.floor(index / 5) !== mobileGroup) { mobileGroup = Math.floor(index / 5); mobileScroll = 0; }
+    mode = "list"; selectedId = ""; posterGeneration++; posterPending = false; posterUploading = false; changePanelDirty = false;
+    error = ""; notice = "";
+    await tick();
+    (document.getElementById(listTrigger) ?? document.getElementById("event-list-title"))?.focus({ preventScroll: true });
+    window.scrollTo({ top: listScroll, behavior: "instant" });
   }
 
   async function load() {
-    request?.abort(); const controller = new AbortController(); request = controller; const current = ++generation; loading = true; error = "";
-    try { events = await getAdminEvents(accessToken, controller.signal); }
+    request?.abort(); const controller = new AbortController(); request = controller; const current = ++generation; loading = true; listError = "";
+    try { const result = await getAdminEvents(accessToken, controller.signal); if (current === generation) events = result; }
     catch (cause) {
       if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
-      else error = cause instanceof ApiError ? cause.message : "Daftar konser belum dapat dimuat. Periksa koneksi lalu coba lagi.";
+      else listError = "Daftar konser gagal dimuat. Data terakhir tetap tersedia bila sudah pernah dimuat.";
     } finally { if (current === generation) { loading = false; if (request === controller) request = undefined; } }
   }
 
   async function save(event: SubmitEvent) {
     event.preventDefault(); if (saving || posterUploading || posterPending) return;
     saving = true; error = ""; notice = "";
+    const creating = mode === "create";
     try {
       const value = payload();
       const result = selectedId ? await updateAdminEvent(accessToken, selectedId, value) : await createAdminEvent(accessToken, value);
@@ -107,7 +139,7 @@
         lineupText = result.lineup.join("\n"); eventBaseline = eventState();
         posterGeneration++; posterPending = false; posterUploading = false;
       } else select(result, true);
-      notice = "Perubahan konser tersimpan.";
+      notice = creating ? "Draf konser dibuat. Atur zona dan kategori tiket sebelum menerbitkan konser." : "Perubahan konser tersimpan.";
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
       else if (cause instanceof ApiError && cause.code === "SCHEDULE_LOCKED") error = "Jadwal tidak dapat diubah karena konser sudah memiliki pesanan.";
@@ -175,30 +207,46 @@
 
 <svelte:head><title>Kelola Konser | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-  <AdminLayout page="events" contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title="Kelola konser." description="Atur informasi, jadwal, lineup, poster, dan publikasi konser." onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={{ label: "Tambah konser", onclick: startNew, disabled: saving }}>
+  <AdminLayout page="events" mobileDescriptionHelp={mode === "list"} contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
     <div class="staff-admin-grid event-admin-grid">
+      {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
-        <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="event-list-title">Daftar konser</h2></div><span class="staff-muted">{visible.length} konser</span></div>
-        <div class="event-list-filters"><label>Cari konser<input bind:value={query} type="search" placeholder="Nama, kota, atau venue" disabled={loading} /></label><label>Status publikasi<select bind:value={publicationFilter} disabled={loading}><option value="">Semua status</option><option value="DRAFT">Draft</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select></label></div>
+        <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="event-list-title" tabindex="-1">Daftar konser</h2></div><span class="staff-muted">{visible.length} konser</span></div>
+        <AdminMobileFilters id="event-mobile-filters" bind:open={searchOpen}><div class="event-list-filters"><label>Cari konser<input bind:value={query} type="search" placeholder="Nama, kota, atau venue" disabled={loading} /></label><label>Status publikasi<select bind:value={publicationFilter} disabled={loading}><option value="">Semua status</option><option value="DRAFT">Draf</option><option value="PUBLISHED">Terbit</option><option value="ARCHIVED">Diarsipkan</option></select></label></div></AdminMobileFilters>
+        {#if listError}<p class="staff-form-message staff-form-error" role="alert">{listError} <button class="staff-text-button" type="button" disabled={loading} onclick={load}>Coba lagi</button></p>{/if}
         {#if loading}<p class="staff-muted" role="status">Memuat konser…</p>
-        {:else if error && !events.length}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={load}>Coba lagi</button></p>
-        {:else if !visible.length}<p class="staff-muted">Belum ada konser yang cocok.</p>
-        {:else}<ul class="event-admin-list">{#each visible as item (item.id)}<li class:event-admin-selected={selectedId === item.id}><button type="button" onclick={() => select(item)}><span><strong>{item.artist || item.id}</strong><small>{item.city || "Kota belum diatur"} · {item.startsAt ? `${new Date(item.startsAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : "Jadwal belum diatur"}</small></span><span class={`event-publication event-${item.publicationStatus.toLowerCase()}`}>{item.publicationStatus}</span></button></li>{/each}</ul>{/if}
+        {:else if !events.length && !listError}<p class="staff-muted" role="status">Belum ada konser. Pilih Tambah konser untuk membuat draf pertama.</p>
+        {:else if !visible.length && events.length}<p class="staff-muted" role="status">Tidak ada konser yang cocok dengan pencarian atau filter.</p>
+        {:else}<AdminMobileList count={visible.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="event-list-title"><ul class="event-admin-list">{#each mobileListItems(visible, mobileGroup, mobileList.current) as item (item.id)}<li class:admin-mobile-card={mobileList.current}>
+          {#if mobileList.current}
+            <div class="admin-mobile-card-header"><strong>{item.artist || item.id}</strong><span class="admin-order-status" class:is-paid={item.publicationStatus === "PUBLISHED"}>{publicationLabel[item.publicationStatus]}</span></div>
+            <dl class="admin-card-fields">
+              <div><dt>Tanggal</dt><dd>{#if item.startsAt}<time datetime={item.startsAt}>{adminDate.format(new Date(item.startsAt))}</time>{:else}Jadwal belum diatur{/if}</dd></div>
+              <div><dt>Waktu</dt><dd>{item.startsAt ? `${adminTime.format(new Date(item.startsAt))} WIB` : "Belum diatur"}</dd></div>
+              <div><dt>Kota</dt><dd>{item.city || "Kota belum diatur"}</dd></div>
+              <div><dt>Venue</dt><dd>{item.venue || "Venue belum diatur"}</dd></div>
+              <div><dt>Kuota tiket</dt><dd>{adminNumber.format(item.ticketTiers.reduce((sum, tier) => sum + tier.capacity, 0))}</dd></div>
+              <div><dt>Tiket tersedia</dt><dd>{adminNumber.format(item.ticketTiers.reduce((sum, tier) => sum + tier.availableQuantity, 0))}</dd></div>
+            </dl>
+          {:else}<div><strong>{item.artist || item.id}</strong><small>{item.startsAt ? `${new Date(item.startsAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : "Jadwal belum diatur"}</small><small>{item.city || "Kota belum diatur"} · {item.venue || "Venue belum diatur"}</small></div><span class={`event-publication event-${item.publicationStatus.toLowerCase()}`}>{publicationLabel[item.publicationStatus]}</span>{/if}
+          <button id={`event-manage-${item.id}`} class="staff-secondary-button" type="button" aria-label={`Kelola konser ${item.artist || item.id}`} onclick={() => select(item)}>Kelola konser</button>
+        </li>{/each}</ul></AdminMobileList>{/if}
       </section>
-
+      {:else}
       <section class="staff-admin-panel event-editor-panel" aria-labelledby="event-editor-title">
-        <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="event-editor-title">{selectedId ? draft.artist : "Konser baru"}</h2></div>{#if selectedId}<span class={`event-publication event-${draft.publicationStatus.toLowerCase()}`}>{draft.publicationStatus}</span>{/if}</div>
+        <div class="staff-panel-heading"><h2 id="event-editor-title" tabindex="-1">{mode === "edit" ? `Edit konser: ${draft.artist}` : "Tambah konser"}</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={backToList}>Kembali ke daftar</button></div>
+        {#if selectedId}<p class={`event-publication event-${draft.publicationStatus.toLowerCase()}`}>{publicationLabel[draft.publicationStatus]}</p>{/if}
         {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
         {#if notice}<p class="staff-form-message event-save-notice" role="status">{notice}</p>{/if}
         {#if hasUnsaved}<p class="event-unsaved" role="status">Perubahan belum disimpan</p>{/if}
         <form id="event-form" class="staff-form event-admin-form" onsubmit={save} aria-busy={saving}>
           <fieldset class="event-group"><legend>Informasi dasar</legend>
+          <label>Nama konser / artis<input bind:value={draft.artist} oninput={suggestEventId} minlength="2" maxlength="160" required disabled={saving} /></label>
           {#if !selectedId}<label>ID URL konser<input id="event-id" bind:value={draft.id} oninput={() => eventIdManual = true} pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="64" placeholder="nama-konser" required disabled={saving} /><small>Saran ID terisi dari nama konser dan tetap dapat diedit. Gunakan huruf kecil, angka, dan tanda hubung.</small></label>{/if}
           {#if !selectedId && draft.id && events.some((item) => item.id === draft.id)}<p class="staff-form-message staff-form-error" role="alert">ID konser sudah digunakan. Ubah ID sebelum menyimpan.</p>{/if}
-          <label>Nama konser / artis<input bind:value={draft.artist} oninput={suggestEventId} minlength="2" maxlength="160" required disabled={saving} /></label>
           <label>Genre<select bind:value={draft.genre} disabled={saving}><option>Rock</option><option>Pop</option><option>Indie</option></select></label></fieldset>
           <fieldset class="event-group"><legend>Publikasi</legend><label>Label penjualan<select bind:value={draft.status} disabled={saving}><option>Early Bird</option><option>Presale</option><option>Sold Out</option></select></label>
-          <label>Status publikasi<select bind:value={draft.publicationStatus} disabled={saving || !selectedId}><option value="DRAFT">Draft (belum tampil di katalog)</option><option value="PUBLISHED">Published (tampil di katalog)</option><option value="ARCHIVED">Archived (disembunyikan dari katalog)</option></select></label>
+          <label>Status publikasi<select bind:value={draft.publicationStatus} disabled={saving || !selectedId}><option value="DRAFT">Draf (belum tampil di katalog)</option><option value="PUBLISHED">Terbit (tampil di katalog)</option><option value="ARCHIVED">Diarsipkan (disembunyikan dari katalog)</option></select></label>
           </fieldset>
           <fieldset class="event-group"><legend>Jadwal dan lokasi</legend>
           <label>Jadwal (WIB)<input type="datetime-local" bind:value={draft.startsAt} aria-describedby={scheduleLocked ? "schedule-lock-note" : undefined} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || scheduleLocked} /></label>
@@ -235,8 +283,8 @@
               {#if !tierSelected && tierDraft.id && currentEvent?.ticketTiers.some((item) => item.id === tierDraft.id)}<p class="staff-form-message staff-form-error" role="alert">ID kategori sudah digunakan pada konser ini. Ubah ID sebelum menyimpan.</p>{/if}
               <label>Nama kategori<input bind:value={tierDraft.name} oninput={suggestTierId} maxlength="100" required disabled={saving} /></label>
               <label>Zona<select bind:value={tierDraft.zoneId} required disabled={saving || !currentEvent?.zones.length}><option value="">Pilih zona</option>{#each currentEvent?.zones ?? [] as zone}<option value={zone.id}>{zone.name}</option>{/each}</select></label>
-              <div class="event-form-row"><label>Harga (rupiah)<input type="number" min="1" step="1" bind:value={tierDraft.price} required disabled={saving} /></label><label>Kapasitas<input type="number" min="0" step="1" bind:value={tierDraft.capacity} required disabled={saving} /></label></div>
-              <div class="event-form-row"><label>Batas pembelian<input type="number" min="1" step="1" bind:value={tierDraft.maxPerOrder} required disabled={saving} /></label><label>Gate<input bind:value={tierDraft.gate} maxlength="100" required disabled={saving || Boolean(currentEvent?.ticketTiers.find((item) => item.id === tierSelected)?.gateLocked)} /></label></div>
+              <div class="event-form-row"><label>Harga (rupiah)<input type="number" inputmode="numeric" min="1" step="1" bind:value={tierDraft.price} required disabled={saving} /></label><label>Kapasitas<input type="number" inputmode="numeric" min="0" step="1" bind:value={tierDraft.capacity} required disabled={saving} /></label></div>
+              <div class="event-form-row"><label>Batas pembelian<input type="number" inputmode="numeric" min="1" step="1" bind:value={tierDraft.maxPerOrder} required disabled={saving} /></label><label>Gate<input bind:value={tierDraft.gate} maxlength="100" required disabled={saving || Boolean(currentEvent?.ticketTiers.find((item) => item.id === tierSelected)?.gateLocked)} /></label></div>
               {#if currentEvent?.ticketTiers.find((item) => item.id === tierSelected)?.gateLocked}<small class="event-lock-note">Gate dikunci setelah reservasi pertama untuk kategori ini.</small>{/if}
               <label>Benefit<input bind:value={tierDraft.benefit} maxlength="255" disabled={saving} /></label>
               <label>Seating<select bind:value={tierDraft.seating} disabled={saving}><option value="free-standing">Berdiri</option><option value="assigned">Tempat duduk</option></select></label>
@@ -246,11 +294,18 @@
           </section>
         {/if}
       </section>
+      {/if}
     </div>
     <footer class="scan-footer"><span>Tiket Online · Admin tools</span><span>Pengelolaan informasi dan publikasi konser</span></footer>
 </AdminLayout>
 
 <style>
+  .event-admin-grid { grid-template-columns: minmax(0, 1fr); }
+  .event-admin-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 12px; }
+  .event-admin-list small { display: block; color: var(--scan-muted); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+  .event-admin-list strong { overflow-wrap: anywhere; }
+  .event-admin-list button { width: auto; min-height: 44px; }
+  .event-editor-panel .staff-panel-heading { flex-wrap: wrap; }
   .event-admin-grid :global(.staff-form) { font-size: 16px; }
   .event-admin-grid :global(.staff-form > label), .event-list-filters label { font-size: 16px; line-height: 1.45; }
   .event-admin-grid :global(.staff-form small), .event-list-filters :global(small) { font-size: 14px; }
@@ -262,6 +317,5 @@
   .event-unsaved { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid var(--scan-lime); color: var(--scan-text); font-size: 14px; }
   .event-editor-panel :global(button), .event-editor-panel :global(input), .event-editor-panel :global(select), .event-editor-panel :global(textarea) { font-size: 16px; }
   .event-editor-panel :global(button) { min-height: 44px; }
-  .event-admin-list button { min-height: 64px; }
-  @media (max-width: 600px) { .event-group { padding-top: 14px; } .event-group legend { font-size: 17px; } }
+  @media (max-width: 600px) { .event-group { padding-top: 14px; } .event-group legend { font-size: 17px; } .event-admin-list li { grid-template-columns: minmax(0, 1fr) auto; } .event-admin-list li > div { grid-column: 1 / -1; } }
 </style>

@@ -15,10 +15,12 @@
 
 <details class="admin-report-details" bind:open>
   <summary><h2>{title}</h2><span aria-hidden="true"></span></summary>
-  <div class="admin-report-details-content">{@render children()}</div>
+  <div class="admin-report-details-content"><p class="report-table-hint staff-muted">Geser tabel ke kanan untuk melihat kolom lainnya.</p>{@render children()}</div>
 </details>
 
 <style>
+  .report-table-hint { display: none; }
+  @media (max-width: 767px) { .admin-report-details-content:has(:global(.history-table:not(.worker-mobile-table))) > .report-table-hint { display: block; } }
   .admin-report-details { margin-top: 16px; border: 1px solid var(--scan-line); background: var(--scan-panel); }
   summary { display: flex; min-height: 64px; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px; cursor: pointer; list-style: none; }
   summary::-webkit-details-marker { display: none; }

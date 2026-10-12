@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, exportAdminAttendanceReportCSV, getAdminAttendanceReport, getAdminEvents, saveAdminReportCSV, type AdminAttendanceReport, type AdminApiEvent } from "../../lib/api.ts";
@@ -89,7 +90,7 @@
       <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="attendance-filter-title">Filter laporan</h2></div></div>
       <form class="history-filter-form" onsubmit={search} aria-busy={loading}>
         <label>Event wajib<select value={eventId} onchange={(event) => selectEvent(event.currentTarget.value)} required disabled={loading}><option value="">Pilih event</option>{#each events as event (event.id)}<option value={event.id}>{event.artist} · {event.city}</option>{/each}</select></label>
-        <label>Gate<select bind:value={gate} disabled={loading || !eventId || !gateOptions.length}><option value="">Semua gate</option>{#each gateOptions as item (item)}<option value={item}>{item}</option>{/each}</select></label>
+        <AdminMobileFilters id="attendance-gate-filter" title="Filter gate"><label>Gate<select bind:value={gate} disabled={loading || !eventId || !gateOptions.length}><option value="">Semua gate</option>{#each gateOptions as item (item)}<option value={item}>{item}</option>{/each}</select></label></AdminMobileFilters>
         <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading || !eventId}>Terapkan</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
       </form>
     </section>

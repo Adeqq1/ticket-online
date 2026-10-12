@@ -1,8 +1,16 @@
 <script lang="ts">
+  import { MediaQuery } from "svelte/reactivity";
+  import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
+  import { mobileListItems } from "../../lib/mobile-list.ts";
+  const mobileList = new MediaQuery("(max-width: 767px)");
+
+  import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
   import { ApiError, getAdminCheckInHistory, type CheckInHistoryEvent, type CheckInHistoryFilter, type CheckInHistoryItem } from "../../lib/api.ts";
 
+  let mobileGroup = $state(0);
+  let mobileScroll = $state(0);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let events = $state<CheckInHistoryEvent[]>([]);
   let items = $state<CheckInHistoryItem[]>([]);
@@ -23,14 +31,15 @@
     const controller = new AbortController();
     request = controller;
     const current = ++generation;
-    if (more) loadingMore = true; else { loading = true; items = []; cursor = null; }
+    if (more) loadingMore = true; else { loading = true; items = []; cursor = null; mobileGroup = 0; mobileScroll = 0; }
     error = "";
     try {
       const page = await getAdminCheckInHistory(accessToken, { ...filters, ...(more && cursor ? { beforeId: cursor } : {}) }, controller.signal);
       if (current !== generation) return;
       events = page.filterOptions;
-      items = more ? [...items, ...page.items] : page.items;
+      items = more ? [...new Map([...items, ...page.items].map(item => [item.id, item])).values()] : page.items;
       cursor = page.nextCursor;
+      return true;
     } catch (cause) {
       if (current !== generation || (cause instanceof DOMException && cause.name === "AbortError")) return;
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
@@ -70,24 +79,26 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-  <AdminLayout page="history" contentId="checkin-history-content" skipLabel="Lewati ke riwayat check-in" kicker="OPERASIONAL EVENT • AUDIT" title="Riwayat check-in." description="Periksa hasil scan yang tercatat server beserta petugas dan waktu masuk." onLogout={onLogout} loggingOut={loggingOut} primaryAction={{ label: "Cari", form: "checkin-search-form", disabled: loading }}>
-    <section class="staff-admin-panel checkin-history-panel" aria-labelledby="history-filters-title">
-      <div class="staff-panel-heading"><div><span class="panel-index">01</span><h2 id="history-filters-title">Filter riwayat</h2></div></div>
+  <AdminLayout page="history" contentId="checkin-history-content" skipLabel="Lewati ke riwayat check-in" kicker="OPERASIONAL EVENT • AUDIT" title="Riwayat check-in." description="Periksa hasil scan yang tercatat server beserta petugas dan waktu masuk." onLogout={onLogout} loggingOut={loggingOut} >
+    <section class="staff-admin-panel checkin-history-panel" aria-label="Filter riwayat check-in">
+      <AdminMobileFilters id="checkin-mobile-filters" title="Filter riwayat">
       <form id="checkin-search-form" class="history-filter-form" onsubmit={search} aria-busy={loading}>
         <label>Event<select value={eventId} onchange={(event) => selectEvent(event.currentTarget.value)} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
         <label>Gate<select bind:value={gate} disabled={loading || !gates.length}><option value="">Semua gate</option>{#each gates as item (item)}<option value={item}>{item}</option>{/each}</select></label>
         <label>Kode tiket<input bind:value={query} maxlength="35" placeholder="Cari sebagian kode ET-…" disabled={loading} /></label>
         <div class="history-filter-actions"><button class="scan-submit" type="submit" disabled={loading}>Cari</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
       </form>
+      </AdminMobileFilters>
     </section>
 
     <section class="staff-admin-panel checkin-history-panel" aria-labelledby="history-results-title">
-      <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="history-results-title">Hasil scan</h2></div><button class="staff-text-button" type="button" onclick={() => { void load(applied); }} disabled={loading}>{loading ? "Memuat…" : "Muat ulang"}</button></div>
+      <div class="staff-panel-heading"><div><span class="panel-index">02</span><h2 id="history-results-title" tabindex="-1">Hasil scan</h2></div><button class="staff-text-button" type="button" onclick={() => { void load(applied); }} disabled={loading}>{loading ? "Memuat…" : "Muat ulang"}</button></div>
       {#if loading}<p class="staff-muted" aria-live="polite">Memuat riwayat check-in…</p>
-      {:else if error}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => { void load(applied); }}>Coba lagi</button></p>
+      {:else if error && !items.length}<p class="staff-form-message staff-form-error" role="alert">{error} <button class="staff-text-button" type="button" onclick={() => { void load(applied); }}>Coba lagi</button></p>
       {:else if items.length === 0}<p class="staff-muted" role="status">Belum ada percobaan check-in yang cocok.</p>
-      {:else}<div class="history-table-wrap"><table class="history-table"><caption class="visually-hidden">Percobaan check-in terbaru</caption><thead><tr><th scope="col">Waktu</th><th scope="col">Kode tiket</th><th scope="col">Event / gate</th><th scope="col">Petugas</th><th scope="col">Hasil</th><th scope="col">Waktu check-in</th></tr></thead><tbody>{#each items as item (item.id)}<tr><td data-label="Waktu"><time datetime={item.recordedAt}>{localTime(item.recordedAt)}</time></td><td data-label="Kode tiket"><code>{item.code ?? "Kode tidak valid"}</code></td><td data-label="Event / gate">{item.eventName ?? item.eventId ?? "Belum tersedia"}<small>{item.gate ?? "Belum tersedia"}</small></td><td data-label="Petugas">{item.staff.name}</td><td data-label="Hasil"><span class:history-success={item.outcome === "CHECKED_IN"} class="history-outcome">{outcomeLabel(item.outcome)}</span></td><td data-label="Waktu check-in">{#if item.checkedInAt}<time datetime={item.checkedInAt}>{localTime(item.checkedInAt)}</time>{:else}Belum tersedia{/if}</td></tr>{/each}</tbody></table></div>
-        {#if cursor}<div class="history-more"><button class="staff-secondary-button" type="button" disabled={loadingMore} onclick={() => { void load(applied, true); }}>{loadingMore ? "Memuat…" : "Muat berikutnya"}</button></div>{/if}
+      {:else}<AdminMobileList count={items.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="history-results-title" hasMore={Boolean(cursor)} loadMore={() => load(applied, true)} disabled={loadingMore}><div class="history-table-wrap"><table class="history-table"><caption class="visually-hidden">Percobaan check-in terbaru</caption><thead><tr><th scope="col">Waktu</th><th scope="col">Kode tiket</th><th scope="col">Event / gate</th><th scope="col">Petugas</th><th scope="col">Hasil</th><th scope="col">Waktu check-in</th></tr></thead><tbody>{#each mobileListItems(items, mobileGroup, mobileList.current) as item (item.id)}<tr><td data-label="Waktu"><time datetime={item.recordedAt}>{localTime(item.recordedAt)}</time></td><td data-label="Kode tiket"><code>{item.code ?? "Kode tidak valid"}</code></td><td data-label="Event / gate">{item.eventName ?? item.eventId ?? "Belum tersedia"}<small>{item.gate ?? "Belum tersedia"}</small></td><td data-label="Petugas">{item.staff.name}</td><td data-label="Hasil"><span class:history-success={item.outcome === "CHECKED_IN"} class="history-outcome">{outcomeLabel(item.outcome)}</span></td><td data-label="Waktu check-in">{#if item.checkedInAt}<time datetime={item.checkedInAt}>{localTime(item.checkedInAt)}</time>{:else}Belum tersedia{/if}</td></tr>{/each}</tbody></table></div>
+        </AdminMobileList>
+        {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
       {/if}
     </section>
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Riwayat hasil check-in server</span></footer>

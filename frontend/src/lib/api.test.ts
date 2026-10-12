@@ -207,7 +207,7 @@ test("admin issue APIs use protected routes and send required case notes", async
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
-    return new Response(calls.length <= 2 ? JSON.stringify({ items: [], nextCursor: null }) : calls.length === 6 ? JSON.stringify({ jobId: "a", retryJobId: "b", status: "PENDING" }) : calls.length === 3 ? JSON.stringify({ caseId: "1", providerStatus: "settlement" }) : null, { status: calls.length === 4 || calls.length === 5 ? 204 : 200 });
+    return new Response(calls.length <= 2 ? JSON.stringify({ items: [], nextCursor: null }) : calls.length === 6 ? JSON.stringify({ jobId: "0123456789abcdef0123456789abcdef", retryJobId: "b".repeat(32), status: "PENDING" }) : calls.length === 3 ? JSON.stringify({ caseId: "1", providerStatus: "settlement" }) : null, { status: calls.length === 4 || calls.length === 5 ? 204 : 200 });
   }) as typeof fetch;
   try {
     await getAdminPaymentCases("staff-token"); await getAdminEmailJobs("staff-token", undefined, "next");
@@ -475,5 +475,23 @@ test("poster upload rejects malformed success and preserves session/storage erro
       globalThis.fetch = (async () => Response.json({error:{code:"POSTER_ERROR",message:"Upload gagal"}}, {status})) as unknown as typeof fetch;
       await expect(uploadAdminPoster("token", file)).rejects.toMatchObject({status,code:"POSTER_ERROR"});
     }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test("email retry accepts same-ID and replacement jobs but locks malformed successful responses", async () => {
+  const originalFetch = globalThis.fetch;
+  const id = "a".repeat(32);
+  let calls = 0;
+  try {
+    for (const retryJobId of [id, "b".repeat(32)]) {
+      globalThis.fetch = (async () => Response.json({ jobId: id, retryJobId, status: "PENDING" })) as unknown as typeof fetch;
+      expect((await retryAdminEmailJob("admin", id)).retryJobId).toBe(retryJobId);
+    }
+    for (const value of [null, {}, { jobId: id, retryJobId: id, status: "SENT" }, { jobId: "other", retryJobId: id, status: "PENDING" }, { jobId: id, retryJobId: 1, status: "PENDING" }]) {
+      globalThis.fetch = (async () => { calls++; return Response.json(value); }) as unknown as typeof fetch;
+      await expect(retryAdminEmailJob("admin", id)).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME" });
+    }
+    expect(calls).toBe(5);
   } finally { globalThis.fetch = originalFetch; }
 });

@@ -1,0 +1,129 @@
+{
+  "realBackend": true,
+  "transport": "Playwright relay to isolated Go HTTP server; no API fixtures",
+  "responses": [
+    {
+      "path": "/api/v1/staff/me",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/operations",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/staff/me",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/payment-cases",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/c2d059cb3491d71ec81823daff4eaaad",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/c2d059cb3491d71ec81823daff4eaaad/retry",
+      "method": "POST",
+      "status": 0,
+      "connectionInterrupted": true
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/c2d059cb3491d71ec81823daff4eaaad",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/c2d059cb3491d71ec81823daff4eaaad",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/payment-cases",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/c2d059cb3491d71ec81823daff4eaaad",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/fc0efc9dde8f7e81fef66d4397e46d29",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/fc0efc9dde8f7e81fef66d4397e46d29/retry",
+      "method": "POST",
+      "status": 0,
+      "connectionInterrupted": true
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/fc0efc9dde8f7e81fef66d4397e46d29",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/eb41433a38c2eb9c4f176413cf54176a",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/fc0efc9dde8f7e81fef66d4397e46d29",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/payment-cases",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/fc0efc9dde8f7e81fef66d4397e46d29",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/email-jobs/eb41433a38c2eb9c4f176413cf54176a",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/staff/me",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/staff/me",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/admin/operations",
+      "method": "GET",
+      "status": 200
+    }
+  ],
+  "humanUAT": "not performed"
+}
