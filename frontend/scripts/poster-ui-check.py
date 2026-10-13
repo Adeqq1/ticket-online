@@ -14,6 +14,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
+from runpy import run_path
+
+confirmation_helpers = run_path(str(Path(__file__).with_name('admin-confirm.py')))
+auto_confirm = confirmation_helpers['auto_confirm']
 from importlib.util import spec_from_file_location, module_from_spec
 
 spec = spec_from_file_location("admin_fixtures", Path(__file__).with_name("admin-ui-check.py"))
@@ -31,6 +35,7 @@ async def check(browser, base, width):
       URL.revokeObjectURL=(u)=>{window.posterURLs.revoked.push(u);revoke(u)};""")
     page = await context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
+    await auto_confirm(page)
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     event = deepcopy(fixtures.EVENT)
@@ -86,13 +91,25 @@ async def check(browser, base, width):
     await page.goto(base + "/admin/events")
     await expect(page.locator("#event-form")).to_have_count(0)
     await page.get_by_role("button", name="Kelola konser Nusa Malam", exact=True).click()
+    await page.locator(".event-section-nav").get_by_role("button", name="Materi", exact=True).click()
     await expect(page.get_by_role("radio", name="Unggah dari perangkat")).to_be_checked()
     await expect(page.locator(".poster-preview img")).to_have_attribute("src", event["image"])
     picker = page.get_by_label("Pilih file poster")
     save = page.get_by_role("button", name="Simpan perubahan", exact=True)
     upload = page.get_by_role("button", name="Unggah poster", exact=True)
-    await picker.set_input_files(str(IMAGE))
+    await expect(page.locator(".poster-file-name")).to_have_text("Belum ada file dipilih")
+    await page.get_by_role("radio", name="Gunakan URL gambar", exact=True).focus()
+    await page.keyboard.press("Tab")
+    await expect(picker).to_be_focused()
+    assert await page.locator(".poster-file-control").evaluate("el => getComputedStyle(el).outlineStyle") == "solid"
+    async with page.expect_file_chooser() as chooser:
+        await picker.press("Enter")
+    await (await chooser.value).set_files(str(IMAGE))
+    await expect(page.locator(".poster-file-name")).to_have_text(IMAGE.name)
     await expect(save).to_be_disabled()
+    await page.locator(".event-section-nav").get_by_role("button", name="Informasi", exact=True).click()
+    await page.locator(".event-section-nav").get_by_role("button", name="Materi", exact=True).click()
+    assert await picker.evaluate("el => el.files.length") == 1
     await expect(page.locator(".poster-preview img")).to_have_attribute("src", re.compile("^blob:"))
     await expect(page.get_by_text("Perubahan belum disimpan", exact=True)).to_be_visible()
     state["upload_status"] = 503
@@ -133,6 +150,7 @@ async def check(browser, base, width):
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await page.get_by_role("button", name="Kelola konser Konser Kedua", exact=True).click()
     state["hold"].set()
+    await page.locator(".event-section-nav").get_by_role("button", name="Materi", exact=True).click()
     await expect(page.locator(".poster-preview img")).to_have_attribute("src", other["image"])
     assert calls["upload"] == before + 1
     await expect(page.get_by_text("Poster terunggah. Simpan perubahan konser untuk menerapkannya.", exact=True)).to_have_count(0)
@@ -156,6 +174,18 @@ async def check(browser, base, width):
     await picker.set_input_files({"name": "large.png", "mimeType": "image/png", "buffer": bytes(5 * 1024 * 1024 + 1)})
     await expect(page.get_by_role("alert").filter(has_text="maksimal 5 MiB")).to_be_visible()
     await picker.set_input_files(str(IMAGE))
+    long_name = "poster-konser-" + "nama-panjang-" * 15 + ".jpg"
+    async with page.expect_file_chooser() as chooser:
+        await page.locator(".poster-file-control").click()
+    await (await chooser.value).set_files({"name": long_name, "mimeType": "image/jpeg", "buffer": IMAGE.read_bytes()})
+    await expect(page.locator(".poster-file-name")).to_have_text(long_name)
+    await page.evaluate("""() => {
+        window.pickerFonts = [...document.querySelectorAll('.poster-file *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+        for (const [el, , size] of window.pickerFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+    }""")
+    assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "200% file name overflow"
+    await page.evaluate("() => { for (const [el, original] of window.pickerFonts) el.style.fontSize = original; }")
+    assert await picker.evaluate("el => el.getBoundingClientRect().height >= 44")
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "horizontal overflow"
     assert await upload.evaluate("el=>el.getBoundingClientRect().height>=44")
     await page.get_by_role("radio", name="Gunakan URL gambar").check()
@@ -178,11 +208,12 @@ async def check(browser, base, width):
     for source in ("file", "url"):
         await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
         await page.get_by_role("button", name="Tambah konser", exact=True).click()
-        await expect(page.get_by_role("radio", name="Unggah dari perangkat")).to_be_checked()
         await page.get_by_label("Nama konser / artis", exact=True).fill("Konser Baru " + source)
+        for _ in range(2): await page.get_by_role("button", name="Berikutnya", exact=True).click()
+        await expect(page.get_by_role("radio", name="Unggah dari perangkat")).to_be_checked()
         if source == "file":
             await picker.set_input_files(str(IMAGE))
-            await expect(page.get_by_role("button", name="Buat konser", exact=True)).to_be_disabled()
+            await expect(page.get_by_role("button", name="Simpan draf & lanjutkan", exact=True)).to_be_disabled()
             await upload.click()
             await expect(page.get_by_text("Poster terunggah. Simpan perubahan konser untuk menerapkannya.", exact=True)).to_be_visible()
             expected_url = poster
@@ -190,8 +221,10 @@ async def check(browser, base, width):
             await page.get_by_role("radio", name="Gunakan URL gambar").check()
             expected_url = base + "/api/v1/media/posters/" + "3" * 64 + ".jpg"
             await page.get_by_label("URL poster", exact=True).fill(expected_url)
-        await page.get_by_role("button", name="Buat konser", exact=True).click()
-        await expect(page.get_by_role("button", name="Simpan perubahan", exact=True)).to_be_enabled()
+        await page.get_by_role("button", name="Simpan draf & lanjutkan", exact=True).click()
+        await expect(page.locator("#event-section-title")).to_have_text("Zona")
+        if width < 768: await page.get_by_role("combobox", name="Pilih langkah", exact=True).select_option("2")
+        else: await page.locator(".event-section-nav").get_by_role("button", name="Materi", exact=True).click()
         await expect(page.locator(".poster-preview img")).to_have_attribute("src", expected_url)
         await expect(page.get_by_text("Perubahan belum disimpan", exact=True)).to_have_count(0)
         assert created[-1]["image"] == expected_url
@@ -214,7 +247,7 @@ async def main():
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
         try:
-            for width in (1440, 390, 320):
+            for width in (1440, 390, 320, 768):
                 await check(browser, args.base_url, width)
         finally:
             await browser.close()

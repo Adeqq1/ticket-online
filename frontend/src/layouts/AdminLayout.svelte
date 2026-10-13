@@ -1,15 +1,92 @@
 <script lang="ts">
-  import { tick, type Snippet } from "svelte";
+  import { onDestroy, onMount, tick, type Snippet } from "svelte";
   import AdminHelp from "../components/admin/AdminHelp.svelte";
 
   type Action = { label: string; onclick?: () => void; form?: string; disabled?: boolean; id?: string; controls?: string; expanded?: boolean };
   type Page = "pricing" | "events" | "staff" | "orders" | "issues" | "operations" | "reports" | "attendance" | "conversion" | "history";
-  let { page, contentId, skipLabel, kicker, title, description, mobileDescriptionHelp = false, onLogout, loggingOut, logoutDisabled, primaryAction, secondaryAction, children }: {
+  let { page, contentId, skipLabel, kicker, title, description, mobileDescriptionHelp = false, onLogout, onBeforeNavigate, loggingOut, logoutDisabled, primaryAction, secondaryAction, children }: {
     page: Page; contentId: string; skipLabel: string; kicker: string; title: string; description: string; mobileDescriptionHelp?: boolean;
-    onLogout: () => void; loggingOut: boolean; logoutDisabled?: boolean; primaryAction?: Action; secondaryAction?: Action; children: Snippet;
+    onLogout: () => void; onBeforeNavigate?: () => Promise<boolean>; loggingOut: boolean; logoutDisabled?: boolean; primaryAction?: Action; secondaryAction?: Action; children: Snippet;
   } = $props();
 
   let dialog: HTMLDialogElement;
+  let confirmDialog: HTMLDialogElement;
+  let cancelButton = $state<HTMLButtonElement>();
+  let confirmation = $state<{ title: string; message: string; confirmLabel: string } | null>(null);
+  let resolveConfirmation: ((accepted: boolean) => void) | undefined;
+  let confirmTrigger: HTMLElement | null = null;
+  let destroyed = false;
+  let navigating = false;
+  let approvedNavigation = false;
+
+  export function consumeNavigationApproval() {
+    const approved = approvedNavigation;
+    approvedNavigation = false;
+    return approved;
+  }
+
+  async function protectNavigation(event: MouseEvent) {
+    if (!onBeforeNavigate || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !(event.target instanceof Element)) return;
+    const link = event.target.closest<HTMLAnchorElement>("a[href]");
+    if (!link || link.hasAttribute("download") || (link.target && link.target !== "_self")) return;
+    const destination = new URL(link.href);
+    if (destination.origin !== location.origin || (destination.pathname === location.pathname && destination.search === location.search && destination.hash)) return;
+    event.preventDefault();
+    if (navigating) return;
+    navigating = true;
+    try {
+      if (await onBeforeNavigate() && !destroyed) {
+        approvedNavigation = true;
+        window.location.assign(destination.href);
+      }
+    } finally { navigating = false; }
+  }
+
+  onMount(() => {
+    document.addEventListener("click", protectNavigation, true);
+    return () => document.removeEventListener("click", protectNavigation, true);
+  });
+
+  export function confirm(options: { title: string; message: string; confirmLabel: string }): Promise<boolean> {
+    if (destroyed || resolveConfirmation) return Promise.resolve(false);
+    confirmTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    confirmation = options;
+    return new Promise<boolean>((resolve) => {
+      resolveConfirmation = resolve;
+      void tick().then(() => {
+        if (resolveConfirmation !== resolve) return;
+        confirmDialog.showModal();
+        cancelButton?.focus();
+      });
+    });
+  }
+
+  function finishConfirmation(accepted: boolean) {
+    const resolve = resolveConfirmation;
+    if (!resolve) return;
+    resolveConfirmation = undefined;
+    if (confirmDialog?.open) confirmDialog.close();
+    confirmation = null;
+    if (!destroyed && confirmTrigger?.isConnected) confirmTrigger.focus({ preventScroll: true });
+    confirmTrigger = null;
+    resolve(accepted);
+  }
+
+  function handleConfirmKeydown(event: KeyboardEvent) {
+    if (event.key !== "Tab") return;
+    const items = [...confirmDialog.querySelectorAll<HTMLElement>('button, [tabindex="0"]')];
+    if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1)?.focus(); }
+    else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0]?.focus(); }
+  }
+
+  function closeConfirmOnBackdrop(event: MouseEvent) {
+    if (event.target !== confirmDialog || event.detail > 1) return;
+    const bounds = confirmDialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) finishConfirmation(false);
+  }
+
+  onDestroy(() => { destroyed = true; finishConfirmation(false); });
+
   let menuButton: HTMLButtonElement;
   let menuOpen = $state(false);
   const groups = [
@@ -62,6 +139,18 @@
     {/each}
   </dialog>
 
+  <dialog class="admin-confirm" bind:this={confirmDialog} aria-labelledby="admin-confirm-title" aria-describedby="admin-confirm-message" oncancel={(event) => { event.preventDefault(); finishConfirmation(false); }} onclose={() => { if (!confirmDialog?.open) finishConfirmation(false); }} onkeydown={handleConfirmKeydown} onclick={closeConfirmOnBackdrop}>
+    {#if confirmation}
+      <h2 id="admin-confirm-title">{confirmation.title}</h2>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Scrollable confirmation text must be reachable by keyboard.) -->
+      <div id="admin-confirm-message" role="region" aria-label="Rincian konfirmasi" tabindex="0">{confirmation.message}</div>
+      <div class="admin-confirm-actions">
+        <button class="staff-secondary-button" type="button" bind:this={cancelButton} onclick={() => finishConfirmation(false)}>Batal</button>
+        <button class="scan-submit staff-submit" type="button" onclick={() => finishConfirmation(true)}>{confirmation.confirmLabel}</button>
+      </div>
+    {/if}
+  </dialog>
+
   <div class="admin-layout-grid">
     <aside class="admin-sidebar" aria-label="Navigasi admin">
       {#each groups as group (group.label)}
@@ -79,6 +168,15 @@
 <svelte:window onresize={closeOnDesktop} />
 
 <style>
+  .admin-confirm { box-sizing: border-box; width: min(32rem, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; border: 1px solid var(--admin-border); border-radius: 16px; background: var(--admin-card); color: var(--admin-text); }
+  .admin-confirm[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 16px; }
+  .admin-confirm::backdrop { background: rgb(0 0 0 / .65); }
+  .admin-confirm h2 { margin: 0; font-size: 22px; line-height: 1.3; overflow-wrap: anywhere; }
+  .admin-confirm #admin-confirm-message { min-height: 0; margin: 0; overflow-y: auto; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; line-height: 1.5; }
+  .admin-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; }
+  .admin-confirm-actions button { min-width: 44px; min-height: 44px; margin: 0; border-radius: 10px; font-size: 16px; overflow-wrap: anywhere; }
+  @media (max-width: 600px) { .admin-confirm { padding: 20px; } .admin-confirm-actions button { flex: 1 1 100%; } }
+  @media print { .admin-confirm { display: none !important; } }
   .admin-layout .skip-link:not(:focus) { top: 0; transform: translateY(-100%); }
   .admin-topbar { width: min(100% - 56px, 1500px); }
   .admin-topbar .scan-brand { min-height: 44px; }

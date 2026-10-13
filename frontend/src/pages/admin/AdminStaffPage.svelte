@@ -14,6 +14,13 @@
 
   let mobileGroup = $state(0);
   let mobileScroll = $state(0);
+  let layout: ReturnType<typeof AdminLayout>;
+  async function confirmAction(title: string, message: string, confirmLabel: string) {
+    const token = accessToken;
+    const before = confirmationState();
+    return await layout.confirm({ title, message, confirmLabel }) && token === accessToken && before === confirmationState();
+  }
+  const confirmationState = () => JSON.stringify([selectedId, selected, creating, editName, editActive, editAssignments, resetPassword, newName, newEmail, newPassword, newAssignments, uncertain, createUncertain, saving]);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let staff = $state<Staff[]>([]);
   let events = $state<AdminApiEvent[]>([]);
@@ -30,6 +37,11 @@
   let newAssignments = $state<StaffAssignment[]>([]);
   let newAssignmentPending = $state(false);
   let creating = $state(false);
+  let createStep = $state(0);
+  let editSection = $state(0);
+  const createSteps = ["Akun", "Penugasan", "Tinjau"];
+  const editSections = ["Profil dan akses", "Penugasan", "Reset password"];
+  const sectionIcons = ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21v-2a8 8 0 0 1 16 0v2", "M4 4h16v16H4ZM8 8h8M8 12h8M8 16h5", "M7 11V7a5 5 0 0 1 10 0v4M5 11h14v10H5Z"];
   let createUncertain = $state(false);
   let selectedId = $state("");
   let editName = $state("");
@@ -60,13 +72,18 @@
     return `${event ? `${event.artist} · ${event.city}` : `Event ${assignment.eventId}`} · ${assignment.gate}`;
   }
   function protectUnsaved(event: BeforeUnloadEvent) {
-    if (staffEditorDirty || createDirty || saving || hasUncertain) { event.preventDefault(); event.returnValue = ""; }
+    if (!layout?.consumeNavigationApproval() && (staffEditorDirty || createDirty || saving || hasUncertain)) { event.preventDefault(); event.returnValue = ""; }
   }
-  function allowStaffDiscard() {
-    if (createUncertain || selectedUncertain?.profile || selectedUncertain?.assignments || selectedUncertain?.password) return window.confirm("Hasil tindakan akun belum pasti. Jangan mengulang tindakan sebelum hasilnya diperiksa. Lanjutkan keluar dari panel?");
-    return !(staffEditorDirty || createDirty) || window.confirm("Perubahan akun petugas yang belum disimpan akan hilang. Lanjutkan?");
+  async function allowStaffDiscard() {
+    if (createUncertain || selectedUncertain?.profile || selectedUncertain?.assignments || selectedUncertain?.password) return (await confirmAction("Keluar dari panel?", "Hasil tindakan akun belum pasti. Jangan mengulang tindakan sebelum hasilnya diperiksa. Lanjutkan keluar dari panel?", "Keluar dari panel"));
+    return !(staffEditorDirty || createDirty) || (await confirmAction("Buang perubahan?", "Perubahan akun petugas yang belum disimpan akan hilang. Lanjutkan?", "Buang perubahan"));
   }
-  function requestLogout() { if (!saving && allowStaffDiscard()) onLogout(); }
+  async function allowNavigation() {
+    if (saving) { notice = "Tunggu penyimpanan selesai sebelum meninggalkan halaman."; return false; }
+    if (hasUncertain) return confirmAction("Keluar dari panel?", "Hasil tindakan akun belum pasti. Jangan mengulang tindakan sebelum hasilnya diperiksa. Lanjutkan keluar dari panel?", "Keluar dari panel");
+    return allowStaffDiscard();
+  }
+  async function requestLogout() { if (!saving && await allowStaffDiscard()) onLogout(); }
   function resetFilters() { filters = { query: "", status: "all", eventId: "", unassigned: false }; void focusElement("staff-search"); }
 
   function unknownOutcome(cause: unknown) {
@@ -86,18 +103,18 @@
 
   function clearCreate() {
     newName = ""; newEmail = ""; newPassword = ""; newAssignments = [];
-    creating = false; createUncertain = false; newAssignmentPending = false;
+    createStep = 0; creating = false; createUncertain = false; newAssignmentPending = false;
   }
 
-  function openCreate() {
-    if (saving || creating || !allowStaffDiscard()) return;
+  async function openCreate() {
+    if (saving || creating || !await allowStaffDiscard()) return;
     listScroll = window.scrollY;
     selectedId = ""; resetPassword = ""; editAssignmentPending = false; error = ""; notice = ""; creating = true;
     void focusElement("staff-create-title");
   }
 
   async function closePanel() {
-    if (saving || !allowStaffDiscard()) return;
+    if (saving || !await allowStaffDiscard()) return;
     const previousId = selectedId;
     const index = filteredStaff.findIndex(person => person.id === previousId);
     if (mobileList.current && index >= 0 && Math.floor(index / 5) !== mobileGroup) { mobileGroup = Math.floor(index / 5); mobileScroll = 0; }
@@ -138,12 +155,12 @@
 
   onMount(() => { void loadStaff(); void loadEvents(); });
 
-  function selectStaff(person: Staff) {
+  async function selectStaff(person: Staff) {
     if (saving) return;
-    if (person.id === selectedId || !allowStaffDiscard()) return;
+    if (person.id === selectedId || !await allowStaffDiscard()) return;
     listScroll = window.scrollY;
     clearCreate();
-    selectedId = person.id; editName = person.name; editActive = person.active;
+    editSection = 0; selectedId = person.id; editName = person.name; editActive = person.active;
     editAssignments = person.assignments.map((assignment) => ({ ...assignment }));
     profileBaseline = JSON.stringify({ name: editName, active: editActive });
     assignmentBaseline = JSON.stringify(editAssignments);
@@ -158,8 +175,30 @@
       : cause instanceof ApiError ? cause.message : "Tidak dapat menghubungi server.";
   }
 
+  async function navigateCreate(next: number) {
+    if (saving || createUncertain) return false;
+    if (next > createStep) {
+      const invalid = document.querySelector<HTMLInputElement>("#staff-account-fields :invalid");
+      if (invalid) { createStep = 0; await tick(); invalid.reportValidity(); invalid.focus(); return false; }
+      if (next === 2 && (newAssignmentPending || loadingEvents || eventsError)) {
+        createStep = 1; error = newAssignmentPending ? "Tambahkan atau batalkan pilihan penugasan sebelum meninjau." : "Tunggu katalog event tersedia sebelum meninjau.";
+        await focusElement("staff-create-section-title"); return false;
+      }
+    }
+    error = ""; createStep = next; await focusElement("staff-create-section-title"); return true;
+  }
+  async function navigateEdit(next: number) {
+    if (saving) return;
+    editSection = next;
+    await focusElement(["staff-profile", "staff-assignments", "staff-password"][next]!);
+  }
+
   async function create(event: SubmitEvent) {
-    event.preventDefault(); if (saving || !creating || createUncertain || newAssignmentPending || loadingEvents || eventsError) return;
+    event.preventDefault(); if (saving || !creating || createUncertain) return;
+    if (createStep < 2) { await navigateCreate(createStep + 1); return; }
+    const invalid = document.querySelector<HTMLInputElement>("#staff-account-fields :invalid");
+    if (invalid) { createStep = 0; await tick(); invalid.reportValidity(); invalid.focus(); return; }
+    if (newAssignmentPending || loadingEvents || eventsError) { createStep = 1; await focusElement("staff-create-section-title"); return; }
     saving = true; error = ""; notice = "";
     try {
       const created = await createStaff(accessToken, { name: newName, email: newEmail.trim(), password: newPassword, assignments: newAssignments });
@@ -195,7 +234,7 @@
 
   async function saveDetails(event: SubmitEvent) {
     event.preventDefault(); if (saving || !selected || selectedUncertain?.profile) return;
-    if (selected.active && !editActive && !window.confirm(`Nonaktifkan ${selected.name}? Semua sesi petugas ini akan dicabut.`)) return;
+    if (selected.active && !editActive && !(await confirmAction("Nonaktifkan akun?", `Nonaktifkan ${selected.name}? Semua sesi petugas ini akan dicabut.`, "Nonaktifkan akun"))) return;
     saving = true; error = ""; notice = "";
     try {
       const staffId = selected.id;
@@ -219,13 +258,13 @@
 
   async function saveAssignments(event: SubmitEvent) {
     event.preventDefault(); if (saving || !selected || selectedUncertain?.assignments || editAssignmentPending || loadingEvents || eventsError) return;
+    const staffId = selected.id;
+    const before = selected.assignments;
+    const removed = before.filter((item) => !editAssignments.some((next) => next.eventId === item.eventId && next.gate === item.gate));
+    const added = editAssignments.filter((item) => !before.some((old) => old.eventId === item.eventId && old.gate === item.gate));
+    if ((added.length || removed.length) && !(await confirmAction("Simpan penugasan?", `Simpan perubahan penugasan untuk ${selected.name}? Event dan gate yang diizinkan akan mengikuti daftar baru. Sesi tetap aktif.\n${added.length ? `Ditambahkan: ${added.map(assignmentLabel).join(", ")}. ` : ""}${removed.length ? `Dihapus: ${removed.map(assignmentLabel).join(", ")}.` : ""}`, "Simpan penugasan"))) return;
     saving = true; error = ""; notice = "";
     try {
-      const staffId = selected.id;
-      const before = selected.assignments;
-      const removed = before.filter((item) => !editAssignments.some((next) => next.eventId === item.eventId && next.gate === item.gate));
-      const added = editAssignments.filter((item) => !before.some((old) => old.eventId === item.eventId && old.gate === item.gate));
-      if ((added.length || removed.length) && !window.confirm(`Simpan perubahan penugasan untuk ${selected.name}? Event dan gate yang diizinkan akan mengikuti daftar baru. Sesi tetap aktif.\n${added.length ? `Ditambahkan: ${added.map(assignmentLabel).join(", ")}. ` : ""}${removed.length ? `Dihapus: ${removed.map(assignmentLabel).join(", ")}.` : ""}`)) return;
       await replaceStaffAssignments(accessToken, staffId, editAssignments);
       assignmentBaseline = JSON.stringify(editAssignments);
       const loaded = await loadStaff();
@@ -242,7 +281,7 @@
 
   async function savePassword(event: SubmitEvent) {
     event.preventDefault(); if (saving || !selected || selectedUncertain?.password) return;
-    if (!window.confirm(`Reset password ${selected.name}? Semua sesi aktif petugas ini akan dicabut.`)) return;
+    if (!(await confirmAction("Reset password?", `Reset password ${selected.name}? Semua sesi aktif petugas ini akan dicabut.`, "Reset password"))) return;
     saving = true; error = ""; notice = "";
     try { await resetStaffPassword(accessToken, selected.id, resetPassword); resetPassword = ""; notice = "Password direset dan sesi lama petugas dicabut."; }
     catch (cause) {
@@ -261,7 +300,7 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-  <AdminLayout page="staff" mobileDescriptionHelp={mode === "list"} contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title={mode === "list" ? "Daftar petugas." : mode === "create" ? "Tambah petugas." : "Edit petugas."} description={mode === "list" ? "Temukan akun dan periksa akses tim pada event dan gate." : mode === "create" ? "Buat akun petugas beserta penugasan awalnya." : "Ubah profil, penugasan, atau password akun yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah petugas", onclick: openCreate, disabled: saving, id: "staff-create-opener" } : undefined} secondaryAction={mode === "edit" ? { label: "Muat ulang", onclick: () => { void loadStaff(); }, disabled: loadingStaff || saving } : undefined}>
+  <AdminLayout bind:this={layout} onBeforeNavigate={allowNavigation} page="staff" mobileDescriptionHelp={mode === "list"} contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title={mode === "list" ? "Daftar petugas." : mode === "create" ? "Tambah petugas." : "Edit petugas."} description={mode === "list" ? "Temukan akun dan periksa akses tim pada event dan gate." : mode === "create" ? "Buat akun petugas beserta penugasan awalnya." : "Ubah profil, penugasan, atau password akun yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah petugas", onclick: openCreate, disabled: saving, id: "staff-create-opener" } : undefined} secondaryAction={mode === "edit" ? { label: "Muat ulang", onclick: () => { void loadStaff(); }, disabled: loadingStaff || saving } : undefined}>
     <div id="staff-result" role="status" aria-live="polite" tabindex="-1">
       {#if notice}<p class="staff-form-message staff-form-success">{notice}</p>{/if}
     </div>
@@ -289,20 +328,18 @@
         {:else if filteredStaff.length === 0}<p class="staff-muted">Tidak ada akun yang cocok. Ubah pencarian atau reset filter.</p>
         {:else}<AdminMobileList count={filteredStaff.length} bind:group={mobileGroup} bind:scrollLeft={mobileScroll} headingId="staff-list-title">{#if mobileList.current}<ul class="staff-list">{#each mobileListItems(filteredStaff, mobileGroup, mobileList.current) as person (person.id)}
           <li id={`staff-account-${person.id}`} class:admin-mobile-card={mobileList.current} tabindex="-1">
-            <div class="staff-list-identity">
                 <div class="admin-mobile-card-header"><strong>{person.name}</strong><span class="staff-status" class:is-active={person.active}>Status: {person.active ? "Aktif" : "Nonaktif"}</span></div>
                 <dl class="admin-card-fields">
                   <div><dt>Email</dt><dd>{person.email}</dd></div>
                   <div><dt>Peran</dt><dd><span class="staff-role">{person.role === "ADMIN" ? "Admin" : "Staff"}</span></dd></div>
-                  <div><dt>Penugasan</dt><dd>
+                  <div><dt>Penugasan</dt><dd class="staff-list-identity">
                     {#each person.assignments.slice(0, 2) as assignment}<span class="admin-card-assignment">{assignmentLabel(assignment)}</span>{/each}
                     {#if person.assignments.length > 2}<details><summary>Lihat semua penugasan ({person.assignments.length.toLocaleString("id-ID")})</summary>{#each person.assignments.slice(2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}</details>{/if}
                     {#if !person.assignments.length}{person.role === "STAFF" ? "Belum ditugaskan. Atur event dan gate melalui Kelola." : "Tanpa penugasan"}{/if}
                   </dd></div>
                 </dl>
                 {#if person.role === "ADMIN"}<span>Akun administrator tidak dapat diubah melalui halaman ini.</span>{/if}
-            </div>
-            {#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button" type="button" disabled={saving} onclick={() => selectStaff(person)}>Kelola<span class="visually-hidden"> {person.name}</span></button>{/if}
+            {#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button" type="button" disabled={saving} onclick={() => void selectStaff(person)}>Kelola<span class="visually-hidden"> {person.name}</span></button>{/if}
           </li>
         {/each}</ul>
         {:else}
@@ -319,32 +356,56 @@
                   {#if person.assignments.length > 2}<details><summary>Lihat semua penugasan ({person.assignments.length.toLocaleString("id-ID")})</summary>{#each person.assignments.slice(2) as assignment}<span>{assignmentLabel(assignment)}</span>{/each}</details>{/if}
                   {#if !person.assignments.length}<span>{person.role === "STAFF" ? "Belum ditugaskan. Atur event dan gate melalui Kelola." : "Tanpa penugasan"}</span>{/if}
                 </div></td>
-                <td>{#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button admin-icon-button" type="button" aria-label={`Kelola ${person.name}`} title={`Kelola ${person.name}`} disabled={saving} onclick={() => selectStaff(person)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z" /><path d="m14 5 5 5" /></svg></button>{:else}<small>Akun administrator tidak dapat diubah melalui halaman ini.</small>{/if}</td>
+                <td>{#if person.role === "STAFF"}<button id={`staff-manage-${person.id}`} class="staff-secondary-button admin-icon-button" type="button" aria-label={`Kelola ${person.name}`} title={`Kelola ${person.name}`} disabled={saving} onclick={() => void selectStaff(person)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z" /><path d="m14 5 5 5" /></svg></button>{:else}<small>Akun administrator tidak dapat diubah melalui halaman ini.</small>{/if}</td>
               </tr>{/each}</tbody>
             </table>
         {/if}</AdminMobileList>{/if}
       </section>
       {:else if creating}<section id="staff-work-panel" class="staff-admin-panel staff-create-panel" aria-labelledby="staff-create-title">
         <div class="staff-panel-heading"><h2 id="staff-create-title" tabindex="-1">Tambah petugas</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
-        <form id="staff-create-form" class="staff-form" onsubmit={create} aria-busy={saving}>
+        <div class="admin-wizard">
+        <nav class="staff-section-nav admin-wizard-nav" aria-label="Langkah tambah petugas">
+          {#each createSteps as label, index}<button class="staff-secondary-button" type="button" title={`${index + 1}. ${label}`} aria-current={createStep === index ? "step" : undefined} disabled={saving || createUncertain} onclick={() => navigateCreate(index)}><svg class="admin-wizard-mobile-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={index === 2 ? "m5 12 4 4L19 6" : sectionIcons[index]} /></svg><span>{index + 1}. {label}</span></button>{/each}
+        </nav>
+        <div class="admin-wizard-content admin-wizard-body staff-create-content">
+        <h3 id="staff-create-section-title" tabindex="-1">{createSteps[createStep]}</h3>
+        <p class="staff-action-note" aria-live="polite">Langkah {createStep + 1} dari 3</p>
+        <form id="staff-create-form" class="staff-form" novalidate onsubmit={create} aria-busy={saving}>
+          <div id="staff-account-fields" class="staff-form-fields" hidden={createStep !== 0}>
           <label>Nama<input bind:value={newName} autocomplete="name" minlength="2" maxlength="80" required disabled={saving} readonly={createUncertain} /></label>
           <label>Email<input bind:value={newEmail} type="email" autocomplete="email" maxlength="254" required disabled={saving} readonly={createUncertain} /></label>
           <label>Password awal<input bind:value={newPassword} type="password" autocomplete="new-password" minlength="12" maxlength="128" required disabled={saving} readonly={createUncertain} /><small>Minimal 12 karakter; sesi lama akan dicabut saat password diganti.</small></label>
+          </div>
+          <div hidden={createStep !== 1}>
           {#if loadingEvents}<p class="staff-muted" aria-live="polite">Memuat pilihan event…</p>{:else if eventsError}<p class="staff-form-message staff-form-error" role="alert">{eventsError} Penugasan belum tersedia; input tetap tersimpan. <button class="staff-text-button" type="button" onclick={loadEvents}>Coba lagi</button></p>{:else}<StaffAssignmentsEditor {events} bind:value={newAssignments} bind:pending={newAssignmentPending} mode="create" disabled={saving || createUncertain} />{/if}
+          </div>
+          <div hidden={createStep !== 2}>
+            <dl class="staff-review">
+              <div><dt>Nama</dt><dd>{newName}</dd></div><div><dt>Email</dt><dd>{newEmail}</dd></div>
+              <div><dt>Password awal</dt><dd>{newPassword ? "Sudah diisi" : "Belum diisi"}</dd></div>
+              <div><dt>Penugasan</dt><dd>{#if newAssignments.length}<ul>{#each newAssignments as assignment}<li>{assignmentLabel(assignment)}</li>{/each}</ul>{:else}Tanpa penugasan; akses event/gate belum diberikan.{/if}</dd></div>
+            </dl>
+          </div>
           {#if createUncertain}<button class="staff-secondary-button" type="button" disabled={saving} onclick={checkCreateResult}>Periksa daftar petugas</button>{/if}
-          <div class="staff-create-actions"><button class="scan-submit staff-submit" type="submit" disabled={saving || createUncertain || newAssignmentPending || loadingEvents || Boolean(eventsError)}>{saving ? "Menyimpan…" : "Buat akun petugas"}</button><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Batal</button></div>
+          <div class="staff-create-actions">
+            {#if createStep > 0}<button class="staff-secondary-button" type="button" disabled={saving || createUncertain} onclick={() => navigateCreate(createStep - 1)}>Sebelumnya</button>{/if}
+            <button class="scan-submit staff-submit" type="submit" disabled={saving || createUncertain || (createStep > 0 && (newAssignmentPending || loadingEvents || Boolean(eventsError)))}>{saving ? "Menyimpan…" : createStep === 2 ? "Buat akun petugas" : "Lanjutkan"}</button>
+            <button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Batal</button>
+          </div>
         </form>
+        </div></div>
       </section>
     {:else if selected}<section id="staff-work-panel" class="staff-admin-panel staff-edit-panel" aria-labelledby="staff-edit-title">
       <div class="staff-panel-heading"><h2 id="staff-edit-title" tabindex="-1">Edit petugas: {selected.name}</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
       <p class="staff-list-help">{selected.email}</p>
       {#if !filteredStaff.some((person) => person.id === selectedId)}<p class="staff-list-help" role="status">{selected.name} tidak termasuk hasil saat ini. Editor dan draft tetap terbuka.</p>{/if}
-      <nav class="staff-section-nav" aria-label="Bagian pengelolaan akun"><a href="#staff-profile">Profil dan akses</a><a href="#staff-assignments">Penugasan</a><a href="#staff-password">Reset password</a></nav>
       {#if selectedUncertain?.profile || selectedUncertain?.assignments}<p class="staff-list-help" role="alert">Hasil perubahan {selectedUncertain.profile ? "profil" : "penugasan"} belum pasti. Tindakan tersebut ditahan. Muat ulang daftar dan periksa hasilnya sebelum melanjutkan.</p>{/if}
       {#if selectedUncertain?.password}<p class="staff-list-help" role="alert">Hasil reset password belum pasti. Jangan mengulang reset. Minta petugas memeriksa apakah password baru dapat digunakan; daftar akun tidak dapat membuktikan hasil reset.</p>{/if}
       {#if staffEditorDirty}<p class="staff-edit-unsaved" role="status">Perubahan akun belum disimpan</p>{/if}
-      <div class="staff-edit-grid">
-        <form class="staff-form" onsubmit={saveDetails} aria-busy={saving}>
+      <div class="admin-wizard">
+      <nav class="staff-section-nav admin-wizard-nav" aria-label="Bagian pengelolaan akun">{#each editSections as label, index}<button class="staff-secondary-button" type="button" aria-label={`Bagian ${label}`} title={`Bagian ${label}`} aria-current={editSection === index ? "page" : undefined} disabled={saving} onclick={() => navigateEdit(index)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={sectionIcons[index]} /></svg><span>{label}</span></button>{/each}</nav>
+      <div class="staff-edit-grid admin-wizard-content">
+        <form class="staff-form" hidden={editSection !== 0} onsubmit={saveDetails} aria-busy={saving}>
           <h3 id="staff-profile" tabindex="-1">Profil dan akses</h3>
           <p class="staff-action-note">Simpan nama dan status akun. Menonaktifkan akun langsung mencabut semua sesi.</p>
           <label>Nama<input bind:value={editName} minlength="2" maxlength="80" required disabled={saving} readonly={Boolean(selectedUncertain?.profile)} /></label>
@@ -352,20 +413,20 @@
           <small>Menonaktifkan akun langsung mencabut semua sesi petugas tersebut.</small>
           <button class="staff-secondary-button" type="submit" disabled={saving || Boolean(selectedUncertain?.profile)}>Simpan profil</button>
         </form>
-        <form class="staff-form" onsubmit={saveAssignments} aria-busy={saving}>
+        <form class="staff-form" hidden={editSection !== 1} onsubmit={saveAssignments} aria-busy={saving}>
           <h3 id="staff-assignments" tabindex="-1">Penugasan</h3>
           <p class="staff-action-note">Daftar ini menentukan event dan gate yang dapat diakses petugas. Perubahan berlaku saat disimpan; sesi tetap aktif.</p>
           {#if loadingEvents}<p class="staff-muted">Memuat katalog…</p>{:else if eventsError}<p class="staff-form-message staff-form-error" role="alert">{eventsError} Draft penugasan tetap tersedia setelah katalog dimuat ulang. <button class="staff-text-button" type="button" onclick={loadEvents}>Coba lagi</button></p>{:else}{#key selectedId}<StaffAssignmentsEditor {events} bind:value={editAssignments} bind:pending={editAssignmentPending} disabled={saving || Boolean(selectedUncertain?.assignments)} />{/key}{/if}
           <button class="staff-secondary-button" type="submit" disabled={saving || Boolean(selectedUncertain?.assignments) || editAssignmentPending || loadingEvents || Boolean(eventsError)}>Simpan penugasan</button>
         </form>
-        <form class="staff-form" onsubmit={savePassword} aria-busy={saving}>
+        <form class="staff-form" hidden={editSection !== 2} onsubmit={savePassword} aria-busy={saving}>
           <h3 id="staff-password" tabindex="-1">Reset password</h3>
           <p class="staff-action-note">Reset password adalah tindakan terpisah dan mencabut semua sesi aktif petugas.</p>
           <label>Password baru<input bind:value={resetPassword} type="password" autocomplete="new-password" minlength="12" maxlength="128" required disabled={saving} readonly={Boolean(selectedUncertain?.password)} /></label>
           <small>Reset password mencabut semua sesi aktif milik petugas.</small>
           <button class="staff-secondary-button" type="submit" disabled={saving || Boolean(selectedUncertain?.password)}>Reset password</button>
         </form>
-      </div>
+      </div></div>
     </section>{/if}
     </div>
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Pengaturan akun dan akses event</span></footer>
@@ -380,8 +441,10 @@
   .staff-list li > button { justify-self: end; }
   .staff-list-help { margin: 0 0 16px; color: var(--scan-muted); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
   @media (max-width: 767px) { .staff-list-explanation { display: none; } }
-  .staff-section-nav { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 20px; }
-  .staff-section-nav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--scan-text); font-size: 14px; }
+  .staff-section-nav { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .staff-section-nav button { display: inline-flex; align-items: center; gap: 8px; white-space: normal; }
+  .staff-section-nav svg { flex-shrink: 0; }
+  .staff-section-nav [aria-current] { border-color: var(--admin-accent); background: var(--admin-input); }
   .staff-list-identity details span { display: block; margin-top: 4px; }
   .staff-list-identity summary { min-height: 44px; padding-block: 12px; color: var(--scan-text); font-size: 14px; line-height: 1.5; cursor: pointer; }
   .staff-list-identity summary:focus-visible { outline: 3px solid var(--scan-lime); outline-offset: 3px; }
@@ -397,10 +460,10 @@
   .staff-status { display: inline-block; padding: 4px 8px; border-radius: 2px; color: var(--admin-text); background: var(--admin-neutral-bg); font-size: 14px; line-height: 1.5; cursor: default; }
   .staff-status.is-active { background: var(--admin-active-bg); color: var(--admin-active-text); }
   .staff-edit-panel { margin-top: 0; }
-  .staff-edit-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-  .staff-edit-grid :global(.staff-form + .staff-form) { border-top: 1px solid var(--admin-border); padding-top: 24px; }
+  .staff-edit-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .staff-create-actions { display: flex; flex-wrap: wrap; gap: 12px; }
   .staff-create-actions > button { flex: 1 1 auto; margin: 0; }
+  .staff-create-panel .staff-submit { width: 100%; }
   .staff-panel-heading { flex-wrap: wrap; }
   .staff-panel-heading h2 { overflow-wrap: anywhere; }
   #staff-result:not(:empty) { margin-bottom: 16px; }
@@ -410,9 +473,28 @@
   .staff-workspace :global(button), .staff-list li { min-height: 44px; }
   .staff-workspace :global(.staff-assignment-list li) { min-height: 52px; overflow-wrap: anywhere; }
   .staff-workspace :global(.staff-assignment-controls) { grid-template-columns: minmax(0, 1fr); }
+  .staff-create-panel, .staff-edit-grid { container: staff-form / inline-size; }
+  .staff-create-panel .staff-form, .staff-edit-grid .staff-form { margin: 0; gap: 12px; }
+  .staff-form-fields { display: grid; gap: 12px; }
+  .staff-form-fields label, .staff-edit-grid label { display: grid; gap: 6px; min-width: 0; }
+  .staff-create-panel h3 { margin: 0 0 16px; }
+  .staff-edit-grid h3 { margin: 0 0 4px; }
+  .staff-create-content > .staff-action-note { margin-bottom: 12px; }
+  .staff-review { display: grid; gap: 12px; margin: 0; }
+  .staff-review > div { display: grid; gap: 6px; }
+  .staff-review dt { color: var(--scan-muted); }
+  .staff-review dd, .staff-review ul { margin: 0; overflow-wrap: anywhere; }
+  .staff-review ul { padding-left: 20px; }
+  .staff-workspace [hidden] { display: none; }
+  @container staff-form (min-width: 35em) {
+    .staff-form-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .staff-form-fields > label:last-child { grid-column: 1 / -1; }
+    .staff-review > div { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+    .staff-workspace :global(.staff-assignment-controls) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  }
   @media (max-width: 767px) {
+    .staff-create-content { container: staff-form / inline-size; }
     .staff-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
-    .staff-list-identity { grid-column: 1 / -1; }
     .staff-list li > button { justify-self: end; }
     .staff-filter-toggle { display: inline-flex; justify-content: center; }
     .staff-list-filters { grid-template-columns: minmax(0, 1fr); }

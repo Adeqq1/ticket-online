@@ -10,6 +10,13 @@
   import { createRequestVersion } from "../../lib/request-version.ts";
   import { adminDate, adminTime, auditSummary, caseStatus, emailRetryActionLabel, emailFailureReason, emailRetryConfirmed, emailKind, emailStatus, orderStatusLabel, paymentStatusLabel, providerStatusLabel } from "../../lib/admin-operations.ts";
 
+  let layout: ReturnType<typeof AdminLayout>;
+  async function confirmAction(title: string, message: string, confirmLabel: string) {
+    const token = accessToken;
+    const before = confirmationState();
+    return await layout.confirm({ title, message, confirmLabel }) && token === accessToken && before === confirmationState();
+  }
+  const confirmationState = () => JSON.stringify([view, detailId, selectedCase, selectedEmail, note, uncertainOperation, busy, detailLoading, detailRequests.value()]);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let caseGroup = $state(0); let emailGroup = $state(0);
   let caseScroll = $state(0); let emailScroll = $state(0);
@@ -67,7 +74,7 @@
   }
   async function backToList() {
     if (busy || uncertainOperation) return;
-    if (note.trim() && !window.confirm("Tinggalkan catatan yang belum disimpan?")) return;
+    if (note.trim() && !(await confirmAction("Buang perubahan?", "Tinggalkan catatan yang belum disimpan?", "Buang perubahan"))) return;
     const index = (triggerId.startsWith("case-") ? cases : emails).findIndex(item => triggerId.endsWith(`-${item.id}`));
     if (mobileList.current && index >= 0) {
       if (triggerId.startsWith("case-") && caseGroup !== Math.floor(index / 5)) { caseGroup = Math.floor(index / 5); caseScroll = 0; }
@@ -93,8 +100,8 @@
     const baseline = { historyCount: selectedCase?.history.length ?? selectedEmail?.history.length ?? 0, lastCheckedAt: selectedCase?.lastCheckedAt ?? null, retryJobId: selectedEmail?.retryJobId ?? null, emailHistory: selectedEmail?.history ?? [] };
     if ((action === "retry" && (!emailId || !selectedEmail?.canRetry)) || (action !== "retry" && !caseId)) return;
     if (action === "resolve" && !noteText.trim()) return;
-    if (action === "resolve" && !window.confirm(`Tutup kasus pembayaran ${selectedCase?.reference} dengan catatan: “${noteText.trim()}”? Tindakan ini hanya menutup kasus dan tidak melakukan refund.`)) return;
-    if (action === "retry" && !window.confirm(`${emailRetryActionLabel(selectedEmail!)}\nJadwalkan ulang email untuk ${selectedEmail?.reference} ke ${selectedEmail?.recipient || "alamat penerima belum tersedia"}?`)) return;
+    if (action === "resolve" && !(await confirmAction("Tutup kasus?", `Tutup kasus pembayaran ${selectedCase?.reference} dengan catatan: “${noteText.trim()}”? Tindakan ini hanya menutup kasus dan tidak melakukan refund.`, "Tutup kasus"))) return;
+    if (action === "retry" && !(await confirmAction("Jadwalkan ulang email?", `${emailRetryActionLabel(selectedEmail!)}\nJadwalkan ulang email untuk ${selectedEmail?.reference} ke ${selectedEmail?.recipient || "alamat penerima belum tersedia"}?`, "Jadwalkan ulang email"))) return;
     const kind = action === "retry" ? "email" : "case";
     busy = true; error = ""; message = "";
     try {
@@ -152,22 +159,17 @@
   }
   function time(value: string | null) { return value ? new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "medium" }) + " WIB" : "Belum pernah"; }
   function money(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value); }
-  function protectUnload(event: BeforeUnloadEvent) { if (busy || uncertainOperation || note.trim()) { event.preventDefault(); event.returnValue = ""; } }
-  onMount(() => {
-    void load();
-    const protectNavigation = (event: MouseEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest("a[href]")) return;
-      if (busy || uncertainOperation) { event.preventDefault(); message = "Selesaikan pemeriksaan hasil tindakan sebelum meninggalkan halaman."; }
-      else if (note.trim() && !window.confirm("Tinggalkan catatan yang belum disimpan?")) event.preventDefault();
-    };
-    document.addEventListener("click", protectNavigation, true);
-    return () => document.removeEventListener("click", protectNavigation, true);
-  });
+  function protectUnload(event: BeforeUnloadEvent) { if (!layout?.consumeNavigationApproval() && (busy || uncertainOperation || note.trim())) { event.preventDefault(); event.returnValue = ""; } }
+  async function allowNavigation() {
+    if (busy || uncertainOperation) { message = "Selesaikan pemeriksaan hasil tindakan sebelum meninggalkan halaman."; return false; }
+    return !note.trim() || await confirmAction("Buang perubahan?", "Tinggalkan catatan yang belum disimpan?", "Buang perubahan");
+  }
+  onMount(() => { void load(); });
 </script>
 
 <svelte:window onbeforeunload={protectUnload} />
 <svelte:head><title>Penanganan masalah | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-  <AdminLayout page="issues" mobileDescriptionHelp={view === "list"} contentId="issues-content" skipLabel="Lewati ke penanganan masalah" kicker="OPERASIONAL EVENT • ADMIN" title="Penanganan masalah." description="Periksa pembayaran terlambat dan email yang gagal dikirim." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || busy || Boolean(uncertainOperation)} secondaryAction={view !== "email" ? { label: "Muat ulang", onclick: refresh, disabled: loading || busy || detailLoading } : undefined}>
+  <AdminLayout bind:this={layout} onBeforeNavigate={allowNavigation} page="issues" mobileDescriptionHelp={view === "list"} contentId="issues-content" skipLabel="Lewati ke penanganan masalah" kicker="OPERASIONAL EVENT • ADMIN" title="Penanganan masalah." description="Periksa pembayaran terlambat dan email yang gagal dikirim." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || busy || Boolean(uncertainOperation)} secondaryAction={view !== "email" ? { label: "Muat ulang", onclick: refresh, disabled: loading || busy || detailLoading } : undefined}>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
     {#if message}<div id="issue-feedback" tabindex="-1" class="issue-action-feedback" role="status">{message}</div>{/if}
     {#if view !== "list" && (caseError || emailError)}<p class="staff-form-message staff-form-error" role="alert">Pembaruan daftar gagal. Data terakhir tetap tersedia; hasil tindakan yang sudah berhasil tetap berlaku. {caseError} {emailError}</p>{/if}
@@ -176,15 +178,37 @@
       <section class="staff-admin-panel checkin-history-panel" aria-labelledby="case-list-title"><div class="staff-panel-heading"><h2 id="case-list-title" tabindex="-1">Rekonsiliasi pembayaran</h2></div>
         {#if caseLoading}<p role="status" class="staff-muted">Memuat kasus pembayaran…</p>{/if}
         {#if caseError}<p role="alert" class="staff-form-message staff-form-error">{casesLoaded ? "Pembaruan gagal. Data terakhir tetap ditampilkan. " : ""}{caseError} <button class="staff-text-button" disabled={caseLoading} onclick={loadCases}>Coba lagi</button></p>{/if}
-        {#if cases.length}<AdminMobileList count={cases.length} bind:group={caseGroup} bind:scrollLeft={caseScroll} headingId="case-list-title" hasMore={Boolean(caseCursor)} loadMore={() => more("cases")} disabled={busy || caseLoading}><div class="history-table-wrap"><table class="history-table"><thead><tr><th>Nomor pesanan</th><th>Event</th><th>Status</th><th>Provider</th><th>Terakhir diperiksa</th><th>Aksi</th></tr></thead><tbody>{#each mobileListItems(cases, caseGroup, mobileList.current) as item (item.id)}<tr class:admin-mobile-card={mobileList.current}><td data-label="Nomor pesanan"><code>{item.reference}</code></td><td data-label="Event">{item.eventName}</td><td data-label="Status">{#if mobileList.current}<div class="admin-card-statuses"><span class="admin-order-status" class:is-paid={item.orderStatus === "PAID"} class:is-expired={item.orderStatus === "EXPIRED"}>Pesanan: {orderStatusLabel(item.orderStatus)}</span><span class="admin-order-status" class:is-paid={item.paymentStatus === "SUCCEEDED"} class:is-expired={item.paymentStatus === "FAILED"}>Pembayaran: {paymentStatusLabel(item.paymentStatus)}</span></div>{:else}{orderStatusLabel(item.orderStatus)}<small>{paymentStatusLabel(item.paymentStatus)}</small>{/if}</td><td data-label="Provider">{providerStatusLabel(item.providerStatus)}</td><td data-label="Terakhir diperiksa">{#if mobileList.current && item.lastCheckedAt}<time datetime={item.lastCheckedAt}><span class="admin-card-date">{adminDate.format(new Date(item.lastCheckedAt))}</span><span class="admin-card-date">{adminTime.format(new Date(item.lastCheckedAt))} WIB</span></time>{:else}{time(item.lastCheckedAt)}{/if}</td><td data-label="Aksi"><button id={`case-${item.id}`} class="staff-text-button" disabled={busy} onclick={() => openDetail("case", item.id)}>Detail</button></td></tr>{/each}</tbody></table></div></AdminMobileList>{:else if casesLoaded && !caseError && !caseLoading}<p class="staff-muted">Tidak ada kasus pembayaran terbuka.</p>{/if}
+        {#if cases.length}<AdminMobileList count={cases.length} bind:group={caseGroup} bind:scrollLeft={caseScroll} headingId="case-list-title" hasMore={Boolean(caseCursor)} loadMore={() => more("cases")} disabled={busy || caseLoading}>{#if mobileList.current}<ul class="admin-mobile-list">
+          {#each mobileListItems(cases, caseGroup, true) as item (item.id)}<li class="admin-mobile-card">
+            <div class="admin-mobile-card-header"><strong>{item.reference}</strong><span class="admin-order-status" class:is-paid={item.orderStatus === "PAID"} class:is-expired={item.orderStatus === "EXPIRED"}>Pesanan: {orderStatusLabel(item.orderStatus)}</span></div>
+            <dl class="admin-card-fields">
+              <div><dt>Konser</dt><dd>{item.eventName}</dd></div>
+              <div><dt>Pembayaran</dt><dd><span class="admin-order-status" class:is-paid={item.paymentStatus === "SUCCEEDED"} class:is-expired={item.paymentStatus === "FAILED"}>{paymentStatusLabel(item.paymentStatus)}</span></dd></div>
+              <div><dt>Provider</dt><dd>{providerStatusLabel(item.providerStatus)}</dd></div>
+              <div><dt>Terakhir diperiksa</dt><dd>{#if item.lastCheckedAt}<time datetime={item.lastCheckedAt}><span class="admin-card-date">{adminDate.format(new Date(item.lastCheckedAt))}</span><span class="admin-card-date">{adminTime.format(new Date(item.lastCheckedAt))} WIB</span></time>{:else}{time(item.lastCheckedAt)}{/if}</dd></div>
+            </dl>
+            <button id={`case-${item.id}`} class="staff-text-button" type="button" disabled={busy} onclick={() => openDetail("case", item.id)}>Detail</button>
+          </li>{/each}
+        </ul>{:else}<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Nomor pesanan</th><th>Event</th><th>Status</th><th>Provider</th><th>Terakhir diperiksa</th><th>Aksi</th></tr></thead><tbody>{#each mobileListItems(cases, caseGroup, mobileList.current) as item (item.id)}<tr><td data-label="Nomor pesanan"><code>{item.reference}</code></td><td data-label="Event">{item.eventName}</td><td data-label="Status">{orderStatusLabel(item.orderStatus)}<small>{paymentStatusLabel(item.paymentStatus)}</small></td><td data-label="Provider">{providerStatusLabel(item.providerStatus)}</td><td data-label="Terakhir diperiksa">{time(item.lastCheckedAt)}</td><td data-label="Aksi"><button id={`case-${item.id}`} class="staff-text-button" disabled={busy} onclick={() => openDetail("case", item.id)}>Detail</button></td></tr>{/each}</tbody></table></div>{/if}</AdminMobileList>{:else if casesLoaded && !caseError && !caseLoading}<p class="staff-muted">Tidak ada kasus pembayaran terbuka.</p>{/if}
       </section>
       <section class="staff-admin-panel checkin-history-panel" aria-labelledby="email-list-title"><div class="staff-panel-heading"><h2 id="email-list-title" tabindex="-1">Email gagal</h2></div>
         {#if emailLoading}<p role="status" class="staff-muted">Memuat email gagal…</p>{/if}
         {#if emailError}<p role="alert" class="staff-form-message staff-form-error">{emailsLoaded ? "Pembaruan gagal. Data terakhir tetap ditampilkan; status mungkin sudah berubah. " : ""}{emailError} <button class="staff-text-button" disabled={emailLoading} onclick={loadEmails}>Coba lagi</button></p>{/if}
-        {#if emails.length}<AdminMobileList count={emails.length} bind:group={emailGroup} bind:scrollLeft={emailScroll} headingId="email-list-title" hasMore={Boolean(emailCursor)} loadMore={() => more("emails")} disabled={busy || emailLoading}><div class="history-table-wrap"><table class="history-table"><thead><tr><th>Nomor pesanan</th><th>Jenis email</th><th>Status</th><th>Alasan gagal</th>{#if mobileList.current}<th>Terakhir diperbarui</th>{/if}<th>Aksi</th></tr></thead><tbody>{#each mobileListItems(emails, emailGroup, mobileList.current) as item (item.id)}<tr class:admin-mobile-card={mobileList.current}><td data-label="Nomor pesanan"><div><code>{item.reference}</code><small>{item.recipient || "Alamat penerima belum tersedia"}</small></div></td><td data-label="Jenis email">{emailKind(item.kind)}</td><td data-label="Status"><span class="admin-order-status" class:is-expired={item.status === "FAILED"} class:is-paid={item.status === "SENT"}>{emailStatus(item.status)}</span></td><td data-label="Alasan gagal">{emailFailureReason(item.lastError)}</td>{#if mobileList.current}<td data-label="Terakhir diperbarui"><time datetime={item.updatedAt}><span class="admin-card-date">{adminDate.format(new Date(item.updatedAt))}</span><span class="admin-card-date">{adminTime.format(new Date(item.updatedAt))} WIB</span></time></td>{/if}<td data-label="Aksi"><button id={`email-${item.id}`} class="staff-text-button" aria-label={`Lihat detail email ${item.reference}`} disabled={busy} onclick={() => openDetail("email", item.id)}>Lihat detail</button></td></tr>{/each}</tbody></table></div></AdminMobileList>{:else if emailsLoaded && !emailError && !emailLoading}<p class="staff-muted">Tidak ada email gagal yang belum digantikan pada respons daftar ini.</p>{/if}
+        {#if emails.length}<AdminMobileList count={emails.length} bind:group={emailGroup} bind:scrollLeft={emailScroll} headingId="email-list-title" hasMore={Boolean(emailCursor)} loadMore={() => more("emails")} disabled={busy || emailLoading}>{#if mobileList.current}<ul class="admin-mobile-list">
+          {#each mobileListItems(emails, emailGroup, true) as item (item.id)}<li class="admin-mobile-card">
+            <div class="admin-mobile-card-header"><strong>{item.reference}</strong><span class="admin-order-status" class:is-expired={item.status === "FAILED"} class:is-paid={item.status === "SENT"}>{emailStatus(item.status)}</span></div>
+            <dl class="admin-card-fields">
+              <div><dt>Penerima</dt><dd>{item.recipient || "Alamat penerima belum tersedia"}</dd></div>
+              <div><dt>Jenis email</dt><dd>{emailKind(item.kind)}</dd></div>
+              <div><dt>Alasan gagal</dt><dd>{emailFailureReason(item.lastError)}</dd></div>
+              <div><dt>Terakhir diperbarui</dt><dd><time datetime={item.updatedAt}><span class="admin-card-date">{adminDate.format(new Date(item.updatedAt))}</span><span class="admin-card-date">{adminTime.format(new Date(item.updatedAt))} WIB</span></time></dd></div>
+            </dl>
+            <button id={`email-${item.id}`} class="staff-text-button" type="button" aria-label={`Lihat detail email ${item.reference}`} disabled={busy} onclick={() => openDetail("email", item.id)}>Lihat detail</button>
+          </li>{/each}
+        </ul>{:else}<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Nomor pesanan</th><th>Jenis email</th><th>Status</th><th>Alasan gagal</th><th>Aksi</th></tr></thead><tbody>{#each mobileListItems(emails, emailGroup, mobileList.current) as item (item.id)}<tr><td data-label="Nomor pesanan"><div><code>{item.reference}</code><small>{item.recipient || "Alamat penerima belum tersedia"}</small></div></td><td data-label="Jenis email">{emailKind(item.kind)}</td><td data-label="Status"><span class="admin-order-status" class:is-expired={item.status === "FAILED"} class:is-paid={item.status === "SENT"}>{emailStatus(item.status)}</span></td><td data-label="Alasan gagal">{emailFailureReason(item.lastError)}</td><td data-label="Aksi"><button id={`email-${item.id}`} class="staff-text-button" aria-label={`Lihat detail email ${item.reference}`} disabled={busy} onclick={() => openDetail("email", item.id)}>Lihat detail</button></td></tr>{/each}</tbody></table></div>{/if}</AdminMobileList>{:else if emailsLoaded && !emailError && !emailLoading}<p class="staff-muted">Tidak ada email gagal yang belum digantikan pada respons daftar ini.</p>{/if}
       </section>
     </div>{:else}
-      {#if view === "case"}<button class="staff-secondary-button" disabled={busy || Boolean(uncertainOperation)} onclick={backToList}>Kembali ke daftar</button>{/if}
+      {#if view === "case" || mobileList.current}<button class="staff-secondary-button" disabled={busy || Boolean(uncertainOperation)} onclick={backToList}>Kembali ke daftar</button>{/if}
       <div class="issue-detail-heading"><h2 id="issue-detail-title" tabindex="-1">{view === "email" ? `Email ${selectedEmail?.reference ?? "yang dipilih"}` : `Kasus ${selectedCase?.reference ?? "yang dipilih"}`}</h2>
         {#if view === "email" && detailId}<button id="email-status-refresh" class="staff-secondary-button admin-icon-button" type="button" aria-label="Periksa status pengiriman" title="Periksa status pengiriman" disabled={busy || detailLoading} onclick={refreshDetail}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5" /><path d="M4 17v-5h5" /><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" /></svg></button>{/if}
       </div>

@@ -22,8 +22,8 @@
 </script>
 
 <fieldset class="staff-assignment-editor" {disabled}>
-  <legend>Penugasan event dan gate</legend>
-  <p class="assignment-help">Pilih event → pilih gate → Tambah → {mode === "create" ? "Buat akun petugas" : "Simpan penugasan"}.</p>
+  <legend class="visually-hidden">Penugasan event dan gate</legend>
+  <p class="assignment-help">Pilih event → pilih gate → Tambah → {mode === "create" ? "Tinjau → Buat akun petugas" : "Simpan penugasan"}.</p>
   <p class="assignment-help">Tambah memasukkan pilihan ke draft. {mode === "create" ? "Penugasan disimpan bersama tombol Buat akun petugas." : "Akses baru berlaku setelah Simpan penugasan berhasil."}</p>
   {#if events.length}
     <div class="staff-assignment-controls">
