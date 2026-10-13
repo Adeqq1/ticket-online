@@ -3,8 +3,8 @@
   import type { HTMLInputAttributes } from "svelte/elements";
   import { calendarDateLabel, calendarDays, calendarMonths, calendarWeekdays, dateFieldValue, daysInMonth, displayDate, isoDate, mondayIndex, parseDisplayDate, parseISODate, shiftCalendarDate, shiftCalendarMonth, type DateMode, type TimePrecision } from "../../lib/admin-date.ts";
 
-  let { value = $bindable(""), pending = $bindable(false), id, label, showLabel = true, mode = "date", precision = "minute", disabled = false, active = true, resetKey = 0, required = false, name, min, max, "aria-describedby": describedBy, "aria-invalid": ariaInvalid }: {
-    value?: string; pending?: boolean; id: string; label: string; showLabel?: boolean; mode?: DateMode; precision?: TimePrecision; active?: boolean; resetKey?: number;
+  let { value = $bindable(""), pending = $bindable(false), id, label, showLabel = true, mode = "date", precision = "minute", timeZone, disabled = false, active = true, resetKey = 0, required = false, name, min, max, "aria-describedby": describedBy, "aria-invalid": ariaInvalid }: {
+    value?: string; pending?: boolean; id: string; label: string; showLabel?: boolean; mode?: DateMode; precision?: TimePrecision; timeZone?: string; active?: boolean; resetKey?: number;
   } & Pick<HTMLInputAttributes, "disabled" | "required" | "name" | "min" | "max" | "aria-describedby" | "aria-invalid"> = $props();
   let field: HTMLInputElement;
   let trigger: HTMLButtonElement;
@@ -84,8 +84,9 @@
   }
   async function show() {
     if (disabled || !active || field.matches(":disabled")) return;
-    const now = new Date();
-    today = isoDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric", month: "numeric", day: "numeric" }).formatToParts(new Date());
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find(item => item.type === type)!.value);
+    today = isoDate(part("year"), part("month"), part("day"));
     focused = parseDisplayDate(date) ?? today;
     field.blur();
     dialog.showModal(); open = true;
@@ -138,7 +139,7 @@
 <div class="admin-date-field">
   {#if showLabel}<label for={id}>{label}</label>{/if}
   <div class="date-entry">
-    <input bind:this={field} {id} {name} type="text" inputmode="numeric" autocomplete="off" placeholder="DD/MM/YYYY" maxlength="10" value={date} oninput={typeDate} {required} {disabled} aria-describedby={describedBy} aria-invalid={ariaInvalid ?? (pending ? "true" : undefined)} />
+    <input bind:this={field} {id} {name} type="text" inputmode="text" autocomplete="off" placeholder="DD/MM/YYYY" maxlength="10" value={date} oninput={typeDate} {required} {disabled} aria-describedby={describedBy} aria-invalid={ariaInvalid ?? (pending ? "true" : undefined)} />
     <button bind:this={trigger} class="date-trigger" type="button" {disabled} aria-label={`Buka kalender ${label}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={`${id}-calendar`} onclick={show}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M5 5h14v15H5zM8 3v4m8-4v4M5 10h14" /></svg></button>
   </div>
   {#if mode === "datetime"}

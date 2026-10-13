@@ -229,8 +229,8 @@
         <label>Nomor pesanan<input bind:value={query} maxlength="32" placeholder="Cari nomor pesanan" disabled={loading} /></label>
         <label>Event<select bind:value={eventId} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
         <label>Status<select bind:value={status} disabled={loading}><option value="">Semua status</option><option value="PENDING">Menunggu pembayaran</option><option value="PAID">Lunas</option><option value="CANCELLED">Dibatalkan</option><option value="EXPIRED">Kedaluwarsa</option><option value="REFUND_PENDING">Refund diproses</option><option value="REFUNDED">Refund berhasil</option></select></label>
-        <AdminDateField id="orders-date-from" label="Dibuat sejak (WIB)" bind:value={dateFrom} resetKey={dateReset} disabled={loading} active={!mobile || searchOpen} />
-        <AdminDateField id="orders-date-to" label="Dibuat sampai (WIB)" bind:value={dateTo} resetKey={dateReset} disabled={loading} active={!mobile || searchOpen} />
+        <AdminDateField timeZone="Asia/Jakarta" id="orders-date-from" label="Dibuat sejak (WIB)" bind:value={dateFrom} resetKey={dateReset} disabled={loading} active={!mobile || searchOpen} />
+        <AdminDateField timeZone="Asia/Jakarta" id="orders-date-to" label="Dibuat sampai (WIB)" bind:value={dateTo} resetKey={dateReset} disabled={loading} active={!mobile || searchOpen} />
         <div class="history-filter-actions"><button class="scan-submit" type="submit" disabled={loading}>Cari</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
       </form>
     </section>
@@ -283,7 +283,7 @@
           <p>Catat hanya transfer penuh yang sudah berhasil. Form ini mencatat bukti dan tidak mengirim uang.</p>
           <div id="manual-evidence" class="manual-evidence" hidden={manualStep !== 0}>
           <label>Referensi transfer<input bind:value={manualReference} minlength="3" maxlength="160" required disabled={refundBusy || uncertainManual}/></label>
-          <AdminDateField id="manual-paid-at" label="Waktu transfer (WIB)" mode="datetime" precision="second" bind:value={manualPaidAt} bind:pending={manualDatePending} active={manualStep === 0} required disabled={refundBusy || uncertainManual} />
+          <AdminDateField timeZone="Asia/Jakarta" id="manual-paid-at" label="Waktu transfer (WIB)" mode="datetime" precision="second" bind:value={manualPaidAt} bind:pending={manualDatePending} active={manualStep === 0} required disabled={refundBusy || uncertainManual} />
           <label>Catatan bukti<textarea rows="3" bind:value={manualNote} minlength="3" maxlength="500" required disabled={refundBusy || uncertainManual}></textarea></label>
           </div>
           <div hidden={manualStep !== 1}>

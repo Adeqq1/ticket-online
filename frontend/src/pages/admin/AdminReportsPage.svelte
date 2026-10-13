@@ -94,8 +94,8 @@
     <AdminMobileFilters id="reports-mobile-filters" title="Filter laporan">
     <form class="history-filter-form sales-report-filters" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each eventOptions as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
-      <AdminDateField id="sales-date-from" label="Dari tanggal WIB" bind:value={dateFrom} resetKey={dateReset} required />
-      <AdminDateField id="sales-date-to" label="Sampai tanggal WIB" bind:value={dateTo} resetKey={dateReset} required />
+      <AdminDateField timeZone="Asia/Jakarta" id="sales-date-from" label="Dari tanggal WIB" bind:value={dateFrom} resetKey={dateReset} required />
+      <AdminDateField timeZone="Asia/Jakarta" id="sales-date-to" label="Sampai tanggal WIB" bind:value={dateTo} resetKey={dateReset} required />
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
     </form>
     </AdminMobileFilters>

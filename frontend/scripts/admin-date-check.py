@@ -3,6 +3,7 @@ import asyncio
 import sys
 sys.dont_write_bytecode = True
 from copy import deepcopy
+from datetime import datetime, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +20,9 @@ async def calendar(page, field_id, required=False, seconds=False):
     wrapper = field.locator("xpath=../..")
     trigger = wrapper.locator(".date-trigger")
     popup = page.locator("#" + field_id + "-calendar")
+    today = "2026-10-12" if field_id.startswith("voucher-") else "2026-10-13"
+    today_display = "12/10/2026" if field_id.startswith("voucher-") else "13/10/2026"
+    await expect(field).to_have_attribute("inputmode", "text")
     original = await field.input_value()
     await trigger.click()
     await expect(popup).to_be_visible()
@@ -54,12 +58,21 @@ async def calendar(page, field_id, required=False, seconds=False):
     await expect(field).to_have_value("")
     assert await field.evaluate("el => el.checkValidity()") == (not required)
     await trigger.click()
+    await expect(popup.locator(f'[data-date="{today}"][aria-current="date"]')).to_be_focused()
     await popup.get_by_role("button", name="Hari ini", exact=True).click()
+    await expect(field).to_have_value(today_display)
     assert await field.evaluate("el => el.checkValidity()")
     if await wrapper.locator(".date-time").count():
         for part in ("Jam", "Menit", "Detik") if seconds else ("Jam", "Menit"):
             await expect(wrapper.get_by_label(part + " ", exact=False)).to_have_value("00")
-        await wrapper.locator(".date-time input").first.fill("23")
+        time = ("23", "47", "58") if seconds else ("23", "47")
+        for i, value in enumerate(time):
+            await wrapper.locator(".date-time input").nth(i).fill(value)
+        await trigger.click()
+        await popup.get_by_role("button", name="Hari ini", exact=True).click()
+        await expect(field).to_have_value(today_display)
+        for i, value in enumerate(time):
+            await expect(wrapper.locator(".date-time input").nth(i)).to_have_value(value)
         await field.fill("29/02/2024")
         await trigger.click()
         await popup.locator('[data-date="2024-02-28"]').click()
@@ -122,6 +135,7 @@ async def check(browser, base, width):
     context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="America/New_York")
     await context.add_init_script(admin.SESSION_INIT)
     page = await context.new_page()
+    await page.clock.set_fixed_time(datetime(2026, 10, 12, 19, 30, tzinfo=timezone.utc))
     errors, requests, previews, vouchers = [], [], [], []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("dialog", lambda dialog: dialog.accept())
@@ -163,6 +177,13 @@ async def check(browser, base, width):
         await page.get_by_role("button", name="Terapkan", exact=True).click()
         await page.wait_for_timeout(100)
         assert parse_qs(urlparse(requests[-1]).query)["dateFrom"] == ["2024-02-29"]
+        for suffix in ("from", "to"):
+            await page.locator(f"#{prefix}-date-{suffix}").locator("xpath=../..").locator(".date-trigger").click()
+            await page.locator(f"#{prefix}-date-{suffix}-calendar").get_by_role("button", name="Hari ini", exact=True).click()
+        await page.get_by_role("button", name="Terapkan", exact=True).click()
+        await page.wait_for_timeout(100)
+        query = parse_qs(urlparse(requests[-1]).query)
+        assert query["dateFrom"] == ["2026-10-13"] and query["dateTo"] == ["2026-10-13"], query
 
     await page.goto(base + "/admin/events")
     await page.locator("#event-manage-nusa-malam").click()
