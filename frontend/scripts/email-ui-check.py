@@ -12,6 +12,10 @@ from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
 
+confirmation_helpers = run_path(str(Path(__file__).with_name('admin-confirm.py')))
+answer_confirmation = confirmation_helpers['answer_confirmation']
+auto_confirm = confirmation_helpers['auto_confirm']
+
 common = run_path(str(Path(__file__).with_name('admin-ui-check.py')))
 style_audit = run_path(str(Path(__file__).with_name('staff-review-check.py')))['STYLE_AUDIT']
 JOB = 'e' * 32
@@ -43,7 +47,7 @@ async def fixtures(browser, base, output, width):
     results = []
     for scenario in ('standard', 'same-id', 'replacement', 'unproven', 'rejected', 'rate-limit', 'expired', 'refresh-error', 'detail-error', 'success-refresh-error', 'recovery-new-request', 'queued-same-id', 'queued-replacement'):
         print(f'Checking email: {width}px {scenario}', flush=True)
-        context = await browser.new_context(viewport={'width': width, 'height': 900}, timezone_id='Asia/Jakarta')
+        context = await browser.new_context(viewport={'width': width, 'height': 900}, timezone_id='Asia/Jakarta', has_touch=width < 768)
         await context.add_init_script(common['SESSION_INIT'])
         page = await context.new_page()
         page.on('dialog', lambda d: d.accept())
@@ -145,8 +149,14 @@ async def fixtures(browser, base, output, width):
             retry = page.get_by_role('button', name='Buat permintaan pemulihan baru' if scenario == 'recovery-new-request' else 'Kirim ulang email', exact=True)
             await expect(retry).to_be_visible()
             await audit(page)
+            if scenario == 'standard':
+                await retry.click()
+                await answer_confirmation(page, False)
+                assert state['posts'] == 0
+                await expect(retry).to_be_focused()
             if scenario != 'standard':
                 await retry.dblclick()
+                await answer_confirmation(page)
                 if scenario == 'expired':
                     await page.wait_for_url('**/admin/login')
                 elif scenario in ('same-id', 'replacement', 'unproven'):
@@ -257,6 +267,7 @@ async def real_backend(browser, args, output):
     await context.add_init_script('sessionStorage.setItem("ticket-online:staff-session", JSON.stringify(' + json.dumps(session) + '))')
     page = await context.new_page()
     page.on('dialog', lambda d: d.accept())
+    await auto_confirm(page)
     responses = []
 
     async def relay(route):

@@ -13,6 +13,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
+from runpy import run_path
+
+confirmation_helpers = run_path(str(Path(__file__).with_name('admin-confirm.py')))
+answer_confirmation = confirmation_helpers['answer_confirmation']
+auto_confirm = confirmation_helpers['auto_confirm']
 
 
 def fixture(name, filename):
@@ -203,17 +208,17 @@ async def check(browser, base, width):
     await fee.fill("9000")
     await expect(page.get_by_text("Perubahan belum disimpan.", exact=True)).to_be_visible()
     await expect(page.get_by_text("Pratinjau tanpa voucher:", exact=False)).to_contain_text("109.000")
-    page.once("dialog", lambda d: d.dismiss())
     await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await answer_confirmation(page, False)
     assert not saves
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("alert")).to_contain_text("Simpan belum berhasil")
     await expect(fee).to_have_value("9000")
     mode["save"] = 200
     mode["hold"] = asyncio.Event()
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(fee).to_be_disabled()
     await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_disabled()
     mode["hold"].set()
@@ -247,11 +252,11 @@ async def check(browser, base, width):
         await page.get_by_label("Kode voucher", exact=True).focus()
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         await page.set_viewport_size({"width": width, "height": 900})
-        page.once("dialog", lambda d: d.dismiss())
         await page.get_by_role("button", name="Batal", exact=True).click()
+        await answer_confirmation(page, False)
         await expect(page.get_by_label("Kode voucher", exact=True)).to_have_value("DRAFT")
-        page.once("dialog", lambda d: d.accept())
         await page.get_by_role("button", name="Batal", exact=True).click()
+        await answer_confirmation(page, True)
         await expect(page.locator("#voucher-create-opener")).to_be_focused()
         await page.locator("#voucher-create-opener").click()
         await expect(page.get_by_label("Kode voucher", exact=True)).to_have_value("")
@@ -302,8 +307,8 @@ async def check(browser, base, width):
     await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Voucher aktif", exact=True).check()
     await page.get_by_role("button", name="3. Tinjau", exact=True).click()
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Buat voucher", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
     if width < 768:
         await expect(page.locator("#voucher-manage-DUMMY50")).to_be_focused()
@@ -320,8 +325,8 @@ async def check(browser, base, width):
     await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Voucher aktif", exact=True).uncheck()
     await page.get_by_role("button", name="3. Tinjau", exact=True).click()
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.locator(".voucher-list, .voucher-table")).to_contain_text("Nonaktif")
     if width < 768:
         await expect(page.locator("#voucher-manage-DUMMY50")).to_be_focused()
@@ -332,8 +337,8 @@ async def check(browser, base, width):
         await page.get_by_label("Voucher aktif", exact=True).check()
         mode["hideSaved"] = True
         await page.get_by_role("button", name="3. Tinjau", exact=True).click()
-        page.once("dialog", lambda d: d.accept())
         await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
+        await answer_confirmation(page, True)
         await expect(page.locator("#pricing-feedback")).to_be_focused()
         await expect(page.locator("#pricing-feedback")).to_contain_text("belum tersedia di daftar")
         mode["hideSaved"] = False
@@ -508,8 +513,8 @@ async def check_loading(browser, base, width):
     mode["catalog"] = 200
     await page.get_by_role("button", name="Coba lagi katalog", exact=True).click()
     await expect(page.locator(".voucher-editor").get_by_role("button", name="Lanjutkan", exact=True)).to_be_enabled()
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Batal", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(fee).to_have_value("9000")
     sample = page.get_by_label("Subtotal tiket untuk pratinjau (Rp)")
     await sample.fill("123456"); await sample.press("Tab")
@@ -527,13 +532,13 @@ async def check_loading(browser, base, width):
     await page.get_by_role("button", name="Coba lagi", exact=True).click()
     await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_enabled()
     mode["save"] = "conflict"
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("alert")).to_contain_text("Penyimpanan ditolak")
     await expect(fee).to_have_value("9000")
     mode["save"] = "refresh-failed"
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("status").filter(has_text="Biaya admin tersimpan")).to_be_visible()
     await expect(page.get_by_text("Pembaruan data biaya dan voucher gagal.", exact=False)).to_be_visible()
     mode["read"] = 200
@@ -541,8 +546,8 @@ async def check_loading(browser, base, width):
     await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_enabled()
     await fee.fill("9500")
     mode["save"] = "lost"
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan biaya admin", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("alert")).to_contain_text("belum pasti")
     count = len(saves)
     await page.locator("form").first.dispatch_event("submit")
@@ -554,8 +559,8 @@ async def check_loading(browser, base, width):
     await page.get_by_label("Kode voucher", exact=True).fill("LOST50")
     await page.get_by_label("Nilai diskon (%)", exact=True).fill("15")
     await page.get_by_role("button", name="3. Tinjau", exact=True).click()
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Buat voucher", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("alert")).to_contain_text("belum pasti")
     count = len(saves)
     await page.locator("form").nth(1).dispatch_event("submit")
@@ -566,8 +571,8 @@ async def check_loading(browser, base, width):
     await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Voucher aktif", exact=True).check()
     await page.get_by_role("button", name="3. Tinjau", exact=True).click()
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
     assert not errors and await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), errors
     await page.screenshot(path=str(output / f"saved-{width}.png"), full_page=True)
@@ -589,6 +594,7 @@ async def check_save_recovery(browser, base, width, operation, scenario):
     await context.add_init_script(admin.SESSION_INIT)
     page = await context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
+    await auto_confirm(page)
     errors, requests = [], []
     page.on("pageerror", lambda error: errors.append(str(error)))
     voucher = {"code": "RECOVER15", "kind": "PERCENT", "value": 10, "startsAt": "2026-10-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z", "active": False, "eventId": "", "minimumSubtotal": 0, "quota": 100, "revision": 1}

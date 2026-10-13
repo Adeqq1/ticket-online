@@ -12,6 +12,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
+from runpy import run_path
+
+confirmation_helpers = run_path(str(Path(__file__).with_name('admin-confirm.py')))
+auto_confirm = confirmation_helpers['auto_confirm']
 
 
 async def main():
@@ -33,6 +37,7 @@ async def main():
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("response", lambda r: responses.append({"method": r.request.method, "path": urlparse(r.url).path, "status": r.status}) if "/api/v1/" in r.url else None)
         page.on("dialog", lambda dialog: dialog.accept())
+        await auto_confirm(page)
         await page.goto(base + "/admin/pricing")
         fee = page.get_by_label("Nominal tetap (Rp)", exact=True)
         await expect(fee).to_be_visible()

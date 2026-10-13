@@ -14,6 +14,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
+from runpy import run_path
+
+confirmation_helpers = run_path(str(Path(__file__).with_name('admin-confirm.py')))
+auto_confirm = confirmation_helpers['auto_confirm']
 from importlib.util import spec_from_file_location, module_from_spec
 
 spec = spec_from_file_location("admin_fixtures", Path(__file__).with_name("admin-ui-check.py"))
@@ -31,6 +35,7 @@ async def check(browser, base, width):
       URL.revokeObjectURL=(u)=>{window.posterURLs.revoked.push(u);revoke(u)};""")
     page = await context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
+    await auto_confirm(page)
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     event = deepcopy(fixtures.EVENT)

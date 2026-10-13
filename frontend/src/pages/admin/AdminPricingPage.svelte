@@ -18,6 +18,13 @@
   import { formatRupiah } from "../../lib/concerts.ts";
   import { parseRupiahInput, pricingHistoryFields, sameVoucher, uncertainPricingSave } from "../../lib/pricing-editor.ts";
 
+  let layout: ReturnType<typeof AdminLayout>;
+  async function confirmAction(title: string, message: string, confirmLabel: string) {
+    const token = accessToken;
+    const before = confirmationState();
+    return await layout.confirm({ title, message, confirmLabel }) && token === accessToken && before === confirmationState();
+  }
+  const confirmationState = () => JSON.stringify([fee, data?.settings, voucherState(), editing, pendingFee, pendingVoucher, saving, loading, loadingEvents, eventsError]);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let data = $state<PricingData>();
   let events = $state<AdminApiEvent[]>([]);
@@ -49,10 +56,10 @@
   const count = new Intl.NumberFormat("id-ID");
   function localTime(value: string) { const d = new Date(value); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
   function emptyVoucher(): Voucher { return { code: "", kind: "PERCENT", value: 10, startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 7 * 86400000).toISOString(), active: false, eventId: "", minimumSubtotal: 0, quota: 100, revision: 0 }; }
-  function discard() { return !dirty || window.confirm("Perubahan biaya atau voucher belum disimpan. Lanjutkan?"); }
+  async function discard() { return !dirty || (await confirmAction("Buang perubahan?", "Perubahan biaya atau voucher belum disimpan. Lanjutkan?", "Buang perubahan")); }
   function protect(event: BeforeUnloadEvent) { if (dirty || saving || pendingFee || pendingVoucher) { event.preventDefault(); event.returnValue = ""; } }
   async function choose(value?: Voucher) {
-    if (saving || pendingVoucher || (voucherState() !== voucherBaseline && !window.confirm("Buang perubahan voucher yang belum disimpan?"))) return;
+    if (saving || pendingVoucher || (voucherState() !== voucherBaseline && !(await confirmAction("Buang perubahan?", "Buang perubahan voucher yang belum disimpan?", "Buang perubahan")))) return;
     voucherListScroll = window.scrollY; voucherTrigger = value ? `voucher-manage-${value.code}` : "voucher-create-opener";
     voucherOpen = true; voucherStep = 0;
     draft = value ? { code: value.code, kind: value.kind, value: value.value, startsAt: value.startsAt, endsAt: value.endsAt, active: value.active, eventId: value.eventId, minimumSubtotal: value.minimumSubtotal, quota: value.quota, revision: value.revision } : emptyVoucher();
@@ -61,7 +68,7 @@
   }
   async function closeVoucher(saved = false) {
     if (!saved && (saving || pendingVoucher)) return;
-    if (!saved && voucherState() !== voucherBaseline && !window.confirm("Buang perubahan voucher yang belum disimpan?")) return;
+    if (!saved && voucherState() !== voucherBaseline && !(await confirmAction("Buang perubahan?", "Buang perubahan voucher yang belum disimpan?", "Buang perubahan"))) return;
     if (!saved) { const before = JSON.parse(voucherBaseline); draft = before.draft; starts = before.starts; ends = before.ends; }
     const index = data?.vouchers.findIndex(v => v.code === draft.code) ?? -1;
     if (saved && index >= 0 && voucherGroup !== Math.floor(index / mobileGroupSize)) {
@@ -120,7 +127,7 @@
   }
   async function saveFee(event: SubmitEvent) {
     event.preventDefault(); if (saving || loading || pendingFee || !data || fee === undefined || !Number.isSafeInteger(fee) || fee < 0 || fee > 1_000_000_000 || sampleValue === undefined) return;
-    if (!window.confirm(`Ubah biaya admin per order dari ${money(data.settings.adminFee)} menjadi ${money(fee)}? Hanya order baru yang terpengaruh.`)) return;
+    if (!(await confirmAction("Simpan biaya admin?", `Ubah biaya admin per order dari ${money(data.settings.adminFee)} menjadi ${money(fee)}? Hanya order baru yang terpengaruh.`, "Simpan biaya"))) return;
     const input = { adminFee: fee, revision: data.settings.revision };
     await sendFee(input);
   }
@@ -172,7 +179,7 @@
     if (!Number.isFinite(Date.parse(starts)) || !Number.isFinite(Date.parse(ends))) { error = "Isi awal dan akhir masa berlaku yang valid."; return; }
     const input = { ...draft, code: draft.code.trim().toUpperCase(), startsAt: starts === localTime(draft.startsAt) ? draft.startsAt : new Date(starts).toISOString(), endsAt: ends === localTime(draft.endsAt) ? draft.endsAt : new Date(ends).toISOString() };
     if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) { error = "Akhir masa berlaku harus setelah awal masa berlaku."; return; }
-    if (!window.confirm(`Simpan voucher ${input.code}: ${input.kind === "PERCENT" ? input.value + "%" : money(input.value)}, kuota ${input.quota}, ${input.active ? "aktif" : "nonaktif"}? Order yang sudah dibuat tetap memakai snapshot sebelumnya.`)) return;
+    if (!(await confirmAction("Simpan voucher?", `Simpan voucher ${input.code}: ${input.kind === "PERCENT" ? input.value + "%" : money(input.value)}, kuota ${input.quota}, ${input.active ? "aktif" : "nonaktif"}? Order yang sudah dibuat tetap memakai snapshot sebelumnya.`, "Simpan voucher"))) return;
     await sendVoucher(input, !editing);
   }
   async function sendVoucher(input: Voucher, creating: boolean) {
@@ -219,7 +226,7 @@
   {:else}<p class="history-empty staff-muted">{value == null ? "Belum ada" : "Rincian perubahan tidak tersedia."}</p>{/if}
 {/snippet}
 <svelte:head><title>Biaya dan voucher | Gate Control</title><meta name="robots" content="noindex" /></svelte:head>
-<AdminLayout page="pricing" contentId="pricing-content" skipLabel="Lewati ke biaya dan voucher" kicker="PENGATURAN BISNIS" title="Biaya dan voucher." description="Atur biaya per order dan promosi tanpa mengubah transaksi lama." onLogout={() => { if (!saving && discard()) onLogout(); }} {loggingOut} logoutDisabled={saving || loggingOut} secondaryAction={{ label: "Muat ulang", disabled: saving || loading, onclick: () => { void load(); } }}>
+<AdminLayout bind:this={layout} page="pricing" contentId="pricing-content" skipLabel="Lewati ke biaya dan voucher" kicker="PENGATURAN BISNIS" title="Biaya dan voucher." description="Atur biaya per order dan promosi tanpa mengubah transaksi lama." onLogout={async () => { if (!saving && await discard()) onLogout(); }} {loggingOut} logoutDisabled={saving || loggingOut} secondaryAction={{ label: "Muat ulang", disabled: saving || loading, onclick: () => { void load(); } }}>
   <div aria-live="polite">{#if loading}<p role="status">Memuat pengaturan…</p>{/if}{#if notice}<p id="pricing-feedback" tabindex="-1" class="staff-form-message" role="status">{notice}</p>{/if}{#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}{#if dirty}<p>Perubahan belum disimpan.</p>{/if}</div>
   {#if pricingError}<p class="staff-form-message staff-form-error" role="alert">{pricingError} <button class="staff-secondary-button" type="button" disabled={loading || saving} onclick={() => load()}>Coba lagi</button></p>{/if}
   {#if pendingFee || pendingVoucher}<p class="staff-form-message" role="status">Penyimpanan belum terkonfirmasi. Periksa hasilnya; jika belum terbukti, gunakan tindakan di bawah untuk mengirim perubahan awal yang sama.</p><button class="staff-secondary-button" type="button" disabled={loading || saving} onclick={() => load()}>Periksa hasil simpan</button>{/if}

@@ -10,6 +10,13 @@
   import { createRequestVersion } from "../../lib/request-version.ts";
   import { adminDate, adminTime, auditSummary, caseStatus, emailRetryActionLabel, emailFailureReason, emailRetryConfirmed, emailKind, emailStatus, orderStatusLabel, paymentStatusLabel, providerStatusLabel } from "../../lib/admin-operations.ts";
 
+  let layout: ReturnType<typeof AdminLayout>;
+  async function confirmAction(title: string, message: string, confirmLabel: string) {
+    const token = accessToken;
+    const before = confirmationState();
+    return await layout.confirm({ title, message, confirmLabel }) && token === accessToken && before === confirmationState();
+  }
+  const confirmationState = () => JSON.stringify([view, detailId, selectedCase, selectedEmail, note, uncertainOperation, busy, detailLoading, detailRequests.value()]);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let caseGroup = $state(0); let emailGroup = $state(0);
   let caseScroll = $state(0); let emailScroll = $state(0);
@@ -67,7 +74,7 @@
   }
   async function backToList() {
     if (busy || uncertainOperation) return;
-    if (note.trim() && !window.confirm("Tinggalkan catatan yang belum disimpan?")) return;
+    if (note.trim() && !(await confirmAction("Buang perubahan?", "Tinggalkan catatan yang belum disimpan?", "Buang perubahan"))) return;
     const index = (triggerId.startsWith("case-") ? cases : emails).findIndex(item => triggerId.endsWith(`-${item.id}`));
     if (mobileList.current && index >= 0) {
       if (triggerId.startsWith("case-") && caseGroup !== Math.floor(index / 5)) { caseGroup = Math.floor(index / 5); caseScroll = 0; }
@@ -93,8 +100,8 @@
     const baseline = { historyCount: selectedCase?.history.length ?? selectedEmail?.history.length ?? 0, lastCheckedAt: selectedCase?.lastCheckedAt ?? null, retryJobId: selectedEmail?.retryJobId ?? null, emailHistory: selectedEmail?.history ?? [] };
     if ((action === "retry" && (!emailId || !selectedEmail?.canRetry)) || (action !== "retry" && !caseId)) return;
     if (action === "resolve" && !noteText.trim()) return;
-    if (action === "resolve" && !window.confirm(`Tutup kasus pembayaran ${selectedCase?.reference} dengan catatan: “${noteText.trim()}”? Tindakan ini hanya menutup kasus dan tidak melakukan refund.`)) return;
-    if (action === "retry" && !window.confirm(`${emailRetryActionLabel(selectedEmail!)}\nJadwalkan ulang email untuk ${selectedEmail?.reference} ke ${selectedEmail?.recipient || "alamat penerima belum tersedia"}?`)) return;
+    if (action === "resolve" && !(await confirmAction("Tutup kasus?", `Tutup kasus pembayaran ${selectedCase?.reference} dengan catatan: “${noteText.trim()}”? Tindakan ini hanya menutup kasus dan tidak melakukan refund.`, "Tutup kasus"))) return;
+    if (action === "retry" && !(await confirmAction("Jadwalkan ulang email?", `${emailRetryActionLabel(selectedEmail!)}\nJadwalkan ulang email untuk ${selectedEmail?.reference} ke ${selectedEmail?.recipient || "alamat penerima belum tersedia"}?`, "Jadwalkan ulang email"))) return;
     const kind = action === "retry" ? "email" : "case";
     busy = true; error = ""; message = "";
     try {
@@ -152,13 +159,25 @@
   }
   function time(value: string | null) { return value ? new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "medium" }) + " WIB" : "Belum pernah"; }
   function money(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value); }
-  function protectUnload(event: BeforeUnloadEvent) { if (busy || uncertainOperation || note.trim()) { event.preventDefault(); event.returnValue = ""; } }
+  let approvedNavigation = false;
+  function protectUnload(event: BeforeUnloadEvent) { if (!approvedNavigation && (busy || uncertainOperation || note.trim())) { event.preventDefault(); event.returnValue = ""; } }
   onMount(() => {
     void load();
     const protectNavigation = (event: MouseEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest("a[href]")) return;
-      if (busy || uncertainOperation) { event.preventDefault(); message = "Selesaikan pemeriksaan hasil tindakan sebelum meninggalkan halaman."; }
-      else if (note.trim() && !window.confirm("Tinggalkan catatan yang belum disimpan?")) event.preventDefault();
+      if (!(event.target instanceof Element)) return;
+      const link = event.target.closest<HTMLAnchorElement>("a[href]");
+      if (!link) return;
+      if (busy || uncertainOperation) { event.preventDefault(); message = "Selesaikan pemeriksaan hasil tindakan sebelum meninggalkan halaman."; return; }
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.hasAttribute("download") || (link.target && link.target !== "_self")) return;
+      const destination = new URL(link.href);
+      if (destination.origin === location.origin && destination.pathname === location.pathname && destination.search === location.search && destination.hash) return;
+      if (!note.trim()) return;
+      event.preventDefault();
+      void confirmAction("Buang perubahan?", "Tinggalkan catatan yang belum disimpan?", "Buang perubahan").then((accepted) => {
+        if (!accepted) return;
+        approvedNavigation = true;
+        window.location.assign(destination.href);
+      });
     };
     document.addEventListener("click", protectNavigation, true);
     return () => document.removeEventListener("click", protectNavigation, true);
@@ -167,7 +186,7 @@
 
 <svelte:window onbeforeunload={protectUnload} />
 <svelte:head><title>Penanganan masalah | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-  <AdminLayout page="issues" mobileDescriptionHelp={view === "list"} contentId="issues-content" skipLabel="Lewati ke penanganan masalah" kicker="OPERASIONAL EVENT • ADMIN" title="Penanganan masalah." description="Periksa pembayaran terlambat dan email yang gagal dikirim." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || busy || Boolean(uncertainOperation)} secondaryAction={view !== "email" ? { label: "Muat ulang", onclick: refresh, disabled: loading || busy || detailLoading } : undefined}>
+  <AdminLayout bind:this={layout} page="issues" mobileDescriptionHelp={view === "list"} contentId="issues-content" skipLabel="Lewati ke penanganan masalah" kicker="OPERASIONAL EVENT • ADMIN" title="Penanganan masalah." description="Periksa pembayaran terlambat dan email yang gagal dikirim." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || busy || Boolean(uncertainOperation)} secondaryAction={view !== "email" ? { label: "Muat ulang", onclick: refresh, disabled: loading || busy || detailLoading } : undefined}>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
     {#if message}<div id="issue-feedback" tabindex="-1" class="issue-action-feedback" role="status">{message}</div>{/if}
     {#if view !== "list" && (caseError || emailError)}<p class="staff-form-message staff-form-error" role="alert">Pembaruan daftar gagal. Data terakhir tetap tersedia; hasil tindakan yang sudah berhasil tetap berlaku. {caseError} {emailError}</p>{/if}

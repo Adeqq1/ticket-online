@@ -18,6 +18,13 @@
   let searchOpen = $state(false);
   let mobileGroup = $state(0);
   let mobileScroll = $state(0);
+  let layout: ReturnType<typeof AdminLayout>;
+  async function confirmAction(title: string, message: string, confirmLabel: string) {
+    const token = accessToken;
+    const before = confirmationState();
+    return await layout.confirm({ title, message, confirmLabel }) && token === accessToken && before === confirmationState();
+  }
+  const confirmationState = () => JSON.stringify([selectedId, selectedEvent, mode, eventState(), zoneState(), tierState(), posterPending, posterUploading, changePanelDirty, saving]);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let events = $state<AdminApiEvent[]>([]);
   let selectedId = $state("");
@@ -71,8 +78,8 @@
   function protectUnsaved(event: BeforeUnloadEvent) {
     if (hasUnsaved || saving) { event.preventDefault(); event.returnValue = ""; }
   }
-  function allowDiscard() { return !hasUnsaved || window.confirm("Perubahan yang belum disimpan akan hilang. Lanjutkan?"); }
-  function requestLogout() { if (!saving && allowDiscard()) onLogout(); }
+  async function allowDiscard() { return !hasUnsaved || (await confirmAction("Buang perubahan?", "Perubahan yang belum disimpan akan hilang. Lanjutkan?", "Buang perubahan")); }
+  async function requestLogout() { if (!saving && await allowDiscard()) onLogout(); }
   function setChangePanelDirty(dirty: boolean) { changePanelDirty = dirty; }
   function suggestEventId() { if (!eventIdManual) draft.id = suggestAdminId(draft.artist); }
   function suggestZoneId() { if (!zoneIdManual) zoneDraft.id = suggestAdminId(zoneDraft.name); }
@@ -91,8 +98,8 @@
 
   $effect(() => { query; publicationFilter; mobileGroup = 0; mobileScroll = 0; });
 
-  function select(event: AdminApiEvent, discardChecked = false) {
-    if ((saving && !discardChecked) || event.id === selectedId || (!discardChecked && !allowDiscard())) return;
+  async function select(event: AdminApiEvent, discardChecked = false) {
+    if ((saving && !discardChecked) || event.id === selectedId || (!discardChecked && !await allowDiscard())) return;
     if (mode === "list") { listScroll = window.scrollY; listTrigger = `event-manage-${event.id}`; }
     mode = "edit"; section = 0; visited = 0; pendingSection = null;
     selectedId = event.id;
@@ -108,7 +115,7 @@
     void tick().then(() => document.getElementById("event-editor-title")?.focus());
   }
   async function startNew() {
-    if (saving || !allowDiscard()) return;
+    if (saving || !await allowDiscard()) return;
     if (mode === "list") listScroll = window.scrollY;
     listTrigger = "event-create-opener"; mode = "create"; section = 0; visited = 0; pendingSection = null;
     selectedId = ""; draft = emptyEvent(); lineupText = ""; eventIdManual = false; zoneIdManual = false; tierIdManual = false;
@@ -118,7 +125,7 @@
     document.getElementById("event-editor-title")?.focus();
   }
   async function backToList(resultNotice = "") {
-    if (saving || !allowDiscard()) return;
+    if (saving || !await allowDiscard()) return;
     const index = visible.findIndex(item => `event-manage-${item.id}` === listTrigger);
     if (mobileList.current && index >= 0 && Math.floor(index / 5) !== mobileGroup) { mobileGroup = Math.floor(index / 5); mobileScroll = 0; }
     mode = "list"; selectedId = ""; posterGeneration++; posterPending = false; posterUploading = false; changePanelDirty = false;
@@ -207,17 +214,17 @@
     await backToList(publication === "PUBLISHED" ? "Konser berhasil diterbitkan." : "Draf konser tersimpan. Lanjutkan melalui Kelola konser.");
   }
 
-  function selectZone(id: string) {
+  async function selectZone(id: string) {
     if (id === zoneSelected) return;
-    if (zoneState() !== zoneBaseline && !window.confirm("Perubahan zona yang belum disimpan akan hilang. Lanjutkan?")) return;
+    if (zoneState() !== zoneBaseline && !(await confirmAction("Buang perubahan?", "Perubahan zona yang belum disimpan akan hilang. Lanjutkan?", "Buang perubahan"))) return;
     zoneSelected = id; zoneIdManual = Boolean(id);
     const zone = events.find((event) => event.id === selectedId)?.zones.find((item) => item.id === id);
     zoneDraft = zone ? { id, name: zone.name, description: zone.description } : { id: "", name: "", description: "" };
     zoneBaseline = zoneState();
   }
-  function selectTier(id: string) {
+  async function selectTier(id: string) {
     if (id === tierSelected) return;
-    if (tierState() !== tierBaseline && !window.confirm("Perubahan kategori yang belum disimpan akan hilang. Lanjutkan?")) return;
+    if (tierState() !== tierBaseline && !(await confirmAction("Buang perubahan?", "Perubahan kategori yang belum disimpan akan hilang. Lanjutkan?", "Buang perubahan"))) return;
     tierSelected = id; tierIdManual = Boolean(id);
     const tier = events.find((event) => event.id === selectedId)?.ticketTiers.find((item) => item.id === id);
     tierDraft = tier ? { id, name: tier.name, zoneId: tier.zoneId, price: tier.price, capacity: tier.capacity, maxPerOrder: tier.maxPerOrder, benefit: tier.benefit, gate: tier.gate, seating: tier.seating } : { id: "", name: "", zoneId: events.find((event) => event.id === selectedId)?.zones[0]?.id ?? "", price: 0, capacity: 0, maxPerOrder: 1, benefit: "", gate: "", seating: "free-standing" };
@@ -270,7 +277,7 @@
 
 <svelte:head><title>Kelola Konser | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-  <AdminLayout page="events" mobileDescriptionHelp={mode === "list"} contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
+  <AdminLayout bind:this={layout} page="events" mobileDescriptionHelp={mode === "list"} contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
     <div class="staff-admin-grid event-admin-grid">
       {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
@@ -293,7 +300,7 @@
               <div><dt>Tiket tersedia</dt><dd>{adminNumber.format(item.ticketTiers.reduce((sum, tier) => sum + tier.availableQuantity, 0))}</dd></div>
             </dl>
           {:else}<div><strong>{item.artist || item.id}</strong><small>{item.startsAt ? `${new Date(item.startsAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` : "Jadwal belum diatur"}</small><small>{item.city || "Kota belum diatur"} · {item.venue || "Venue belum diatur"}</small></div><span class={`event-publication event-${item.publicationStatus.toLowerCase()}`}>{publicationLabel[item.publicationStatus]}</span>{/if}
-          <button id={`event-manage-${item.id}`} class="staff-secondary-button" type="button" aria-label={`Kelola konser ${item.artist || item.id}`} onclick={() => select(item)}>Kelola konser</button>
+          <button id={`event-manage-${item.id}`} class="staff-secondary-button" type="button" aria-label={`Kelola konser ${item.artist || item.id}`} onclick={() => void select(item)}>Kelola konser</button>
         </li>{/each}</ul></AdminMobileList>{/if}
       </section>
       {:else}
@@ -355,7 +362,7 @@
           {@const currentEvent = events.find((item) => item.id === selectedId)}
       <div hidden={section !== 6}>{#if selectedEvent}{#key selectedId}<EventChangePanel event={selectedEvent} {accessToken} onSaved={load} {onUnauthorized} onDirtyChange={setChangePanelDirty} />{/key}{/if}</div>
           <section class="event-inventory-editor event-admin-form" data-section="3" hidden={section !== 3} aria-label="Pengaturan zona">
-            <label>Zona<select value={zoneSelected} onchange={(event) => { selectZone(event.currentTarget.value); event.currentTarget.value = zoneSelected; }} disabled={saving}><option value="">Tambah zona</option>{#each currentEvent?.zones ?? [] as zone}<option value={zone.id}>{zone.name}</option>{/each}</select></label>
+            <label>Zona<select value={zoneSelected} onchange={(event) => { const control = event.currentTarget; const next = control.value; control.value = zoneSelected; void selectZone(next).then(() => { control.value = zoneSelected; }); }} disabled={saving}><option value="">Tambah zona</option>{#each currentEvent?.zones ?? [] as zone}<option value={zone.id}>{zone.name}</option>{/each}</select></label>
             <form id="zone-form" class="staff-form event-admin-form" onsubmit={saveZone}>
               <label class:event-full={Boolean(zoneSelected)}>Nama zona<input bind:value={zoneDraft.name} oninput={suggestZoneId} maxlength="100" required disabled={saving} /></label>
               {#if !zoneSelected}<label>ID zona<input id="zone-id" bind:value={zoneDraft.id} oninput={() => zoneIdManual = true} pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="64" required disabled={saving} /><small>Saran ID mengikuti nama zona sampai ID diedit.</small></label>{/if}
@@ -365,9 +372,9 @@
             </form>
           </section>
           <section class="event-inventory-editor event-admin-form" data-section="4" hidden={section !== 4} aria-label="Pengaturan kategori tiket">
-            {#if currentEvent?.ticketTiers.length}<div class="event-inventory-list"><h4>Kategori tersimpan</h4>{#each currentEvent?.ticketTiers ?? [] as tier}<button class="staff-secondary-button" type="button" disabled={saving} onclick={() => selectTier(tier.id)}>{tier.name} · {adminNumber.format(tier.availableQuantity)}/{adminNumber.format(tier.capacity)} tersedia · {adminNumber.format(tier.boundQuantity)} stok terikat · {tier.gateLocked ? "Gate terkunci" : "Gate dapat diedit"}</button>{/each}</div>{/if}
+            {#if currentEvent?.ticketTiers.length}<div class="event-inventory-list"><h4>Kategori tersimpan</h4>{#each currentEvent?.ticketTiers ?? [] as tier}<button class="staff-secondary-button" type="button" disabled={saving} onclick={() => void selectTier(tier.id)}>{tier.name} · {adminNumber.format(tier.availableQuantity)}/{adminNumber.format(tier.capacity)} tersedia · {adminNumber.format(tier.boundQuantity)} stok terikat · {tier.gateLocked ? "Gate terkunci" : "Gate dapat diedit"}</button>{/each}</div>{/if}
             {#if !currentEvent?.zones.length}<p class="staff-muted">Tambahkan zona pada langkah Zona sebelum membuat kategori tiket.</p>{/if}
-            <label>Kategori<select value={tierSelected} onchange={(event) => { selectTier(event.currentTarget.value); event.currentTarget.value = tierSelected; }} disabled={saving}><option value="">Tambah kategori</option>{#each currentEvent?.ticketTiers ?? [] as tier}<option value={tier.id}>{tier.name}</option>{/each}</select></label>
+            <label>Kategori<select value={tierSelected} onchange={(event) => { const control = event.currentTarget; const next = control.value; control.value = tierSelected; void selectTier(next).then(() => { control.value = tierSelected; }); }} disabled={saving}><option value="">Tambah kategori</option>{#each currentEvent?.ticketTiers ?? [] as tier}<option value={tier.id}>{tier.name}</option>{/each}</select></label>
             <form id="tier-form" class="staff-form event-admin-form" onsubmit={saveTier}>
               <label class:event-full={Boolean(tierSelected)}>Nama kategori<input bind:value={tierDraft.name} oninput={suggestTierId} maxlength="100" required disabled={saving} /></label>
               {#if !tierSelected}<label>ID kategori<input id="tier-id" bind:value={tierDraft.id} oninput={() => tierIdManual = true} pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="64" required disabled={saving} /><small>Saran ID mengikuti nama kategori sampai ID diedit.</small></label>{/if}

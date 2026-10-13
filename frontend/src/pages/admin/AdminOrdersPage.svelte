@@ -8,6 +8,13 @@
   import { applyIfCurrent } from "../../lib/admin-order-requests.ts";
   import { adminDate, adminTime, orderStatusLabel, paymentStatusLabel, refundStatus } from "../../lib/admin-operations.ts";
 
+  let layout: ReturnType<typeof AdminLayout>;
+  async function confirmAction(title: string, message: string, confirmLabel: string) {
+    const token = accessToken;
+    const before = confirmationState();
+    return await layout.confirm({ title, message, confirmLabel }) && token === accessToken && before === confirmationState();
+  }
+  const confirmationState = () => JSON.stringify([selectedId, selected, refundReason, manualReference, manualPaidAt, manualNote, manualConfirmed, manualStep, refundLocks, refundBusy]);
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
   let items = $state<AdminOrder[]>([]);
   let events = $state<AdminOrderPage["filterOptions"]["events"]>([]);
@@ -68,7 +75,7 @@
   async function finishManual() {
     if (!selected || selected.refund?.status !== "MANUAL_REQUIRED" || manualStep !== 1 || refundBusy || uncertainManual || !manualConfirmed) return;
     const id = selected.id;
-    if (!window.confirm(`Konfirmasi pencatatan refund ${money(selected.refund?.amount ?? selected.total)} untuk ${selected.reference}? Tindakan ini mencatat bukti transfer yang sudah berhasil dan tidak mengirim uang.`)) return;
+    if (!(await confirmAction("Catat refund manual?", `Konfirmasi pencatatan refund ${money(selected.refund?.amount ?? selected.total)} untuk ${selected.reference}? Tindakan ini mencatat bukti transfer yang sudah berhasil dan tidak mengirim uang.`, "Catat refund"))) return;
     refundBusy = true; refundMessage = "";
     const input = { reference: manualReference.trim(), paidAt: wibDateTime(manualPaidAt), note: manualNote.trim() };
     try {
@@ -118,10 +125,10 @@
   function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); void load(applied); }
   function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; void load(applied); }
 
-  function allowDiscard() { return !detailDirty || window.confirm("Isian refund belum disimpan. Kembali ke daftar dan buang isian?"); }
+  async function allowDiscard() { return !detailDirty || (await confirmAction("Buang perubahan?", "Isian refund belum disimpan. Kembali ke daftar dan buang isian?", "Buang perubahan")); }
   function protectUnsaved(event: BeforeUnloadEvent) { if (detailDirty || refundBusy || Object.values(refundLocks).some(lock => lock.refund || lock.manual)) { event.preventDefault(); event.returnValue = ""; } }
   async function closeDetail() {
-    if (refundBusy || !allowDiscard()) return;
+    if (refundBusy || !await allowDiscard()) return;
     const id = selectedId;
     detailRequest?.abort(); detailGeneration++; detailLoading = false; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; manualStep = 0;
     await tick();
@@ -154,7 +161,7 @@
 
   async function submitRefund() {
     if (!selected || refundBusy || uncertainRefund || refundReason.trim().length < 3) return;
-    if (!window.confirm(`Ajukan refund penuh ${money(selected.total)} untuk ${selected.reference}? Alasan: ${refundReason.trim()}. Tiket akan ditahan sampai Midtrans mengonfirmasi hasil.`)) return;
+    if (!(await confirmAction("Ajukan refund penuh?", `Ajukan refund penuh ${money(selected.total)} untuk ${selected.reference}? Alasan: ${refundReason.trim()}. Tiket akan ditahan sampai Midtrans mengonfirmasi hasil.`, "Ajukan refund"))) return;
     const orderId = selected.id;
     const reason = refundReason;
     refundBusy = true; refundMessage = "";
@@ -202,7 +209,7 @@
 <svelte:head><title>Pesanan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 <svelte:window onbeforeunload={protectUnsaved} />
 
-  <AdminLayout page="orders" mobileDescriptionHelp={!selectedId} contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title={selectedId ? "Detail pesanan." : "Daftar pesanan."} description={selectedId ? "Periksa pembeli, pembayaran, tiket, dan tindakan pesanan yang dipilih." : "Temukan dan bandingkan pembayaran serta status pesanan."} onLogout={() => { if (!refundBusy && allowDiscard()) onLogout(); }} loggingOut={loggingOut} logoutDisabled={refundBusy || loggingOut}>
+  <AdminLayout bind:this={layout} page="orders" mobileDescriptionHelp={!selectedId} contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title={selectedId ? "Detail pesanan." : "Daftar pesanan."} description={selectedId ? "Periksa pembeli, pembayaran, tiket, dan tindakan pesanan yang dipilih." : "Temukan dan bandingkan pembayaran serta status pesanan."} onLogout={async () => { if (!refundBusy && await allowDiscard()) onLogout(); }} loggingOut={loggingOut} logoutDisabled={refundBusy || loggingOut}>
     <div class="order-workspace">
     {#if !selectedId}
     <section class="staff-admin-panel checkin-history-panel order-search-panel" class:is-expanded={searchOpen} aria-labelledby="order-filter-title">

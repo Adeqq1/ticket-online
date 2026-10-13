@@ -16,6 +16,10 @@ from urllib.parse import urlparse, parse_qs
 
 from playwright.async_api import async_playwright, expect
 
+confirmation_helpers = run_path(str(Path(__file__).with_name('admin-confirm.py')))
+answer_confirmation = confirmation_helpers['answer_confirmation']
+auto_confirm = confirmation_helpers['auto_confirm']
+
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "docs" / "phase29" / "screenshots"
@@ -307,11 +311,12 @@ async def check_help_pages(browser, base, output, width):
             await editor.locator(".event-section-nav").get_by_role("button", name="Jadwal & lokasi", exact=True).click()
             await check_help(page, width, desktop=True)
             await expect(page.get_by_label("Nama konser / artis", exact=True)).to_have_value("Nusa Malam diperbarui")
-            page.once("dialog", lambda dialog: dialog.dismiss())
             await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+            await answer_confirmation(page, False)
             await expect(editor).to_be_visible()
-            page.once("dialog", lambda dialog: dialog.accept())
         await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+        if editor_mode == "locked":
+            await answer_confirmation(page, True)
         await expect(page.get_by_role("button", name="Kelola konser Nusa Malam", exact=True)).to_be_focused()
     assert all(method == "GET" for method, _ in requests) and not errors, (requests, errors)
     (output / f"help-{width}.json").write_text(json.dumps({"automated": True, "humanUAT": "not performed", "width": width, "pages": ["events", "staff", "orders", "issues"], "requests": requests, "browserErrors": errors}, indent=2))
@@ -412,8 +417,8 @@ async def check_event_forms(browser, base, output, width, record_baseline=False,
         await capture(f"edit-{section}", True)
     await page.get_by_role("button", name="Terapkan keputusan").click()
     assert len(decisions) == 1 and decisions[0]["reason"].startswith("Alasan audit"), decisions
-    page.once("dialog", lambda dialog: dialog.accept())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await answer_confirmation(page, True)
     await page.get_by_role("button", name="Tambah konser", exact=True).click()
     await page.get_by_label("Nama konser / artis", exact=True).fill("Konser baru " + "panjang" * 15)
     for section in range(6):
@@ -546,11 +551,11 @@ async def check_workflows(browser, base, output, width):
     await expect(page.locator("#event-create-opener")).to_have_count(0)
     await expect(page.get_by_role("heading", level=1)).to_have_text("Edit konser.")
     await page.get_by_label("Nama konser / artis", exact=True).fill("Draft tidak disimpan")
-    page.once("dialog", lambda d: d.dismiss())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await answer_confirmation(page, False)
     await expect(page.locator("#event-form")).to_have_count(1)
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_label("Cari konser", exact=True)).to_have_value("Konser 19")
     await expect(page.locator("#event-manage-konser-19")).to_be_focused()
     await page.locator("#event-create-opener").click()
@@ -781,14 +786,14 @@ async def check_workflows(browser, base, output, width):
     await page.locator(f"#order-detail-{orders[0]['id']}").click()
     reason = page.get_by_label("Alasan refund", exact=True)
     await reason.fill("Permintaan admin")
-    page.once("dialog", lambda d: d.dismiss())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await answer_confirmation(page, False)
     await expect(reason).to_have_value("Permintaan admin")
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Ajukan refund", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.get_by_role("button", name="Ajukan refund", exact=True)).to_be_disabled()
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await answer_confirmation(page, True)
     await page.locator(f"#order-detail-{orders[0]['id']}").click()
     await expect(reason).to_have_value("")
     await reason.fill("Permintaan ulang ditahan")
@@ -800,8 +805,8 @@ async def check_workflows(browser, base, output, width):
     refund_found = True
     await page.get_by_role("button", name="Periksa detail refund", exact=True).click()
     await expect(page.locator(".order-selected-panel")).to_contain_text("Permintaan admin")
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await answer_confirmation(page, True)
     await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(5 if width < 768 else 22)
     await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr").first).to_contain_text("Refund diproses")
     if width < 768: await page.get_by_role("button", name="Buka pencarian pesanan", exact=True).click()
@@ -893,12 +898,12 @@ async def check_manual_refund(browser, base, output, width):
     await next_step.click()
     await expect(checkbox).not_to_be_checked()
     await checkbox.check()
-    page.once("dialog", lambda d: d.dismiss())
     await final.click()
+    await answer_confirmation(page, False)
     assert not calls
     mode = "delayed"
-    page.once("dialog", lambda d: d.accept())
     await final.click()
+    await answer_confirmation(page, True)
     await asyncio.wait_for(started.wait(), 10)
     await form.dispatch_event("submit")
     assert len(calls) == 1
@@ -911,8 +916,8 @@ async def check_manual_refund(browser, base, output, width):
     for label, value in evidence: await form.get_by_label(label, exact=True).fill(value)
     await next_step.click(); await checkbox.check()
     mode = "unknown"
-    page.once("dialog", lambda d: d.accept())
     await final.click()
+    await answer_confirmation(page, True)
     await expect(final).to_be_disabled()
     await form.dispatch_event("submit")
     assert len(calls) == 2
@@ -923,8 +928,8 @@ async def check_manual_refund(browser, base, output, width):
     await form.get_by_role("button", name="Periksa detail refund", exact=True).click()
     await expect(page.locator(".order-selected-panel")).to_contain_text("Bukti transfer sudah tercatat.")
     assert len(calls) == 2 and not errors, errors
-    page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await answer_confirmation(page, True)
     await context.close()
     print(f"PASS {width}: manual refund evidence/review, authoritative amount, confirmation reset, single mutation, unknown outcome lock, 200% text")
 
@@ -1264,6 +1269,149 @@ async def capture_wizard_baseline(browser, base, output, width):
     print(f"CAPTURE {width}: existing staff, voucher and refund layouts at normal/200% text")
 
 
+async def check_confirmations(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, native, mutations = [], [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    expiring = False
+    async def handle_native(prompt):
+        native.append(prompt.type)
+        if expiring: await prompt.accept()
+        else: await prompt.dismiss()
+    page.on("dialog", handle_native)
+
+    async def fixture(route):
+        path = urlparse(route.request.url).path
+        if route.request.method != "GET": mutations.append(path)
+        status, payload = body(path, "standard", "ADMIN")
+        await route.fulfill(status=status, content_type="application/json", body=json.dumps(payload) if status != 204 else "")
+
+    await context.route("**/api/v1/**", fixture)
+    await page.goto(base + "/admin/events")
+    await page.locator("#event-manage-nusa-malam").click()
+    await page.get_by_label("Nama konser / artis", exact=True).fill("Draf tetap tersedia")
+    back = page.get_by_role("button", name="Kembali ke daftar", exact=True)
+    dialog = page.locator(".admin-confirm[open]")
+    await back.click()
+    await expect(page.get_by_role("dialog", name="Buang perubahan?", exact=True)).to_be_visible()
+    cancel = dialog.get_by_role("button", name="Batal", exact=True)
+    await expect(cancel).to_be_focused()
+    await page.screenshot(path=str(output / f"discard-{width}.png"))
+    await page.keyboard.press("Shift+Tab")
+    await expect(dialog.locator("#admin-confirm-message")).to_be_focused()
+    await page.keyboard.press("Shift+Tab")
+    await expect(dialog.get_by_role("button", name="Buang perubahan", exact=True)).to_be_focused()
+    await page.keyboard.press("Tab")
+    await expect(dialog.locator("#admin-confirm-message")).to_be_focused()
+    await page.keyboard.press("Tab")
+    await expect(cancel).to_be_focused()
+    await page.keyboard.press("Enter")
+    await expect(dialog).to_have_count(0)
+    await expect(back).to_be_focused()
+    await expect(page.get_by_label("Nama konser / artis", exact=True)).to_have_value("Draf tetap tersedia")
+    await back.click()
+    await page.keyboard.press("Escape")
+    await expect(back).to_be_focused()
+    await back.click()
+    await page.mouse.click(2, 2)
+    await expect(dialog).to_have_count(0)
+    await expect(back).to_be_focused()
+    await back.click()
+    await answer_confirmation(page)
+    await expect(page.locator("#event-manage-nusa-malam")).to_be_focused()
+    await page.locator("#event-manage-nusa-malam").click()
+    # Select controls restore their old value before awaiting the dialog.
+    for section, select_name, input_name in [("Zona", "Zona", "Nama zona"), ("Kategori tiket", "Kategori", "Nama kategori")]:
+        await page.locator(".event-section-nav").get_by_role("button", name=section, exact=True).click()
+        chooser = page.get_by_role("combobox", name=select_name, exact=True)
+        await chooser.select_option("festival")
+        await page.get_by_label(input_name, exact=True).fill("Draf inventori")
+        await chooser.select_option("")
+        await expect(chooser).to_have_value("festival")
+        await answer_confirmation(page, False)
+        await expect(page.get_by_label(input_name, exact=True)).to_have_value("Draf inventori")
+        await chooser.select_option("")
+        await answer_confirmation(page)
+        await expect(chooser).to_have_value("")
+    await back.click()
+    await page.goto(base + "/admin/issues")
+    await page.get_by_role("button", name="Detail", exact=True).first.click()
+    note = page.get_by_label("Catatan admin", exact=True)
+    await note.fill("Audit " + "teks-panjang-tanpa-spasi" * 80)
+    resolve = page.get_by_role("button", name="Tutup kasus dengan catatan ini", exact=True)
+    await resolve.click()
+    for scale in (1, 2):
+        if scale == 2:
+            await dialog.evaluate("el => { window.confirmFonts = [...el.querySelectorAll('*')].map(n => [n, n.style.fontSize, getComputedStyle(n).fontSize]); for (const [n, , size] of window.confirmFonts) n.style.fontSize = parseFloat(size) * 2 + 'px'; }")
+        result = await dialog.evaluate("""el => {
+          const r = el.getBoundingClientRect();
+          return {fits: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight,
+            noOverflow: el.scrollWidth <= el.clientWidth && document.documentElement.scrollWidth <= innerWidth,
+            touch: [...el.querySelectorAll('button')].every(b => b.getBoundingClientRect().height >= 44),
+            bodyScrolls: el.querySelector('#admin-confirm-message').scrollHeight > el.querySelector('#admin-confirm-message').clientHeight,
+            background: getComputedStyle(el).backgroundColor};
+        }""")
+        assert result['fits'] and result['noOverflow'] and result['touch'] and result['bodyScrolls'], result
+        assert result['background'] == 'rgb(35, 48, 44)', result
+        await page.screenshot(path=str(output / f"confirmation-{width}-text{scale * 100}.png"))
+    await dialog.locator("#admin-confirm-message").focus()
+    await page.keyboard.press("End")
+    await expect(dialog.locator("#admin-confirm-message")).to_have_js_property("scrollTop", await dialog.locator("#admin-confirm-message").evaluate("el => el.scrollHeight - el.clientHeight"))
+    await dialog.evaluate("() => { for (const [n, size] of window.confirmFonts) n.style.fontSize = size; }")
+    await cancel.focus()
+    await answer_confirmation(page, False)
+    assert not mutations
+    # A changed draft invalidates approval of the older message.
+    await resolve.click()
+    await note.evaluate("el => { el.value = 'Catatan diperbarui'; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+    await answer_confirmation(page)
+    assert not mutations
+    # Repeated submit calls cannot replace the pending prompt or double-send.
+    await resolve.click()
+    await resolve.dispatch_event("click")
+    await expect(dialog).to_have_count(1)
+    await answer_confirmation(page)
+    await expect(page.get_by_text("Kasus ditutup.", exact=True)).to_be_visible()
+    assert mutations == ['/api/v1/admin/payment-cases/17/resolve'], mutations
+    await note.fill("Catatan navigasi")
+    # The skip link keeps its same-document behavior without discarding notes.
+    await page.locator(".skip-link").focus()
+    await page.keyboard.press("Enter")
+    await expect(dialog).to_have_count(0)
+    await expect(note).to_have_value("Catatan navigasi")
+    if width < 1024:
+        await page.get_by_role("button", name="Menu", exact=True).click()
+        nav = page.locator("#admin-mobile-menu")
+    else:
+        nav = page.locator(".admin-sidebar")
+    link = nav.get_by_role("link", name="Konser", exact=True)
+    await link.click()
+    await answer_confirmation(page, False)
+    await expect(link).to_be_focused()
+    await expect(note).to_have_value("Catatan navigasi")
+    await link.click()
+    await answer_confirmation(page)
+    await page.wait_for_url("**/admin/events")
+    assert not native and not errors, (native, errors)
+    # Session expiry may trigger the existing native unload guard; it must not
+    # leave an application confirmation or execute its pending mutation.
+    expiring = True
+    await page.goto(base + "/admin/issues")
+    await page.get_by_role("button", name="Detail", exact=True).first.click()
+    await page.get_by_label("Catatan admin", exact=True).fill("Catatan sesi berakhir")
+    await page.get_by_role("button", name="Tutup kasus dengan catatan ini", exact=True).click()
+    await expect(dialog).to_be_visible()
+    await context.route("**/api/v1/staff/me", lambda route: route.fulfill(status=401, content_type="application/json", body=json.dumps({"error": {"code": "UNAUTHORIZED", "message": "Sesi berakhir"}})))
+    await page.evaluate("window.dispatchEvent(new Event('focus'))")
+    await page.wait_for_url("**/admin/login")
+    assert len(mutations) == 1, mutations
+    assert all(kind == "beforeunload" for kind in native) and not errors, (native, errors)
+    await context.close()
+    print(f"PASS {width}: styled confirmation, safe focus, Escape/backdrop, selects, long text200, stale/duplicate actions, nested menu navigation")
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
@@ -1274,6 +1422,7 @@ async def main():
     parser.add_argument("--inject-pageerror", action="store_true", help="Inject a non-blocking browser exception to verify failure reporting")
     parser.add_argument("--mobile-lists", action="store_true", help="Check shared mobile list groups, native scroll, and cursor recovery")
     parser.add_argument("--mobile-help", action="store_true", help="Check mobile help on concert, staff, order, and issue lists")
+    parser.add_argument("--confirmations", action="store_true", help="Check styled admin confirmations, focus, responsive layout and async safety")
     parser.add_argument("--workflows", action="store_true", help="Verify the phase 55 concert/order workflows with larger fixtures")
     parser.add_argument("--wizard-baseline", action="store_true", help="Record the existing staff/voucher/refund layouts before rebuilding the local frontend")
     parser.add_argument("--manual-refund", action="store_true", help="Check manual refund evidence and review steps")
@@ -1301,6 +1450,10 @@ async def main():
             parser.error(f"unknown route key: {args.only}")
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        if args.confirmations:
+            for width in (320, 390, 768, 1440): await check_confirmations(browser, args.base_url, output, width)
+            await browser.close()
+            return
         if args.wizard_baseline:
             for width in (320, 390, 768, 1440): await capture_wizard_baseline(browser, args.base_url, output, width)
             await browser.close()
@@ -1443,6 +1596,7 @@ async def main():
                         await page.get_by_role("heading", name="Kasus TO-0123456789abcdef0123").wait_for()
                     if name == "issues" and mode == "uncertain":
                         page.on("dialog", lambda dialog: dialog.accept())
+                        await auto_confirm(page)
                         email_panel = page.locator(".checkin-history-panel").nth(1)
                         await email_panel.get_by_role("button", name="Lihat detail email TO-0123456789abcdef0123", exact=True).click()
                         await page.get_by_role("heading", name="Email TO-0123456789abcdef0123").wait_for()
