@@ -208,7 +208,65 @@ func TestTicketRecoveryAndResendEmail(t *testing.T) {
 	var order struct{ ID, Reference, AccessToken string }
 	_ = json.Unmarshal(ordered.Body.Bytes(), &order)
 	orderID, reference = order.ID, order.Reference
+
+	// Buyer identity comes from the private order relation, without public catalog access or e-tickets.
+	if _, err := db.ExecContext(ctx, "UPDATE events SET publication_status='ARCHIVED', lifecycle_status='RESCHEDULED', starts_at=starts_at + INTERVAL 1 DAY WHERE id=?", eventID); err != nil {
+		t.Fatal(err)
+	}
+	assertIdentity := func(status string) {
+		t.Helper()
+		response := call(handler, clientIP, http.MethodGet, "/api/v1/orders/"+orderID, nil, order.AccessToken)
+		expect(response, http.StatusOK)
+		var detail struct {
+			EventID, EventArtist, EventVenue, EventCity, Status, EventStartsAt string
+			Items                                                              []struct{ Quantity int }
+			CurrentEvent                                                       struct{ StartsAt *string }
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &detail); err != nil {
+			t.Fatal(err)
+		}
+		if detail.EventID != eventID || detail.EventArtist != "Recovery Test" || detail.EventVenue != "Test Venue" || detail.EventCity != "Jakarta" || detail.Status != status || len(detail.Items) != 1 || detail.Items[0].Quantity != 1 {
+			t.Fatalf("private order identity: %+v", detail)
+		}
+		if detail.CurrentEvent.StartsAt == nil || detail.EventStartsAt != *detail.CurrentEvent.StartsAt {
+			t.Fatalf("effective schedule: %+v", detail)
+		}
+		latest, err := time.Parse(time.RFC3339Nano, detail.EventStartsAt)
+		if err != nil || latest.Before(now.Add(95*time.Hour)) {
+			t.Fatalf("order uses stale concert schedule: %s", detail.EventStartsAt)
+		}
+	}
+	for _, status := range []string{"PENDING", "EXPIRED", "CANCELLED"} {
+		if _, err := db.ExecContext(ctx, "UPDATE orders SET status=? WHERE id=?", status, orderID); err != nil {
+			t.Fatal(err)
+		}
+		assertIdentity(status)
+	}
+	expect(call(handler, clientIP, http.MethodGet, "/api/v1/orders/"+orderID, nil, ""), http.StatusUnauthorized)
+	expect(call(handler, clientIP, http.MethodGet, "/api/v1/orders/"+orderID, nil, "incorrect-access-token"), http.StatusNotFound)
+	if _, err := db.ExecContext(ctx, "UPDATE events SET lifecycle_status='POSTPONED' WHERE id=?", eventID); err != nil {
+		t.Fatal(err)
+	}
+	postponed := call(handler, clientIP, http.MethodGet, "/api/v1/orders/"+orderID, nil, order.AccessToken)
+	expect(postponed, http.StatusOK)
+	var schedule struct {
+		EventStartsAt string
+		CurrentEvent  struct{ StartsAt *string }
+	}
+	if err := json.Unmarshal(postponed.Body.Bytes(), &schedule); err != nil {
+		t.Fatal(err)
+	}
+	if schedule.EventStartsAt != "" || schedule.CurrentEvent.StartsAt != nil {
+		t.Fatalf("postponed schedule: %+v", schedule)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE events SET lifecycle_status='SCHEDULED' WHERE id=?", eventID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE orders SET status='PENDING' WHERE id=?", orderID); err != nil {
+		t.Fatal(err)
+	}
 	expect(call(handler, clientIP, http.MethodPost, "/api/v1/orders/"+orderID+"/simulate-payment", map[string]string{"method": "QRIS", "result": "SUCCEEDED"}, order.AccessToken), http.StatusCreated)
+	assertIdentity("PAID")
 
 	port, mails := fakeSMTP(t, nil)
 	workerCtx, stopWorker := context.WithCancel(ctx)

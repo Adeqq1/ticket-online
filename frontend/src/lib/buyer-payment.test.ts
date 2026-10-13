@@ -8,7 +8,7 @@ test("resolves payment labels from backend order and payment status", () => {
   const failed = buyerPaymentStatusLabel("PENDING", "FAILED");
   expect(failed).toBe("Pembayaran gagal");
   const succeeded = buyerPaymentStatusLabel("PENDING", "SUCCEEDED");
-  expect(succeeded).toBe("Pembayaran dikonfirmasi");
+  expect(succeeded).toBe("Pembayaran diterima, menunggu konfirmasi pesanan");
   expect(buyerPaymentStatusLabel("EXPIRED", "SUCCEEDED")).toBe("Pesanan kedaluwarsa");
   expect(buyerPaymentStatusLabel("CANCELLED", "SUCCEEDED")).toBe("Pesanan dibatalkan");
   expect(buyerPaymentStatusLabel("REFUNDED", null)).toBe("Pembayaran dikonfirmasi");

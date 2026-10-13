@@ -3090,7 +3090,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/OrderBase'
         - type: object
-          required: [buyer, attendees, payment, createdAt, updatedAt, eventStartsAt, accessExpiresAt]
+          required: [buyer, attendees, payment, createdAt, updatedAt, eventId, eventArtist, eventVenue, eventCity, eventStartsAt, accessExpiresAt]
           properties:
             buyer:
               type: object
@@ -3115,7 +3115,11 @@ components:
                 - type: 'null'
             createdAt: {type: string, format: date-time}
             updatedAt: {type: string, format: date-time}
-            eventStartsAt: {type: string, description: 'Jadwal efektif RFC3339; kosong saat ditunda atau dibatalkan.'}
+            eventId: {type: string, description: 'Identitas konser terkait pesanan, termasuk konser yang tidak dipublikasikan.'}
+            eventArtist: {type: string}
+            eventVenue: {type: string}
+            eventCity: {type: string}
+            eventStartsAt: {type: string, description: 'Jadwal efektif RFC3339; kosong saat ditunda atau dibatalkan. Gunakan currentEvent.startsAt untuk jadwal terbaru.'}
             currentEvent: {$ref: '#/components/schemas/EventState'}
             refundRight:
               oneOf: [{$ref: '#/components/schemas/EventRefundRight'}, {type: 'null'}]
@@ -3137,7 +3141,7 @@ components:
       required: [method, returnUrl]
       properties:
         method: {type: string, enum: [QRIS, VIRTUAL_ACCOUNT, GOPAY]}
-        returnUrl: {type: string, format: uri}
+        returnUrl: {type: string, format: uri, description: 'Origin FRONTEND_URL, tanpa fragment. Mendukung URL checkout yang ada atau /pesanan/{id} untuk pesanan yang sama tanpa query.'}
     SnapPaymentSession:
       type: object
       required: [redirectUrl]

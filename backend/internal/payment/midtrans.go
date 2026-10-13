@@ -323,7 +323,7 @@ func (h *Handler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 	}
 	input.Method = strings.ToUpper(strings.TrimSpace(input.Method))
 	methodPayment := map[string]string{"QRIS": "qris", "VIRTUAL_ACCOUNT": "bank_transfer", "GOPAY": "gopay"}[input.Method]
-	if methodPayment == "" || !h.validReturnURL(input.ReturnURL) {
+	if methodPayment == "" || !h.validReturnURL(input.ReturnURL, orderID) {
 		writeError(w, 422, "INVALID_REQUEST", "Metode atau URL kembali tidak valid")
 		return
 	}
@@ -392,16 +392,16 @@ func (h *Handler) CreateSnap(w http.ResponseWriter, r *http.Request) {
 }
 
 // Kept separate so configuration, return URL and provider calls remain server-owned.
-func (h *Handler) validReturnURL(value string) bool {
+func (h *Handler) validReturnURL(value, orderID string) bool {
 	got, err := url.Parse(value)
 	if err != nil {
 		return false
 	}
 	base, err := url.Parse(h.frontendURL)
-	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || got.Scheme != base.Scheme || got.Host != base.Host || got.User != nil || got.Fragment != "" || !strings.HasPrefix(got.Path, "/checkout/") {
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || got.Scheme != base.Scheme || got.Host != base.Host || got.User != nil || got.Fragment != "" {
 		return false
 	}
-	return true
+	return strings.HasPrefix(got.Path, "/checkout/") || validID(orderID) && got.Path == "/pesanan/"+orderID && got.RawQuery == ""
 }
 
 func (h *Handler) validProviderRedirect(value string) bool {

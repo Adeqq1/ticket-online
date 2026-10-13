@@ -104,3 +104,11 @@ export function listOrderAccess(): OrderAccess[] {
 export function getOrderAccessForTicket(ticketId: string) {
   return listOrderAccess().find((record) => record.ticketIds.includes(ticketId)) ?? null;
 }
+
+export function orderAccessStorageUnreadable() {
+  for (const name of ["localStorage", "sessionStorage"] as const) {
+    try { if (!globalThis[name] || !Number.isFinite(globalThis[name].length)) return true; }
+    catch { return true; }
+  }
+  return false;
+}

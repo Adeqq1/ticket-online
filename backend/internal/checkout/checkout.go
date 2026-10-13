@@ -96,6 +96,10 @@ type Detail struct {
 	Payment       *PaymentSummary  `json:"payment"`
 	CreatedAt     string           `json:"createdAt"`
 	UpdatedAt     string           `json:"updatedAt"`
+	EventID       string           `json:"eventId"`
+	EventArtist   string           `json:"eventArtist"`
+	EventVenue    string           `json:"eventVenue"`
+	EventCity     string           `json:"eventCity"`
 	EventStartsAt string           `json:"eventStartsAt"`
 	CurrentEvent  eventstate.State `json:"currentEvent"`
 	RefundRight   *RefundRight     `json:"refundRight"`
@@ -406,13 +410,13 @@ func (r *Repository) Get(ctx context.Context, orderID string) (Detail, error) {
 	}
 	defer tx.Rollback()
 	detail := Detail{Attendees: []Attendee{}}
-	var createdAt, updatedAt, startsAt, expiresAt time.Time
+	var createdAt, updatedAt, expiresAt time.Time
 	err = tx.QueryRowContext(ctx, `SELECT o.id, o.reference, o.reservation_id, o.status, o.subtotal, o.admin_fee, o.discount, o.total,
-		o.created_at, o.updated_at, e.starts_at, b.name, b.email, b.phone, b.identity, o.expires_at
+		o.created_at, o.updated_at, e.id, e.artist, e.venue, e.city, b.name, b.email, b.phone, b.identity, o.expires_at
 		FROM orders o JOIN reservations r ON r.id = o.reservation_id JOIN events e ON e.id = r.event_id
 		JOIN order_buyers b ON b.order_id = o.id WHERE o.id = ?`, orderID).Scan(
 		&detail.ID, &detail.Reference, &detail.ReservationID, &detail.Status, &detail.Subtotal, &detail.AdminFee, &detail.Discount, &detail.Total,
-		&createdAt, &updatedAt, &startsAt, &detail.Buyer.Name, &detail.Buyer.Email, &detail.Buyer.Phone, &detail.Buyer.Identity, &expiresAt)
+		&createdAt, &updatedAt, &detail.EventID, &detail.EventArtist, &detail.EventVenue, &detail.EventCity, &detail.Buyer.Name, &detail.Buyer.Email, &detail.Buyer.Phone, &detail.Buyer.Identity, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Detail{}, ErrOrderNotFound
 	}
