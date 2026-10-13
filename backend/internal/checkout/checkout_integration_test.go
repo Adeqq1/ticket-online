@@ -3,6 +3,7 @@ package checkout
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -13,6 +14,12 @@ import (
 )
 
 func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
+	for _, identity := range []string{"", `,"identity":""`, `,"identity":"123456789012"`} {
+		t.Run("buyer"+identity, func(t *testing.T) { checkCheckoutReplay(t, identity) })
+	}
+}
+
+func checkCheckoutReplay(t *testing.T, identity string) {
 	dsn := os.Getenv("MYSQL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("set MYSQL_TEST_DSN to a disposable MySQL database")
@@ -62,11 +69,11 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 		_, _ = db.Exec("DELETE FROM reservations WHERE id = ?", reservationID)
 	})
 
-	request := Request{
-		Buyer:       Buyer{Name: "Pembeli Tes", Email: "test@example.com", Phone: "081234567890", Identity: "123456789012"},
-		VoucherCode: "HEMAT10",
-		Attendees:   []Attendees{{TierID: "festival", Names: []string{"Peserta Satu", "Peserta Dua"}}},
+	var request Request
+	if err := json.Unmarshal([]byte(`{"buyer":{"name":"Pembeli Tes","email":"test@example.com","phone":"081234567890"`+identity+`},"voucherCode":"HEMAT10","attendees":[{"tierId":"festival","names":["Peserta Sama","Peserta Sama"]}]}`), &request); err != nil {
+		t.Fatal(err)
 	}
+
 	repository := NewRepository(db)
 	first, replay, err := repository.Create(ctx, reservationID, idempotencyKey, request)
 	if err != nil || replay {
@@ -82,6 +89,10 @@ func TestCheckoutPersistsOnceAndReplays(t *testing.T) {
 	second, replay, err := repository.Create(ctx, reservationID, idempotencyKey, request)
 	if err != nil || !replay || second.ID != first.ID || second.Reference != first.Reference || second.ExpiresAt != first.ExpiresAt {
 		t.Fatalf("retry = (%+v, %v, %v), want the original order", second, replay, err)
+	}
+	var persistedIdentity string
+	if err := db.QueryRowContext(ctx, "SELECT identity FROM order_buyers WHERE order_id = ?", first.ID).Scan(&persistedIdentity); err != nil || persistedIdentity != request.Buyer.Identity {
+		t.Fatalf("stored identity = %q, error=%v; want %q", persistedIdentity, err, request.Buyer.Identity)
 	}
 	request.Buyer.Name = "Nama Berbeda"
 	if _, _, err := repository.Create(ctx, reservationID, idempotencyKey, request); !errors.Is(err, ErrIdempotencyConflict) {

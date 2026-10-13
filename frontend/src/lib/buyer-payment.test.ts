@@ -26,4 +26,5 @@ test("only a fully loaded PAID order completes checkout or keeps the payment cou
   expect(showCheckoutPaymentCountdown(false, "PAID")).toBe(false);
   expect(showCheckoutPaymentCountdown(false, "REFUNDED")).toBe(false);
   expect(showCheckoutPaymentCountdown(false)).toBe(true);
+  expect(showCheckoutPaymentCountdown(false, "PENDING", "SUCCEEDED")).toBe(false);
 });

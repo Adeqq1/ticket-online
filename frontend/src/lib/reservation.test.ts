@@ -45,3 +45,14 @@ test("pending reservation metadata can be retried without a reservation id", () 
   const attempt = { idempotencyKey: "key-12345678901234", eventId: "nusa-malam", basketKey: "festival=2" };
   expect(parseStoredReservation(serializeStoredReservation(attempt))).toEqual(attempt);
 });
+
+
+test("new and legacy checkout retries keep their exact payload including optional identity", () => {
+  for (const identity of [undefined, "", "123456789012"]) {
+    const payload = { buyer: { name: "Pembeli", email: "buyer@example.com", phone: "08123456789", ...(identity === undefined ? {} : { identity }) }, attendees: [{ tierId: "festival", names: ["Nama Sama", "Nama Sama"] }] };
+    const raw = JSON.stringify(payload);
+    expect(JSON.stringify(parseCheckoutAttempt(raw, { festival: 2 }))).toBe(raw);
+  }
+  const invalid = { buyer: { name: "Pembeli", email: "buyer@example.com", phone: "08123456789", identity: 123 }, attendees: [{ tierId: "festival", names: ["Nama"] }] };
+  expect(parseCheckoutAttempt(JSON.stringify(invalid), { festival: 1 })).toBeNull();
+});

@@ -19,6 +19,6 @@ export function checkoutTicketsComplete(orderStatus: OrderStatus, ticketCount: n
   return orderStatus === "PAID" && expected > 0 && ticketCount === expected;
 }
 
-export function showCheckoutPaymentCountdown(completed: boolean, orderStatus?: OrderStatus) {
-  return !completed && (!orderStatus || orderStatus === "PENDING");
+export function showCheckoutPaymentCountdown(completed: boolean, orderStatus?: OrderStatus, paymentStatus?: PaymentStatus | null) {
+  return !completed && paymentStatus !== "SUCCEEDED" && (!orderStatus || orderStatus === "PENDING");
 }

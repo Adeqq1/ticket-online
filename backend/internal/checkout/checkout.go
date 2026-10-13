@@ -141,7 +141,7 @@ func Validate(request Request) (Request, error) {
 	}
 	request.Buyer.Phone = strings.NewReplacer(" ", "", "-", "").Replace(request.Buyer.Phone)
 	phone := strings.TrimPrefix(request.Buyer.Phone, "+")
-	if len(phone) < 9 || len(phone) > 15 || !digits(phone) || len(request.Buyer.Identity) < 12 || len(request.Buyer.Identity) > 20 || !digits(request.Buyer.Identity) {
+	if len(phone) < 9 || len(phone) > 15 || !digits(phone) || request.Buyer.Identity != "" && (len(request.Buyer.Identity) < 12 || len(request.Buyer.Identity) > 20 || !digits(request.Buyer.Identity)) {
 		return Request{}, ErrInvalidRequest
 	}
 	request.VoucherCode = strings.ToUpper(strings.TrimSpace(request.VoucherCode))
