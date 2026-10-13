@@ -275,7 +275,7 @@ test("payment status reads use GET and continuing sends the saved method for the
   const calls: Array<{ url: string; method: string; body?: string }> = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), method: init?.method ?? "GET", body: typeof init?.body === "string" ? init.body : undefined });
-    return Response.json(calls.length === 1 ? { status: "PENDING" } : { redirectUrl: "https://payments.example/session" });
+    return Response.json(calls.length === 1 ? { status: "PENDING" } : { redirectUrl: "https://app.sandbox.midtrans.com/snap/session" });
   }) as typeof fetch;
   try {
     await getOrder("same-order", "same-session-token");
@@ -493,5 +493,17 @@ test("email retry accepts same-ID and replacement jobs but locks malformed succe
       await expect(retryAdminEmailJob("admin", id)).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME" });
     }
     expect(calls).toBe(5);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("malformed payment redirects keep the result uncertain and never repeat the POST", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    for (const redirectUrl of [undefined, "javascript:alert(1)", "https://app.sandbox.midtrans.com.evil.test/snap/session"]) {
+      globalThis.fetch = (async () => { calls++; return Response.json({ redirectUrl }); }) as unknown as typeof fetch;
+      await expect(createSnapPayment("same-order", "QRIS", "https://tickets.example/pesanan/same-order", "access")).rejects.toMatchObject({ code: "UNKNOWN_OUTCOME", status: 0 });
+    }
+    expect(calls).toBe(3);
   } finally { globalThis.fetch = originalFetch; }
 });

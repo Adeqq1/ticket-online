@@ -485,6 +485,7 @@ async def main():
                     assert await page.locator(".skip-link").evaluate("element => getComputedStyle(element).top === '-64px'"), "The skip link should remain hidden unless it has keyboard focus."
                     assert await page.locator(".order-summary").evaluate("summary => Boolean(summary.compareDocumentPosition(document.querySelector('.checkout-panel')) & Node.DOCUMENT_POSITION_FOLLOWING)"), "The mobile reading and tab order should place the cost summary before checkout confirmation."
                     if viewport_name == "desktop":
+                        await page.evaluate("window.scrollTo({top:0,behavior:'instant'})")
                         desktop_columns = await page.evaluate("""() => {const summary=document.querySelector('.order-summary').getBoundingClientRect(),panel=document.querySelector('.checkout-panel').getBoundingClientRect();return summary.left>panel.left&&Math.abs(summary.top-panel.top)<2}""")
                         assert desktop_columns, "The checkout summary should remain in the right desktop column."
                     else:
@@ -575,14 +576,14 @@ async def main():
                 await page.goto(BASE_URL + "/?scenario=phase21-search", wait_until="domcontentloaded")
                 await page.locator(".concert-card").first.wait_for()
                 assert await page.locator(".concert-card").count() == 4, "The home page should initially show four events."
-                assert await page.locator(".results-count").inner_text() == "5 konser ditemukan, menampilkan 4 pertama", "The home result count should describe all matches while showing only four cards."
+                assert await page.locator(".results-count").inner_text() == "Menampilkan 4 dari 5 konser", "The home result count should describe all matches while showing only four cards."
                 await page.locator("#event-query").fill("Panggung Terakhir")
                 await page.locator("#event-query").press("Enter")
                 assert await page.get_by_role("heading", name="Panggung Terakhir").count() == 1, "Home search should find events beyond the first four."
                 assert await page.locator(".concert-card").count() == 1, "The home search should show only matching events."
                 await page.locator("#event-query").fill("tidak cocok")
                 await page.locator("#event-query").press("Enter")
-                assert await page.get_by_text("Tidak ada konser yang cocok dengan pencarianmu.").is_visible(), "Home search should announce an empty result."
+                assert await page.get_by_text("Tidak ada konser yang cocok dengan filtermu.").is_visible(), "Home search should announce an empty result."
                 await page.locator("#event-query").fill("")
                 await page.locator("#event-query").press("Enter")
                 first_card = await page.locator(".concert-card").first.bounding_box()
@@ -597,8 +598,8 @@ async def main():
                 no_tickets = page.locator(".concert-card").filter(has=page.get_by_role("heading", name="Tiket Menyusul"))
                 assert await no_tickets.locator(".concert-status").inner_text() == "Tiket belum tersedia", "Events without tiers should show ticket availability."
                 assert await page.get_by_text("Jadwal diperbarui", exact=True).is_visible(), "Changed event schedules should be visible on the card."
-                await page.locator(".poster-unavailable").wait_for(state="attached")
-                assert await page.locator(".poster-unavailable").count() == 1, "A failed event poster should leave the neutral poster fallback."
+                await page.locator(".poster-fallback").wait_for(state="attached")
+                assert await page.locator(".poster-fallback").count() == 1, "A failed event poster should leave the neutral poster fallback."
 
                 await page.set_viewport_size({"width": 390, "height": 844})
                 await page.goto(BASE_URL + "/konser/nusa-malam?scenario=phase27-share&festival=2&token=private#TO-secret", wait_until="domcontentloaded")
@@ -657,13 +658,16 @@ async def main():
                 assert (await page.locator(".concert-card h3").all_text_contents())[0] == "Jazz Mahal", "The default catalog order should use the nearest event date."
                 await page.locator(".filters summary").click()
                 await page.locator("#concert-sort").select_option("price")
+                await page.get_by_role("button", name="Cari", exact=True).click()
                 assert (await page.locator(".concert-card h3").all_text_contents())[0] == "Melodi Medan", "Price ordering should use the loaded ticket prices."
                 await page.get_by_label("Batasi harga").check()
                 assert await page.locator("#concert-price").input_value() == "2500000", "Price controls should initialize from the catalog maximum."
-                await page.locator("#concert-price").fill("200000")
+                await page.locator("#concert-price").evaluate("e=>{e.value='200000';e.dispatchEvent(new Event('input',{bubbles:true}))}")
+                await page.get_by_role("button", name="Cari", exact=True).click()
                 assert await page.locator(".concert-card h3").all_text_contents() == ["Melodi Medan"], "An active maximum price should include all matching catalog events."
                 await page.locator("#concert-city").select_option(label="Medan")
                 await page.locator("#concert-query").fill("Melodi")
+                await page.locator("#concert-query").press("Enter")
                 assert await page.locator(".filter-chip").count() == 3, "Each active catalog filter should have its own removable chip."
                 await page.evaluate("window.__catalogRestoredFromBFCache=false;addEventListener('pageshow',event=>window.__catalogRestoredFromBFCache=event.persisted)")
                 await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
@@ -707,10 +711,11 @@ async def main():
                 if not await page.locator(".filters").evaluate("element => element.open"):
                     await page.locator(".filters summary").click()
                 await page.locator("#concert-city").select_option(label="Jakarta")
+                await page.get_by_role("button", name="Cari", exact=True).click()
                 if await page.locator(".filters").evaluate("element => element.open"):
                     await page.locator(".filters summary").click()
                 assert "Jakarta" in await page.locator(".filters summary").inner_text(), "The closed filter summary should show the active city."
-                await page.locator(".reset-filters").click()
+                await page.locator(".search-actions .reset-filters").click()
                 assert await page.locator("#concert-city").input_value() == "", "Reset should clear the city filter."
                 assert await page.locator("#concert-query").input_value() == "", "Reset should clear the catalog search."
                 assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "The catalog should not overflow at 360px."
@@ -721,10 +726,11 @@ async def main():
                     if not await page.locator(".filters").evaluate("element => element.open"):
                         await page.locator(".filters summary").click()
                     await page.get_by_label("Batasi harga").check()
+                    await page.get_by_role("button", name="Cari", exact=True).click()
                     filter_bounds = await page.evaluate("""() => ({viewport:innerWidth,document:document.documentElement.scrollWidth,body:document.body.scrollWidth,fields:document.querySelector('.filter-fields').getBoundingClientRect().toJSON(),reset:document.querySelector('.reset-filters').getBoundingClientRect().toJSON(),controls:[...document.querySelectorAll('.filter-fields select,.filter-fields input[type=text]')].filter(el=>el.getClientRects().length).map(el=>el.getBoundingClientRect().toJSON())})""")
                     assert filter_bounds["document"] <= width, f"Open catalog filters should not create horizontal overflow at {width}px: {filter_bounds}."
                     assert all(control["left"] >= 0 and control["right"] <= width for control in filter_bounds["controls"]), f"Filter controls should remain within the viewport at {width}px: {filter_bounds}."
-                    assert filter_bounds["reset"]["left"] >= filter_bounds["fields"]["right"] or filter_bounds["reset"]["right"] <= filter_bounds["fields"]["left"], f"Reset should not overlap the open filter panel at {width}px: {filter_bounds}."
+                    assert filter_bounds["reset"]["left"] >= filter_bounds["fields"]["right"] or filter_bounds["reset"]["right"] <= filter_bounds["fields"]["left"] or filter_bounds["reset"]["top"] >= filter_bounds["fields"]["bottom"] or filter_bounds["reset"]["bottom"] <= filter_bounds["fields"]["top"], f"Reset should not overlap the open filter panel at {width}px: {filter_bounds}."
                     await page.get_by_label("Batasi harga").uncheck()
                     await page.locator(".filters summary").click()
                     layout_checks.append({"route": "catalog-open-filters", "width": width, **filter_bounds})

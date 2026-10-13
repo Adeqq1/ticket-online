@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { concertTerms } from "../../lib/terms.ts";
   import Accordion from "../../components/Accordion.svelte";
 
   const purchaseSteps = [
@@ -44,6 +45,7 @@
   <a href="#cara-kerja"><span>01</span> Cara kerja</a>
   <a href="#pembayaran"><span>02</span> Pembayaran</a>
   <a href="#refund"><span>03</span> Refund & pembatalan</a>
+  <a href="#ketentuan">Ketentuan pembelian</a>
   <a href="#penukaran"><span>04</span> Penukaran wristband</a>
 </nav>
 
@@ -56,6 +58,11 @@
   <section class="guide-section" id="pembayaran" aria-labelledby="pembayaran-title">
     <div class="guide-section-heading"><span>02</span><h2 id="pembayaran-title">Pembayaran yang jelas sejak awal.</h2></div>
     <Accordion name="Pembayaran" items={paymentRules} />
+  </section>
+
+  <section class="guide-section" id="ketentuan" aria-labelledby="ketentuan-title">
+    <div class="guide-section-heading"><h2 id="ketentuan-title">Ketentuan pembelian</h2></div>
+    <Accordion name="Ketentuan pembelian" items={concertTerms.map(({ title, body }) => ({ question: title, answer: body }))} />
   </section>
 
   <section class="guide-section" id="refund" aria-labelledby="refund-title">

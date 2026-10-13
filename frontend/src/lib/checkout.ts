@@ -1,7 +1,7 @@
 import { parseCheckoutQuantities, type Concert, type TicketTier } from "./concerts.ts";
 
 export type CheckoutLine = { tier: TicketTier; quantity: number };
-export type Buyer = { name: string; email: string; phone: string; identity: string };
+export type Buyer = { name: string; email: string; phone: string; identity?: string };
 
 export function checkoutLines(concert: Concert, params: URLSearchParams): CheckoutLine[] {
   const quantities = parseCheckoutQuantities(concert, params);

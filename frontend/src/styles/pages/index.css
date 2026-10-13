@@ -1,35 +1,36 @@
-.hero { padding-block: clamp(48px, 9vw, 112px) clamp(40px, 7vw, 88px); }
+.hero { padding-block: 20px 12px; }
 .hero-copy { max-width: 740px; animation: rise 450ms both; }
 .eyebrow { margin: 0 0 18px; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .15em; }
-.hero h1 { max-width: 740px; margin: 0 0 18px; font-size: clamp(44px, 7vw, 78px); line-height: .98; letter-spacing: -.065em; }
-.hero-summary { max-width: 480px; margin-bottom: 30px; color: var(--muted); font-size: 18px; line-height: 1.5; }
-.event-section { padding-block: 28px 96px; border-top: 1px solid var(--line); scroll-margin-top: 24px; }
-.section-intro { display: flex; justify-content: space-between; gap: 24px; align-items: baseline; margin-bottom: 20px; }
-.section-intro h2, .journey h2, .payment h2 { max-width: 620px; margin: 0; font-size: clamp(30px, 4vw, 48px); line-height: 1.05; letter-spacing: -.06em; }
+.hero h1 { max-width: 740px; margin: 0 0 8px; font-size: clamp(32px, 3.5vw, 40px); line-height: 1.1; letter-spacing: -.065em; }
+.hero-summary { max-width: 680px; margin: 0 0 12px; color: var(--muted); font-size: 16px; line-height: 1.5; }
+.event-section { padding-block: 12px 48px; border-top: 1px solid var(--line); scroll-margin-top: 24px; }
+.section-intro { display: flex; justify-content: space-between; gap: 24px; align-items: baseline; margin-bottom: 12px; }
+.section-intro h2, .journey h2, .payment h2 { max-width: 620px; margin: 0; font-size: clamp(26px, 3vw, 34px); line-height: 1.05; letter-spacing: -.06em; }
 .section-intro p, .journey-lead p, .payment-copy > p { margin: 0; color: var(--muted); line-height: 1.5; }
-.event-search { max-width: 680px; margin-bottom: 8px; }
+.event-search { max-width: 860px; margin-bottom: 8px; }
 .event-search label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 700; }
 .search-control { display: flex; gap: 10px; }
 .search-control input { min-width: 0; flex: 1; min-height: 48px; padding: 0 14px; border: 1px solid var(--control-line); border-radius: var(--radius); background: transparent; color: var(--ink); }
 .search-control input::placeholder { color: var(--muted); opacity: 1; }
+.event-search .search-actions { margin-top: 12px; }
 .sample-note, .results-count { margin: 12px 0; color: var(--muted); font-size: 13px; }
 .event-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 .catalog-link { display: inline-flex; margin-top: 20px; color: var(--accent); font-weight: 700; }
 .empty-state { padding: 36px 0; border-top: 1px solid var(--line); }
-.journey { padding-block: 88px; display: grid; grid-template-columns: minmax(280px, .86fr) minmax(0, 1.14fr); gap: clamp(44px, 10vw, 150px); align-items: start; border-top: 1px solid var(--line); }
+.journey { padding-block: 36px; display: grid; grid-template-columns: minmax(280px, .86fr) minmax(0, 1.14fr); gap: clamp(44px, 10vw, 150px); align-items: start; border-top: 1px solid var(--line); }
 .journey-lead { position: sticky; top: 32px; }
 .journey-lead p { margin-top: 16px; max-width: 390px; }
 .journey-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.journey-list li { display: grid; grid-template-columns: 62px 1fr minmax(170px, .68fr); gap: 16px; padding: 25px 0; border-bottom: 1px solid var(--line); }
+.journey-list li { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 16px; padding: 25px 0; border-bottom: 1px solid var(--line); }
 .journey-list span { color: var(--accent); font-size: 13px; font-weight: 700; }
 .journey-list h3 { margin: 0; font-size: 25px; line-height: 1; }
-.journey-list p { margin: 0; color: var(--muted); line-height: 1.5; }
-.payment { padding-block: 72px 88px; border-top: 1px solid var(--line); }
+.journey-list p { grid-column: 2; margin: 0; color: var(--muted); line-height: 1.5; }
+.payment { padding-block: 36px; border-top: 1px solid var(--line); }
 .payment-copy { max-width: 720px; }
 .payment-copy h2 { margin-bottom: 16px; }
-.payment-copy ul { padding: 0; margin: 28px 0; list-style: none; }
-.payment-copy li { padding: 13px 0; border-top: 1px solid var(--line); font-weight: 700; }
-.payment-copy li:last-child { border-bottom: 1px solid var(--line); }
+.payment-copy ul { padding: 0; margin: 16px 0 0; display: flex; flex-wrap: wrap; gap: 12px 24px; list-style: none; }
+.payment-copy li { padding: 4px 0; font-weight: 700; }
+
 .fine-print { font-size: 14px; }
 .ticket-section { padding-block: 56px 72px; border-top: 1px solid var(--line); }
 .ticket-copy { max-width: 600px; }
@@ -39,17 +40,31 @@
 @media (max-width: 1023px) and (min-width: 768px) { .event-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
   .hero { padding-block: 30px 18px; }
-  .hero h1 { font-size: clamp(42px, 12vw, 56px); }
+  .hero h1 { font-size: clamp(32px, 8vw, 44px); }
   .hero-summary { margin-bottom: 22px; font-size: 16px; }
   .section-intro { display: block; margin-bottom: 16px; }
   .section-intro p { margin-top: 8px; font-size: 14px; }
   .event-section { padding-block: 16px 60px; }
   .event-section .results-count { margin: 6px 0; }
   .event-list { grid-template-columns: 1fr; gap: 12px; }
-  .journey { padding-block: 60px; grid-template-columns: 1fr; gap: 24px; }
-  .payment { padding-block: 52px 60px; }
+  .journey { padding-block: 32px; grid-template-columns: 1fr; gap: 24px; }
+  .payment { padding-block: 32px; }
   .ticket-section { padding-block: 48px 56px; }
   .journey-lead { position: static; }
   .journey-list li { grid-template-columns: 40px 1fr; gap: 12px; }
   .journey-list p { grid-column: 2; }
+}
+
+.home-filter-fields { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr); gap: 20px; padding-block: 8px; }
+.event-list > div, .event-list .concert-card { height: 100%; }
+.load-more { margin: 20px 20px 0 0; }
+.ticket-access { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+@media (max-width: 767px) { .home-filter-fields { grid-template-columns: 1fr; gap: 12px; } }
+
+@media (min-width: 1024px) {
+  .event-search { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr) 170px; gap: 16px; max-width: none; }
+  .event-search .filters[open] summary { display: none; }
+  .event-search .filter-tools { margin: 0; align-items: flex-end; }
+  .home-filter-fields { grid-template-columns: minmax(0, .8fr) minmax(0, 2fr); gap: 16px; padding: 0; }
+  .event-search .search-actions { align-self: end; margin: 0 0 8px; }
 }

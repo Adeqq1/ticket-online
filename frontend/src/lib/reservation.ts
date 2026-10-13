@@ -28,7 +28,7 @@ export function parseCheckoutAttempt(value: string | null, quantities: Record<st
     const payload = JSON.parse(value ?? "") as Partial<CreateOrderRequest>;
     const buyer = payload.buyer;
     const attendees = payload.attendees;
-    if (!buyer || ![buyer.name, buyer.email, buyer.phone, buyer.identity].every((part) => typeof part === "string") || !Array.isArray(attendees) || attendees.length !== Object.keys(quantities).length || (payload.voucherCode !== undefined && typeof payload.voucherCode !== "string")) return null;
+    if (!buyer || ![buyer.name, buyer.email, buyer.phone].every((part) => typeof part === "string") || (buyer.identity !== undefined && typeof buyer.identity !== "string") || !Array.isArray(attendees) || attendees.length !== Object.keys(quantities).length || (payload.voucherCode !== undefined && typeof payload.voucherCode !== "string")) return null;
     const seen = new Set<string>();
     for (const attendee of attendees) {
       const quantity = quantities[attendee.tierId];

@@ -77,3 +77,18 @@ func TestValidateRejectsInvalidAttendeeName(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want ErrInvalidRequest", err)
 	}
 }
+
+func TestValidateOptionalIdentity(t *testing.T) {
+	for _, identity := range []string{"", "   ", "123456789012", "12345678901234567890"} {
+		input := Request{Buyer: Buyer{Name: "Buyer", Email: "buyer@example.com", Phone: "081234567890", Identity: identity}}
+		if _, err := Validate(input); err != nil {
+			t.Fatalf("identity %q: %v", identity, err)
+		}
+	}
+	for _, identity := range []string{"12345", "123456789012345678901", "abcdefghijklm"} {
+		input := Request{Buyer: Buyer{Name: "Buyer", Email: "buyer@example.com", Phone: "081234567890", Identity: identity}}
+		if _, err := Validate(input); err != ErrInvalidRequest {
+			t.Fatalf("identity %q: %v", identity, err)
+		}
+	}
+}

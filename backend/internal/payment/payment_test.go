@@ -90,3 +90,28 @@ func TestMidtransStatusUsesConfiguredEndpointAndHonorsTimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestPaymentReturnURLAllowsSameOrderWithoutRelaxingOrigin(t *testing.T) {
+	const id = "0123456789abcdef0123456789abcdef"
+	h := NewHandlerWithMidtrans(NewRepository(nil), nil, nil, "key", "https://tickets.example.com", "sandbox")
+	for _, tc := range []struct {
+		url  string
+		want bool
+	}{
+		{"https://tickets.example.com/checkout/nusa-malam?reservation=existing", true},
+		{"https://tickets.example.com/pesanan/" + id, true},
+		{"https://tickets.example.com/pesanan/ffffffffffffffffffffffffffffffff", false},
+		{"https://tickets.example.com/pesanan/" + id + "#pembayaran", false},
+		{"https://tickets.example.com/pesanan/" + id + "?token=private", false},
+		{"https://tickets.example.com/pesanan/" + id + "/extra", false},
+		{"https://tickets.example.com.evil.test/pesanan/" + id, false},
+		{"https://user@tickets.example.com/pesanan/" + id, false},
+		{"http://tickets.example.com/pesanan/" + id, false},
+		{"//tickets.example.com/pesanan/" + id, false},
+		{"https://tickets.example.com/pulihkan-tiket", false},
+	} {
+		if got := h.validReturnURL(tc.url, id); got != tc.want {
+			t.Errorf("validReturnURL(%q) = %v, want %v", tc.url, got, tc.want)
+		}
+	}
+}

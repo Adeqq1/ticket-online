@@ -1,120 +1,110 @@
 <script lang="ts">
-  import { currentStart, eventStatus } from "../../lib/event-changes.ts";
   import { onMount, tick } from "svelte";
   import { eventDate } from "../../lib/concerts.ts";
   import { buyerOrderStatusLabel, refundStatusLabel } from "../../lib/buyer-refund.ts";
-  import { ApiError, getOrder, listOrderTickets, type ApiTicket } from "../../lib/api.ts";
   import { buyerPaymentStatusLabel } from "../../lib/buyer-payment.ts";
-  import { loadBuyerOrderTickets, uniqueBuyerTickets, type BuyerOrderTickets } from "../../lib/buyer-tickets.ts";
-  import { hasPersistentTicketAccess, listOrderAccess, saveOrderTicketAccess } from "../../lib/order-access.ts";
-  import { listTicketSnapshots } from "../../lib/tickets.ts";
+  import { buyerOrderCategory, buyerOrderIssue, buyerOrderNeedsRecovery, canResumeOrderPayment, groupBuyerOrders, loadBuyerOrderTickets, orderedTicketCount, usableBuyerTickets, type BuyerOrderTickets } from "../../lib/buyer-tickets.ts";
+  import { listOrderAccess, orderAccessStorageUnreadable } from "../../lib/order-access.ts";
 
   let orders = $state<BuyerOrderTickets[]>([]);
   let loading = $state(true);
   let loadingOrders = $state<string[]>([]);
-  let checkingPayments = $state<string[]>([]);
-  let paymentCheckErrors = $state<Record<string, string>>({});
-  let paymentMessage = $state("");
-  let paymentResult = $state<HTMLParagraphElement>();
-  let listError = $state("");
-  let demoDataPresent = $state(false);
-  const tickets = $derived(uniqueBuyerTickets(orders));
-  const ordersNeedingRetry = $derived(orders.filter((order) => order.error || order.detail?.status !== "PAID" || !order.tickets.length));
-  const upcoming = (ticket: ApiTicket) => Date.parse(currentStart(ticket) ?? "") > Date.now();
-  function persistTickets(access: BuyerOrderTickets["access"], ticketList: ApiTicket[]) {
-    if (!ticketList.length) return;
-    const saved = saveOrderTicketAccess(access, access.accessExpiresAt, ticketList.map((ticket) => ticket.id));
-    if (!saved) listError = "Penyimpanan browser gagal. Kode tiket tetap terlihat di halaman ini, tetapi tautan e-ticket tidak akan tersedia setelah halaman ditutup.";
+  let selected = $state<"active" | "pending" | "history">("active");
+  let now = $state(Date.now());
+  let storageUnreadable = $state(false);
+  let message = $state("");
+  let resultMessage = $state<HTMLParagraphElement>();
+  let controller: AbortController;
+  const groups = $derived(groupBuyerOrders(orders));
+  const followups = $derived(orders.filter(({ detail }) => detail?.currentEvent?.status === "POSTPONED" || detail?.status === "REFUND_PENDING" || detail?.refundRight?.requested && detail.refund?.status !== "SUCCEEDED" || detail?.refund && detail.refund.status !== "SUCCEEDED"));
+  const storageFailed = $derived(orders.some((order) => order.accessSaved === false));
+  const categories = [{ id: "active", label: "Tiket aktif" }, { id: "pending", label: "Menunggu pembayaran" }, { id: "history", label: "Riwayat" }] as const;
+
+  async function refreshOrder(order: BuyerOrderTickets) {
+    const id = order.access.orderId;
+    if (loadingOrders.includes(id)) return null;
+    loadingOrders = [...loadingOrders, id];
+    try {
+      const result = await loadBuyerOrderTickets(order.access, controller.signal);
+      if (controller.signal.aborted) return null;
+      orders = orders.map((item) => item.access.orderId === id ? result : item);
+      now = Date.now();
+      return result;
+    } finally { loadingOrders = loadingOrders.filter((value) => value !== id); }
   }
 
-  async function refreshOrder(orderId: string) {
-    if (loadingOrders.includes(orderId)) return;
-    loadingOrders = [...loadingOrders, orderId];
-    const access = listOrderAccess().find((record) => record.orderId === orderId);
-    if (!access) {
-      listError = "Akses order tidak tersedia di browser ini.";
-      loadingOrders = loadingOrders.filter((id) => id !== orderId);
+  async function paymentAction(order: BuyerOrderTickets, resume: boolean) {
+    const result = await refreshOrder(order);
+    if (!result) return;
+    if (resume && result.detail && canResumeOrderPayment(result.detail) && result.accessSaved !== false) {
+      window.location.assign(`/pesanan/${encodeURIComponent(order.access.orderId)}#pembayaran`);
       return;
     }
-    const result = await loadBuyerOrderTickets(access, pageController?.signal);
-    if (result.tickets.length) {
-      persistTickets(access, result.tickets);
-    }
-    orders = [...orders.filter((order) => order.access.orderId !== orderId), result];
-    loadingOrders = loadingOrders.filter((id) => id !== orderId);
-  }
-
-  async function checkPaymentStatus(orderId: string) {
-    if (checkingPayments.includes(orderId)) return;
-    const order = orders.find((item) => item.access.orderId === orderId);
-    if (!order) return;
-    checkingPayments = [...checkingPayments, orderId];
-    paymentCheckErrors[orderId] = "";
-    paymentMessage = "";
-    try {
-      const detail = await getOrder(orderId, order.access.accessToken, pageController?.signal);
-      orders = orders.map((item) => item.access.orderId === orderId ? { ...item, detail } : item);
-      paymentMessage = `Status pembayaran diperbarui: ${buyerPaymentStatusLabel(detail.status, detail.payment?.status)}.`;
-    } catch (cause) {
-      paymentCheckErrors[orderId] = cause instanceof Error ? cause.message : "Terjadi gangguan jaringan.";
-      paymentMessage = "Status pembayaran terbaru belum dapat diperiksa.";
-    } finally { checkingPayments = checkingPayments.filter((id) => id !== orderId); await tick(); paymentResult?.focus(); }
-  }
-
-  async function reloadTickets(orderId: string) {
-    if (loadingOrders.includes(orderId)) return;
-    const order = orders.find((item) => item.access.orderId === orderId);
-    if (!order?.detail || !["PAID", "REFUND_PENDING", "REFUNDED"].includes(order.detail.status)) return;
-    loadingOrders = [...loadingOrders, orderId];
-    try {
-      const tickets = await listOrderTickets(orderId, order.access.accessToken, pageController?.signal);
-      const expected = order.detail.items.reduce((count, item) => count + item.quantity, 0);
-      const error = tickets.length === expected ? null : new Error("Sebagian e-ticket belum dapat dimuat.");
-      persistTickets(order.access, tickets);
-      orders = orders.map((item) => item.access.orderId === orderId ? { ...item, tickets, error } : item);
-    } catch (cause) {
-      orders = orders.map((item) => item.access.orderId === orderId ? { ...item, error: cause instanceof Error ? cause : new Error("Daftar tiket belum dapat dimuat.") } : item);
-    } finally { loadingOrders = loadingOrders.filter((id) => id !== orderId); }
+    message = result.error ? buyerOrderIssue(result) : `Status pembayaran diperbarui: ${buyerPaymentStatusLabel(result.detail!.status, result.detail!.payment?.status)}.`;
+    await tick(); resultMessage?.focus();
   }
 
   onMount(() => {
-    let active = true;
-    pageController = new AbortController();
-    demoDataPresent = listTicketSnapshots().length > 0;
-    const savedOrders = listOrderAccess();
-    Promise.all(savedOrders.map((order) => loadBuyerOrderTickets(order, pageController?.signal))).then((results) => {
-      if (!active) return;
-      orders = results;
-      for (const result of results) persistTickets(result.access, result.tickets);
-    }).catch(() => { if (active) listError = "Daftar order belum dapat dimuat."; }).finally(() => { if (active) loading = false; });
-    return () => { active = false; pageController?.abort(); };
+    controller = new AbortController();
+    storageUnreadable = orderAccessStorageUnreadable();
+    Promise.all(listOrderAccess().map((access) => loadBuyerOrderTickets(access, controller.signal))).then((results) => {
+      if (!controller.signal.aborted) { orders = results; loading = false; }
+    });
+    const refresh = () => { if (!loading && document.visibilityState === "visible") for (const order of orders) void refreshOrder(order); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(() => { now = Date.now(); }, 1000);
+    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
   });
-  let pageController: AbortController | undefined;
 </script>
 
 {#snippet orderCard(order: BuyerOrderTickets)}
+  {@const detail = order.detail}
+  {@const category = buyerOrderCategory(order)}
+  {@const usable = usableBuyerTickets(order)}
+  {@const busy = loadingOrders.includes(order.access.orderId)}
   <li>
-    <article class="my-order-card">
-      <div>
-        <b>Kode pesanan (reference): {order.access.reference}</b>
-        {#if order.detail}
-          <p>Status pembayaran: {buyerPaymentStatusLabel(order.detail.status, order.detail.payment?.status)}. Status order: {buyerOrderStatusLabel(order.detail.status)}{#if order.detail.refund} · {refundStatusLabel(order.detail.refund.status)}{/if}</p>
-          {#if buyerPaymentStatusLabel(order.detail.status, order.detail.payment?.status) === "Menunggu konfirmasi pembayaran"}<p>Pembayaran belum dikonfirmasi. Tiket tersedia setelah pembayaran dikonfirmasi.</p>{/if}
-          {#if paymentCheckErrors[order.access.orderId]}<p role="alert">Status pembayaran terbaru belum dapat diperiksa. {paymentCheckErrors[order.access.orderId]} Status terakhir yang berhasil dibaca: {buyerPaymentStatusLabel(order.detail.status, order.detail.payment?.status)}.</p>{/if}
-          {#if order.error}<p>Daftar tiket: {order.error.message}</p>{/if}
-        {:else if order.error instanceof ApiError && order.error.code === "ACCESS_TOKEN_EXPIRED"}
-          <p>Akses order di browser ini sudah kedaluwarsa.</p>
-        {:else if order.error instanceof ApiError && order.error.status === 404}
-          <p>Order tidak ditemukan dengan akses yang tersimpan.</p>
-        {:else}
-          <p>{order.error?.message ?? "Tiket belum tersedia."}</p>
-        {/if}
-      </div>
-      <div class="my-order-actions">
-        <a class="button button-secondary" href={`/pesanan/${encodeURIComponent(order.access.orderId)}`}>Detail pesanan</a>
-        {#if order.detail?.status === "PENDING"}<button class="button button-secondary" type="button" disabled={checkingPayments.includes(order.access.orderId)} onclick={() => checkPaymentStatus(order.access.orderId)}>{checkingPayments.includes(order.access.orderId) ? "Memeriksa…" : "Periksa status pembayaran"}</button>{/if}
-        {#if order.detail && ["PAID", "REFUND_PENDING", "REFUNDED"].includes(order.detail.status) && (!order.tickets.length || order.error)}<button class="button button-secondary" type="button" disabled={loadingOrders.includes(order.access.orderId)} onclick={() => reloadTickets(order.access.orderId)}>{loadingOrders.includes(order.access.orderId) ? "Memuat…" : "Muat ulang tiket"}</button>{/if}
-        {#if !order.detail}<button class="button button-secondary" type="button" disabled={loadingOrders.includes(order.access.orderId)} onclick={() => refreshOrder(order.access.orderId)}>{loadingOrders.includes(order.access.orderId) ? "Memuat..." : "Coba muat ulang"}</button>{/if}
+    <article class="my-ticket-card">
+      <div class="my-ticket-card-link">
+        <div class="my-ticket-mark" class:past={category !== "active"} aria-hidden="true">{detail?.status === "EXPIRED" ? "Pesanan kedaluwarsa" : detail?.status === "CANCELLED" ? "Pesanan dibatalkan" : detail?.status === "PENDING" ? "Menunggu pembayaran" : order.tickets.length ? "E-ticket" : "Pesanan"}</div>
+        <div class="my-ticket-card-body">
+          <h2>{detail?.eventArtist || "Informasi konser belum tersedia"}</h2>
+          {#if detail?.eventArtist}
+            <p class="my-ticket-date">{detail.currentEvent?.startsAt ? eventDate(detail.currentEvent.startsAt) : "Jadwal belum diumumkan"}</p>
+            {#if detail.eventVenue || detail.eventCity}<p class="my-ticket-venue">{[detail.eventVenue, detail.eventCity].filter(Boolean).join(", ")}</p>{/if}
+          {/if}
+          {#if detail}<p class="my-ticket-venue">{orderedTicketCount(detail)} tiket dipesan{#if category === "active" || category === "history" && detail.status === "PAID"}{" · "}{usable.length} dapat digunakan{/if}</p>{/if}
+          <p><span class:past={category !== "active"} class="my-ticket-status">{category === "review" ? "Perlu diperiksa" : detail?.status === "EXPIRED" ? "Pesanan kedaluwarsa" : detail?.status === "CANCELLED" ? "Pesanan dibatalkan" : detail?.currentEvent?.status === "POSTPONED" ? "Acara ditunda" : category === "active" ? "Tiket aktif" : category === "history" && detail?.status === "PAID" ? detail.currentEvent?.status === "CANCELLED" ? "Acara dibatalkan" : "Tiket tidak aktif" : detail ? buyerOrderStatusLabel(detail.status) : "Perlu diperiksa"}</span></p>
+          {#if detail?.refund}<p class="my-ticket-event-update">{refundStatusLabel(detail.refund.status)}</p>{:else if detail?.refundRight?.requested}<p class="my-ticket-event-update">Refund sedang diperiksa</p>{/if}
+          {#if detail?.status === "EXPIRED"}<p class="my-ticket-venue">Batas waktu pembayaran telah lewat.</p>{/if}
+          {#if (detail?.status === "EXPIRED" || detail?.status === "CANCELLED") && detail.payment?.status === "SUCCEEDED"}<p class="my-ticket-event-update">Pembayaran diterima setelah pesanan berakhir. Periksa detail pengembalian dana.</p>{/if}
+          {#if detail?.status === "PENDING"}
+            <p class="my-ticket-venue">{detail.payment?.status === "SUCCEEDED" ? "Pembayaran diterima; menunggu konfirmasi pesanan." : detail.payment?.status === "PENDING" ? "Pembayaran belum selesai. Jika sudah membayar, periksa status pembayaran." : Date.parse(detail.expiresAt) <= now ? "Batas pembayaran lewat. Hasil pembayaran perlu diperiksa." : `Bayar sebelum ${eventDate(detail.expiresAt)}.`}</p>
+          {/if}
+          {#if category === "review" && detail?.status === "PAID"}<p class="my-ticket-venue">{order.tickets.length} e-ticket berhasil dimuat; kelayakan belum dapat dipastikan.</p>{/if}
+          {#if category === "review"}<p class="my-ticket-venue">{buyerOrderIssue(order)}</p>{/if}
+          <p class="my-ticket-reference">Nomor pesanan: {detail?.reference || order.access.reference}</p>
+          <div class="my-order-actions">
+            {#if order.accessSaved === false || buyerOrderNeedsRecovery(order)}
+              <a class="button" href="/pulihkan-tiket">Pulihkan tiket</a>
+            {:else if category === "active" && usable.length === 1}
+              <a class="button" href={`/tiket/${encodeURIComponent(usable[0]!.id)}`}>Buka e-ticket</a>
+            {:else if category === "active" && usable.length > 1}
+              <details class="ticket-picker">
+                <summary class="button">Buka e-ticket</summary>
+                <ul aria-label="Pilih peserta dan kategori tiket">
+                  {#each usable as ticket (ticket.id)}<li><a href={`/tiket/${encodeURIComponent(ticket.id)}`}>{ticket.attendeeName} · {ticket.tierName}</a></li>{/each}
+                </ul>
+              </details>
+            {:else if category === "pending" && detail}
+              <button class="button" type="button" disabled={busy} onclick={() => paymentAction(order, canResumeOrderPayment(detail, now))}>{busy ? "Memeriksa..." : canResumeOrderPayment(detail, now) ? "Lanjutkan pembayaran" : "Periksa status pembayaran"}</button>
+              {#if detail.payment?.status === "PENDING" && canResumeOrderPayment(detail, now)}<button class="text-button" type="button" disabled={busy} onclick={() => paymentAction(order, false)}>Periksa status pembayaran</button>{/if}
+            {:else if category === "review"}
+              <button class="button" type="button" disabled={busy} onclick={() => refreshOrder(order)}>{busy ? "Memuat..." : "Coba lagi"}</button>
+            {/if}
+            {#if detail && order.accessSaved !== false}<a class="text-button" href={`/pesanan/${encodeURIComponent(order.access.orderId)}`}>Lihat detail</a>{/if}
+          </div>
+        </div>
       </div>
     </article>
   </li>
@@ -122,7 +112,7 @@
 
 <svelte:head>
   <title>Tiket saya | Tiket Online</title>
-  <meta name="description" content="Lihat e-ticket dari order yang tersimpan pada browser ini." />
+  <meta name="description" content="Lihat konser, status tiket, dan pesanan yang tersimpan di perangkat ini." />
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -130,61 +120,56 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Dompet tiket</p>
     <h1>Tiket saya.</h1>
-    <p>Order dan tiket yang tersimpan dapat dibuka di sini. Tautan pada email konfirmasi juga dapat membuka e-ticket di perangkat lain.</p>
+    <p>Pesanan yang tersimpan di perangkat ini ditampilkan di sini. Untuk membuka tiket di perangkat lain, gunakan tautan pada email konfirmasi.</p>
     <p><a class="text-button" href="/pulihkan-tiket">Sudah membeli, tetapi tiket tidak muncul?</a></p>
   </header>
-
-  {#if demoDataPresent}<p class="legacy-ticket-note" role="status">Snapshot demo lama tersimpan di browser, tetapi bukan tiket backend dan tidak ditampilkan sebagai tiket masuk.</p>{/if}
-  {#if listError}<p class="legacy-ticket-note" role="alert">{listError}</p>{/if}
-  <p class="sr-only" role="status" aria-live="polite" tabindex="-1" bind:this={paymentResult}>{paymentMessage}</p>
+  {#if storageUnreadable}<p class="legacy-ticket-note" role="alert">Akses yang tersimpan di perangkat ini belum dapat dibaca. Sebagian pesanan mungkin belum muncul. Gunakan tautan email konfirmasi atau <a href="/pulihkan-tiket">pulihkan tiket</a>.</p>{/if}
+  {#if storageFailed}<p class="legacy-ticket-note" role="alert">Akses pesanan belum tersimpan di perangkat ini. Gunakan tautan email konfirmasi atau <a href="/pulihkan-tiket">pulihkan tiket</a> untuk membuka kembali setelah halaman ditutup.</p>{/if}
+  <p role="status" aria-live="polite" tabindex="-1" bind:this={resultMessage}>{message}</p>
   {#if loading}
-    <p role="status">Memuat order dan e-ticket...</p>
-  {:else if tickets.length}
-    <div class="my-tickets-summary" aria-live="polite"><strong>{tickets.length} tiket</strong><span>Urut berdasarkan jadwal acara</span></div>
-    <ul class="my-tickets-list" aria-label="Daftar e-ticket">
-      {#each tickets as ticket (ticket.id)}
-        {@const access = orders.find((order) => order.tickets.some((item) => item.id === ticket.id))?.access}
-        {@const persistent = access ? hasPersistentTicketAccess(access.orderId, ticket.id) : false}
-        <li>
-          <article class="my-ticket-card">
-            <div class="my-ticket-card-link">
-              <div class="my-ticket-mark" aria-hidden="true">Tiket<br />digital</div>
-              <div class="my-ticket-card-body">
-                <div class="my-ticket-card-topline">
-                  <span class:past={!upcoming(ticket)} class="my-ticket-status">{ticket.usable === false ? "Tidak aktif" : eventStatus(ticket.currentEvent) || (upcoming(ticket) ? "Mendatang" : "Selesai")}</span>
-                  {#if access}<a class="my-ticket-reference" href={`/pesanan/${encodeURIComponent(access.orderId)}`}>Kode pesanan (reference): {ticket.orderReference}</a>{:else}<span class="my-ticket-reference">Kode pesanan (reference): {ticket.orderReference}</span>{/if}
-                </div>
-                <h2>{ticket.eventArtist}</h2>
-                <p class="my-ticket-date">{eventDate(currentStart(ticket))}</p>
-                {#if ticket.currentEvent?.version}<p class="my-ticket-event-update" role="status">{ticket.currentEvent.announcement}</p>{/if}
-                <p class="my-ticket-venue">{ticket.eventVenue}, {ticket.eventCity}</p>
-                <p class="my-ticket-venue"><strong>{ticket.attendeeName}</strong></p>
-                <p class="my-ticket-venue">{ticket.tierName} · {ticket.gate}</p>
-                {#if persistent}
-                  <a class="my-ticket-action" href={`/tiket/${encodeURIComponent(ticket.id)}`}>Lihat e-ticket <span aria-hidden="true">→</span></a>
-                {:else}
-                  <p class="my-ticket-action">Kode tiket tersedia selama halaman ini terbuka.</p>
-                {/if}
-              </div>
-            </div>
-          </article>
-        </li>
-      {/each}
-    </ul>
-    {#if ordersNeedingRetry.length}
-      <ul class="my-order-list" aria-label="Order yang perlu diperiksa">
-        {#each ordersNeedingRetry as order (order.access.orderId)}
-          {@render orderCard(order)}
-        {/each}
-      </ul>
-    {/if}
-  {:else if orders.length}
-    <ul class="my-order-list" aria-label="Status order tersimpan">
-      {#each orders as order (order.access.orderId)}
-          {@render orderCard(order)}
-      {/each}
-    </ul>
+    <p role="status">Memeriksa pesanan dan status tiket...</p>
   {:else}
-    <section class="my-tickets-empty" aria-labelledby="empty-title"><div class="ticket-illustration" aria-hidden="true"><span></span><span></span><i></i><b></b></div><div><p class="ticket-kicker">Belum ada tiket</p><h2 id="empty-title">Dompetmu masih kosong.</h2><p>Akses pesanan mungkin belum tersimpan di browser ini. Pulihkan tiket memakai email pembeli dan kode pesanan dari email konfirmasi.</p><a class="button" href="/pulihkan-tiket">Pulihkan tiket</a><p><a class="text-button" href="/konser">Cari konser</a></p></div></section>
+    {#if followups.length}<p class="legacy-ticket-note" role="status">{followups.length} pesanan memiliki acara ditunda atau refund yang masih berjalan. Buka detail pesanan untuk tindak lanjut.</p>{/if}
+    <nav class="ticket-categories" aria-label="Kategori pesanan">
+      {#each categories as category}<button type="button" aria-pressed={selected === category.id} onclick={() => { selected = category.id; }}>{category.label} <span>{groups[category.id].length}</span></button>{/each}
+    </nav>
+    <section aria-label={categories.find((category) => category.id === selected)!.label}>
+      {#if groups[selected].length}
+        <div class="my-tickets-summary"><strong>{groups[selected].length} pesanan</strong><button class="text-button" type="button" disabled={loadingOrders.length > 0} onclick={() => { for (const order of orders) void refreshOrder(order); }}>Periksa lagi</button></div>
+        <ul class="my-tickets-list" aria-label="Daftar pesanan">{#each groups[selected] as order (order.access.orderId)}{@render orderCard(order)}{/each}</ul>
+      {:else if selected === "active"}
+        <div class="my-tickets-empty"><div><h2>Belum ada tiket aktif.</h2><p>Temukan konser dan pesan tiketmu.</p>{#if groups.review.length}<p role="status">Sebagian status tiket belum dapat dipastikan. Periksa pesanan di bagian Perlu diperiksa.</p>{/if}<a class="button" href="/konser">Cari konser</a></div></div>
+      {:else}<p role="status">{selected === "pending" ? "Tidak ada pesanan yang menunggu pembayaran." : "Belum ada riwayat pesanan."}</p>{/if}
+    </section>
+    {#if groups.review.length}
+      <section class="ticket-review" aria-labelledby="review-title"><h2 id="review-title">Perlu diperiksa</h2><p>Status pesanan berikut belum dapat dipastikan.</p><ul class="my-tickets-list" aria-label="Pesanan perlu diperiksa">{#each groups.review as order (order.access.orderId)}{@render orderCard(order)}{/each}</ul></section>
+    {/if}
   {/if}
 </section>
+
+<style>
+  .my-ticket-mark.past { background: var(--canvas); color: var(--muted); }
+  .my-ticket-card h2 { margin-top: 0; }
+  .my-ticket-card-body > p { margin-block: 6px; }
+  .my-ticket-reference { margin-top: 16px; font-size: 12px; }
+  .my-order-actions { align-items: center; margin-top: auto; padding-top: 18px; }
+  .ticket-categories { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+  .ticket-categories button { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+  .ticket-categories button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .ticket-categories span { font-variant-numeric: tabular-nums; }
+  .ticket-picker { width: 100%; }
+  .ticket-picker summary { cursor: pointer; }
+  .ticket-picker ul { display: grid; gap: 12px; padding-left: 20px; }
+  .ticket-picker a { overflow-wrap: anywhere; }
+  .ticket-review { margin-top: 32px; }
+  .my-tickets-empty { grid-template-columns: 1fr; min-height: 240px; padding-block: 28px; }
+  .my-tickets-empty h2 { font-size: clamp(30px, 4vw, 44px); }
+  @media (max-width: 767px) {
+    .my-ticket-card-link { grid-template-columns: minmax(0, 1fr); }
+    .my-ticket-mark { display: none; }
+    .my-ticket-card-body { padding: 18px; }
+    .ticket-categories { gap: 6px; }
+    .ticket-categories button { padding: 10px; font-size: 14px; }
+    .my-order-actions .button { width: 100%; }
+  }
+</style>

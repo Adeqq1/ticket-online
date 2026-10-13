@@ -25,7 +25,7 @@ export type Voucher = VoucherSnapshot & { startsAt: string; endsAt: string; acti
 export type PricingData = { settings: PricingSettings; vouchers: Array<Voucher & { usage: { held: number; consumed: number; released: number } }>; history: Array<{ actor: string; objectId: string; before: unknown; after: unknown; createdAt: string }> };
 export type OrderBase = { id: string; reference: string; reservationId: string; status: OrderStatus; expiresAt: string; subtotal: number; adminFee: number; discount: number; total: number; items: OrderItem[]; voucher?: VoucherSnapshot | null };
 export type OrderResponse = OrderBase & { accessToken: string; accessExpiresAt: string | null };
-export type OrderDetail = OrderBase & { buyer: Buyer; attendees: Array<{ tierId: string; ticketNumber: number; name: string }>; payment: PaymentSummary | null; createdAt: string; updatedAt: string; eventStartsAt: string; accessExpiresAt: string | null; currentEvent?: EventState; refundRight?: { requested: boolean; deadline: string | null } | null; refund?: { status: string; amount: number } | null };
+export type OrderDetail = OrderBase & { eventId?: string; eventArtist?: string; eventVenue?: string; eventCity?: string; buyer: Buyer; attendees: Array<{ tierId: string; ticketNumber: number; name: string }>; payment: PaymentSummary | null; createdAt: string; updatedAt: string; eventStartsAt: string; accessExpiresAt: string | null; currentEvent?: EventState; refundRight?: { requested: boolean; deadline: string | null } | null; refund?: { status: string; amount: number } | null };
 export type PaymentSummary = { id: string; method: PaymentMethod; amount: number; status: PaymentStatus; paidAt?: string };
 export type SimulatePaymentRequest = { method: PaymentMethod; result: PaymentStatus };
 export type ApiTicket = { currentEvent?: EventState; usable?: boolean; id: string; code: string; attendeeName: string; orderReference: string; eventId: string; eventArtist: string; eventCity: string; eventVenue: string; eventAddress: string; eventStartsAt: string; tierName: string; gate: string; issuedAt: string };
@@ -277,8 +277,13 @@ export function simulatePayment(orderId: string, payload: SimulatePaymentRequest
   return request<PaymentResult>(`/api/v1/orders/${encodeURIComponent(orderId)}/simulate-payment`, signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 
-export function createSnapPayment(orderId: string, method: PaymentMethod, returnUrl: string, accessToken: string, signal?: AbortSignal) {
-  return request<{ redirectUrl: string }>(`/api/v1/orders/${encodeURIComponent(orderId)}/payments`, signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify({ method, returnUrl }) });
+export async function createSnapPayment(orderId: string, method: PaymentMethod, returnUrl: string, accessToken: string, signal?: AbortSignal) {
+  const result = await request<{ redirectUrl: string }>(`/api/v1/orders/${encodeURIComponent(orderId)}/payments`, signal, { method: "POST", headers: { ...privateHeaders(accessToken), "Content-Type": "application/json" }, body: JSON.stringify({ method, returnUrl }) });
+  try {
+    const url = new URL(result.redirectUrl);
+    if (url.protocol === "https:" && ["app.midtrans.com", "app.sandbox.midtrans.com"].includes(url.host) && url.pathname.startsWith("/snap/") && !url.username && !url.password) return result;
+  } catch { /* A malformed response does not prove payment creation failed. */ }
+  throw new ApiError("Hasil pembayaran belum dapat dipastikan. Periksa status pembayaran.", 0, "UNKNOWN_OUTCOME");
 }
 
 export async function listOrderTickets(orderId: string, accessToken: string, signal?: AbortSignal) {

@@ -24,7 +24,7 @@
   function validate() {
     errors = {
       email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? "" : "Masukkan email pembeli yang valid.",
-      reference: /^TO-[0-9a-f]{20}$/i.test(reference.trim()) ? "" : "Masukkan kode pesanan (reference), misalnya TO- diikuti 20 karakter.",
+      reference: /^TO-[0-9a-f]{20}$/i.test(reference.trim()) ? "" : "Masukkan nomor pesanan, misalnya TO- diikuti 20 karakter.",
     };
     return !errors.email && !errors.reference;
   }
@@ -46,7 +46,7 @@
     } catch (value) {
       formError = value instanceof ApiError && value.status === 429
         ? `Terlalu banyak permintaan. Coba lagi dalam ${Math.ceil((value.retryAfter ?? 60) / 60)} menit.`
-        : value instanceof ApiError ? value.message : "Permintaan belum dapat dikirim. Coba lagi.";
+        : "Permintaan belum dapat dikirim. Coba lagi.";
     } finally { busy = false; }
   }
 
@@ -74,7 +74,7 @@
       // An unknown network outcome may already have consumed the token; never retry automatically.
       token = null;
       linkSpent = true;
-      verifyError = value instanceof ApiError && value.status === 410 ? value.message
+      verifyError = value instanceof ApiError && value.status === 410 ? "Tautan pemulihan sudah berakhir atau digunakan. Minta tautan baru. Ini bukan berarti pesanan kedaluwarsa."
         : value instanceof ApiError && value.status === 429 ? "Terlalu banyak percobaan pemulihan. Coba lagi nanti dengan tautan baru."
         : "Hasil pemulihan belum dapat dipastikan. Jika tiket belum muncul di Tiket Saya, minta tautan pemulihan baru.";
     } finally { busy = false; }
@@ -83,7 +83,7 @@
 
 <svelte:head>
   <title>Pulihkan tiket | Tiket Online</title>
-  <meta name="description" content="Pulihkan akses e-ticket di browser baru menggunakan email pembeli dan kode pesanan." />
+  <meta name="description" content="Pulihkan akses pesanan di perangkat lain menggunakan email pembeli dan nomor pesanan." />
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -91,7 +91,7 @@
   <header class="my-tickets-heading">
     <p class="ticket-kicker">Pemulihan tiket</p>
     <h1>Pulihkan tiket.</h1>
-    <p>Gunakan email pembeli dan kode pesanan untuk membuka e-ticket di browser ini.</p>
+    <p>Gunakan email pembeli dan nomor pesanan untuk memulihkan akses pesanan di perangkat ini.</p>
   </header>
 
   <ol class="recovery-steps" aria-label="Langkah pemulihan tiket">
@@ -100,21 +100,23 @@
     <li><strong>Buka tautan email</strong><span>Pulihkan akses sebelum tautan kedaluwarsa.</span></li>
   </ol>
 
+  <p class="recovery-access-note">Pemulihan hanya mengembalikan akses pesanan. Pesanan kedaluwarsa tetap kedaluwarsa dan tidak dapat digunakan untuk masuk.</p>
+
   {#if unsaved}
     <div class="recovery-panel" id="recovery-unsaved" tabindex="-1" role="alert">
-      <h2>Akses belum tersimpan di browser ini.</h2>
-      <p>Penyimpanan browser diblokir, jadi akses pesanan hanya tersedia selama halaman ini terbuka. Aktifkan penyimpanan browser lalu minta tautan baru.</p>
-      <p><b>Kode pesanan (reference): {unsaved.reference}</b>{#if unsaved.detail} · {unsaved.detail.items.reduce((count, item) => count + item.quantity, 0)} tiket{/if}</p>
+      <h2>Akses belum tersimpan di perangkat ini.</h2>
+      <p>Akses pesanan belum tersimpan. Gunakan tautan email konfirmasi atau minta tautan pemulihan baru untuk membuka kembali setelah halaman ditutup.</p>
+      <p><b>Nomor pesanan: {unsaved.reference}</b>{#if unsaved.detail} · {unsaved.detail.items.reduce((count, item) => count + item.quantity, 0)} tiket{/if}</p>
       {#if unsaved.tickets.length}
         <ul class="recovery-codes" aria-label="Kode e-ticket">
           {#each unsaved.tickets as ticket (ticket.id)}<li><span>{ticket.attendeeName} · {ticket.tierName} · {ticket.gate}</span><code>{ticket.code}</code></li>{/each}
         </ul>
-      {:else}<p>Kode tiket belum dapat dimuat. Kode pesanan <code>TO-…</code> berbeda dari kode tiket <code>ET-…</code>.</p>{/if}
+      {:else}<p>Kode tiket belum dapat dimuat. Nomor pesanan <code>TO-…</code> berbeda dari kode tiket <code>ET-…</code>.</p>{/if}
     </div>
   {:else if token}
     <div class="recovery-panel">
       <h2>Tautan pemulihan siap.</h2>
-      <p>Tekan tombol di bawah untuk menyimpan akses pesanan di browser ini. Tautan hanya dapat dipakai sekali.</p>
+      <p>Tekan tombol di bawah untuk menyimpan akses pesanan di perangkat ini. Tautan hanya dapat dipakai sekali.</p>
       <button class="button" type="button" disabled={busy} aria-busy={busy} onclick={verify}>{busy ? "Memulihkan..." : "Pulihkan tiket"}</button>
     </div>
   {:else}
@@ -126,7 +128,7 @@
         <ol>
           <li>Periksa inbox dan folder spam email pembeli untuk tautan pemulihan.</li>
           <li>Buka tautan sebelum kedaluwarsa; tautan berlaku 15 menit.</li>
-          <li>Tekan “Pulihkan tiket” untuk menyimpan akses di browser ini.</li>
+          <li>Tekan “Pulihkan tiket” untuk menyimpan akses di perangkat ini.</li>
         </ol>
         <p>Jika email belum ditemukan, periksa kembali alamat email checkout. Permintaan baru dibatasi satu kali setiap menit.</p>
         <button class="button button-secondary" type="button" onclick={() => { requested = ""; }}>Kirim permintaan lain</button>
@@ -134,17 +136,18 @@
     {:else}
       <div class="recovery-panel">
         <h2>Siapkan data pemulihan</h2>
-        <p>Cari email berjudul “E-ticket pesanan” untuk menemukan kode pesanan. Kode <code>TO-…</code> berbeda dari kode tiket <code>ET-…</code>. Gunakan email pembeli saat checkout.</p>
+        <p>Cari email berjudul “E-ticket pesanan”. Nomor pesanan tertera pada judul email dan ringkasan di awal email. Kode <code>TO-…</code> berbeda dari kode tiket <code>ET-…</code>. Gunakan email pembeli saat checkout.</p>
       </div>
       <form class="recovery-panel field-grid" novalidate onsubmit={submitRequest} aria-describedby="recovery-form-error">
-        {#if linkSpent}<p class="recovery-wide">Minta tautan baru dengan email pembeli dan kode pesanan (reference).</p>{/if}
+        {#if linkSpent}<p class="recovery-wide">Minta tautan baru dengan email pembeli dan nomor pesanan.</p>{/if}
         <label for="recovery-email">Email pembeli
-          <input id="recovery-email" type="email" autocomplete="email" maxlength="254" bind:value={email} required aria-invalid={Boolean(errors.email)} aria-describedby="recovery-email-error" class:is-invalid={Boolean(errors.email)} />
+          <input id="recovery-email" type="email" autocomplete="email" maxlength="254" bind:value={email} required aria-invalid={Boolean(errors.email)} aria-describedby="recovery-email-hint recovery-email-error" class:is-invalid={Boolean(errors.email)} />
+          <span id="recovery-email-hint" class="recovery-hint">Gunakan email pembeli saat memesan tiket.</span>
           <small id="recovery-email-error" aria-live="polite">{errors.email}</small>
         </label>
-        <label for="recovery-reference">Kode pesanan (reference)
+        <label for="recovery-reference">Nomor pesanan
           <input id="recovery-reference" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="23" placeholder="TO-…" bind:value={reference} required aria-invalid={Boolean(errors.reference)} aria-describedby="recovery-reference-hint recovery-reference-error" class:is-invalid={Boolean(errors.reference)} />
-          <span id="recovery-reference-hint" class="recovery-hint">Kode pesanan diawali TO-. Kode tiket ET- tidak berlaku di sini.</span>
+          <span id="recovery-reference-hint" class="recovery-hint">Nomor pesanan diawali TO-. Kode tiket ET- tidak berlaku di sini.</span>
           <small id="recovery-reference-error" aria-live="polite">{errors.reference}</small>
         </label>
         <p id="recovery-form-error" class="form-error recovery-wide" aria-live="polite">{formError}</p>
@@ -154,3 +157,11 @@
   {/if}
   <p class="recovery-footer"><a class="text-button" href="/tiket-saya">Kembali ke Tiket Saya</a></p>
 </section>
+
+<style>
+  .recovery-access-note { max-width: 680px; color: var(--muted); line-height: 1.5; }
+  .recovery-panel.field-grid { gap: 12px; align-items: start; }
+  .field-grid label { align-content: start; }
+  .field-grid input { box-sizing: border-box; height: 48px; }
+  .field-grid small:empty, .form-error:empty { display: none; }
+</style>

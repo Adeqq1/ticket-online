@@ -74,6 +74,7 @@
 .concert-detail .cart-checkout { width: 100%; margin-top: 8px; }
 .concert-detail .cart-checkout:disabled { border-color: var(--line); background: var(--line); color: var(--muted); cursor: not-allowed; }
 .concert-detail .mobile-cart { display: none; }
+.concert-detail .checkout-fee-note { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .detail-missing { min-height: 60dvh; padding-block: 110px; }
 .detail-missing h1 { font-size: clamp(42px, 7vw, 76px); letter-spacing: -.07em; }
 .detail-missing p { max-width: 480px; margin-bottom: 28px; color: var(--muted); }

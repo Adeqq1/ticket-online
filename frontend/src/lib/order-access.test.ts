@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { getOrderAccess, getOrderAccessForTicket, hasPersistentOrderAccess, hasPersistentTicketAccess, listOrderAccess, parseOrderAccess, removeOrderAccess, saveOrderAccess, saveOrderTicketAccess, type OrderAccess } from "./order-access.ts";
+import { getOrderAccess, getOrderAccessForTicket, hasPersistentOrderAccess, hasPersistentTicketAccess, listOrderAccess, orderAccessStorageUnreadable, parseOrderAccess, removeOrderAccess, saveOrderAccess, saveOrderTicketAccess, type OrderAccess } from "./order-access.ts";
 
 const record = { orderId: "order-1", accessToken: "private-token", expiresAt: "2027-08-24T12:40:00Z", accessExpiresAt: "2027-08-25T00:00:00Z", reservationId: "reservation-1", idempotencyKey: "stable-key", basketKey: "festival=1", reference: "TO-ABCDEFGHIJ", ticketIds: ["ticket-1"] };
 
@@ -125,5 +125,17 @@ test("tab storage preserves order recovery when local storage is unavailable", (
     values.clear();
     if (originalLocal) Object.defineProperty(globalThis, "localStorage", originalLocal); else Reflect.deleteProperty(globalThis, "localStorage");
     if (originalSession) Object.defineProperty(globalThis, "sessionStorage", originalSession); else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("reports unreadable saved access without discarding memory or changing stored records", () => {
+  const originals = ["localStorage", "sessionStorage"].map((name) => Object.getOwnPropertyDescriptor(globalThis, name));
+  try {
+    for (const name of ["localStorage", "sessionStorage"]) Object.defineProperty(globalThis, name, { configurable: true, value: { length: 0 } });
+    expect(orderAccessStorageUnreadable()).toBe(false);
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("access denied"); } });
+    expect(orderAccessStorageUnreadable()).toBe(true);
+  } finally {
+    ["localStorage", "sessionStorage"].forEach((name, index) => { const descriptor = originals[index]; if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); });
   }
 });

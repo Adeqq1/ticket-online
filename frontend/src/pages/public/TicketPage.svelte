@@ -101,7 +101,7 @@
           <div class="pass-grid"><div class="pass-row"><span>Pengunjung</span><b>{ticket.attendeeName}</b></div><div class="pass-row"><span>Tanggal event</span><b>{eventDate(currentStart(ticket))}</b></div><div class="pass-row"><span>Jenis tiket</span><b>{ticket.tierName}</b></div><div class="pass-row"><span>Gate</span><b>{ticket.gate}</b></div></div>
         </div>
         <details class="pass-details" bind:this={ticketDetails}><summary>Rincian penerbitan dan pesanan</summary>
-          <div class="ticket-lines"><div class="ticket-line"><span>Alamat</span><b>{ticket.eventAddress}</b></div><div class="ticket-line"><span>Kode pesanan (reference)</span><b>{ticket.orderReference}</b></div><div class="ticket-line"><span>Diterbitkan</span><b>{eventDate(ticket.issuedAt)}</b></div></div>
+          <div class="ticket-lines"><div class="ticket-line"><span>Alamat</span><b>{ticket.eventAddress}</b></div><div class="ticket-line"><span>Nomor pesanan</span><b>{ticket.orderReference}</b></div><div class="ticket-line"><span>Diterbitkan</span><b>{eventDate(ticket.issuedAt)}</b></div></div>
         </details>
       </section>
       <aside class="pass-stub"><div><span class="pass-label">Tunjukkan di gate</span>{#if qrSource}<img class="qr-code" src={qrSource} alt={`QR code untuk kode e-ticket ${ticket.code}`} />{:else}<p role="status">{ticket.usable === false ? "QR dinonaktifkan; tiket tidak dapat digunakan." : "QR tidak tersedia. Gunakan kode e-ticket di bawah."}</p>{/if}<p class="ticket-code">{ticket.code}</p>{#if ticket.usable !== false}<button class="button button-secondary" type="button" onclick={copyCode}>Salin kode</button>{/if}</div>{#if currentStart(ticket) && ticket.usable !== false}<Countdown startsAt={currentStart(ticket)!} />{/if}</aside>
