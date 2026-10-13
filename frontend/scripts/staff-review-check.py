@@ -139,6 +139,9 @@ async def verify_create_flow(page, people, admin, width, base_url):
         await expect(page.locator("#staff-create-title")).to_be_focused()
         await page.keyboard.press("Tab")
         await expect(panel.get_by_role("button", name="Kembali ke daftar", exact=True)).to_be_focused()
+        for label in ("1. Akun", "2. Penugasan", "3. Tinjau"):
+            await page.keyboard.press("Tab")
+            await expect(panel.get_by_role("button", name=label, exact=True)).to_be_focused()
         await page.keyboard.press("Tab")
         await expect(panel.get_by_label("Nama", exact=True)).to_be_focused()
         await panel.get_by_label("Nama", exact=True).fill("Nadia Petugas")
@@ -160,10 +163,30 @@ async def verify_create_flow(page, people, admin, width, base_url):
         await expect(page.get_by_role("button", name="Menu", exact=True)).to_be_focused()
     await draft()
     assert not posts, "The top action must never create an account"
+    await panel.get_by_label("Email", exact=True).fill("broken")
+    await panel.get_by_role("button", name="Lanjutkan", exact=True).click()
+    await expect(panel.get_by_label("Email", exact=True)).to_be_focused()
+    await expect(page.locator("#staff-create-section-title")).to_have_text("Akun")
+    assert not posts
+    await panel.get_by_label("Email", exact=True).fill("nadia@example.com")
+    await panel.get_by_role("button", name="Lanjutkan", exact=True).click()
+    assert not posts
     await panel.get_by_role("combobox", name="Event", exact=True).select_option("event")
     await panel.get_by_role("combobox", name="Gate", exact=True).select_option("Gate A")
     await panel.get_by_role("button", name="Tambah", exact=True).click()
-    await audit("create form")
+    await audit("create assignment")
+    await panel.get_by_role("button", name="Lanjutkan", exact=True).click()
+    assert not posts
+    await expect(panel.locator(".staff-review")).to_contain_text("Sudah diisi")
+    assert "password-fixture-123" not in await panel.inner_text()
+    await panel.get_by_label("Password awal").evaluate("el => el.value = ''")
+    await panel.locator("form").dispatch_event("submit")
+    await expect(panel.get_by_label("Password awal")).to_be_focused()
+    await expect(page.locator("#staff-create-section-title")).to_have_text("Akun")
+    assert not posts
+    await panel.get_by_label("Password awal").fill("password-fixture-123")
+    await panel.get_by_role("button", name="3. Tinjau", exact=True).click()
+    await audit("create review")
     await cancel.hover()
     await audit("secondary hover")
     await cancel.focus()
@@ -178,6 +201,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
                 window.originalSizes = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, parseFloat(getComputedStyle(el).fontSize)]);
                 for (const [el, , size] of window.originalSizes) el.style.setProperty('font-size', `${size * 2}px`, 'important');
             }""")
+        await panel.get_by_role("button", name="1. Akun", exact=True).click()
         await panel.get_by_label("Password awal").focus()
         await audit(label)
         await cancel.scroll_into_view_if_needed()
@@ -185,6 +209,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
         if scale == 2:
             await page.evaluate("() => { for (const [el, original] of window.originalSizes) { el.style.removeProperty('font-size'); if(original) el.style.fontSize = original; } }")
     await page.set_viewport_size({"width": width, "height": 900})
+    await panel.get_by_role("button", name="3. Tinjau", exact=True).click()
     page.once("dialog", lambda dialog: dialog.dismiss())
     await cancel.click()
     await expect(panel.get_by_label("Nama", exact=True)).to_have_value("Nadia Petugas")
@@ -236,6 +261,8 @@ async def verify_create_flow(page, people, admin, width, base_url):
         await visit()
         await draft()
         count = len(posts)
+        await panel.get_by_role("button", name="3. Tinjau", exact=True).click()
+        assert len(posts) == count
         await submit.click()
         if mode == "delayed":
             await asyncio.wait_for(started.wait(), 15)
@@ -291,21 +318,25 @@ async def verify_create_flow(page, people, admin, width, base_url):
             await page.wait_for_url("**/admin/login")
             continue
         await visit()
-        await opener.click()
+        await draft()
+        await panel.get_by_role("button", name="Lanjutkan", exact=True).click()
+        next_step = panel.get_by_role("button", name="Lanjutkan", exact=True)
         if catalog_mode == "loading":
             await panel.get_by_text("Memuat pilihan event…").wait_for()
-            await expect(submit).to_be_disabled()
+            await expect(next_step).to_be_disabled()
             release.set()
-            await expect(submit).to_be_enabled()
+            await expect(next_step).to_be_enabled()
         elif catalog_mode == "error":
             await panel.get_by_text("Katalog event belum dapat dimuat.", exact=False).wait_for()
-            await expect(submit).to_be_disabled()
+            await expect(next_step).to_be_disabled()
             catalog_mode = "success"
             await panel.get_by_role("button", name="Coba lagi").click()
-            await expect(submit).to_be_enabled()
+            await expect(next_step).to_be_enabled()
         else:
             await page.wait_for_url("**/admin/login")
-        if await panel.count(): await cancel.click()
+        if await panel.count():
+            page.once("dialog", lambda dialog: dialog.accept())
+            await cancel.click()
     catalog_mode = "success"
     await visit()
     await draft()
@@ -380,6 +411,14 @@ async def verify_management_flow(page, admin, width, base_url):
         await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
         await audit(name)
         await page.screenshot(path=str(output / f"roster20-{name}-{width}.png"), animations="disabled")
+        if name in ("create-open", "event-gate-selection", "create-review", "edit", "manage", "unknown-password"):
+            await page.evaluate("""() => {
+              window.__sectionFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+              for (const [el, , size] of window.__sectionFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+            }""")
+            await audit(name + "-text200")
+            await page.screenshot(path=str(output / f"roster20-{name}-text200-{width}.png"), full_page=True)
+            await page.evaluate("() => { for (const [el, size] of window.__sectionFonts) el.style.fontSize = size; }")
 
     async def reset_filters():
         if await page.get_by_role("button", name="Reset filter", exact=True).count():
@@ -453,9 +492,9 @@ async def verify_management_flow(page, admin, width, base_url):
     await expect(search).to_have_count(0)
     await expect(page.locator("#staff-create-opener")).to_have_count(0)
     await editor.get_by_label("Nama", exact=True).fill("Draft Ayu")
-    await editor.get_by_role("link", name="Penugasan", exact=True).click()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await expect(page.locator("#staff-assignments")).to_be_focused()
-    await editor.get_by_role("link", name="Profil dan akses", exact=True).click()
+    await editor.get_by_role("button", name="Bagian Profil dan akses", exact=True).click()
     await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Draft Ayu")
     await capture("edit", editor.locator("h2"))
     page.once("dialog", lambda dialog: dialog.dismiss())
@@ -469,7 +508,11 @@ async def verify_management_flow(page, admin, width, base_url):
 
     # Returning to the list protects an unadded selection before another account can open.
     await page.locator(f"#staff-manage-{rows[1]['id']}").click()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await editor.get_by_role("combobox", name="Event", exact=True).select_option("musik")
+    await editor.get_by_role("button", name="Bagian Profil dan akses", exact=True).click()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
+    await expect(editor.get_by_role("combobox", name="Event", exact=True)).to_have_value("musik")
     page.once("dialog", lambda dialog: dialog.dismiss())
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await expect(page.locator("#staff-edit-title")).to_have_text("Edit petugas: " + rows[1]["name"])
@@ -477,6 +520,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await page.locator(f"#staff-manage-{rows[2]['id']}").click()
     await expect(page.locator("#staff-edit-title")).to_be_focused()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await expect(editor.get_by_role("combobox", name="Event", exact=True)).to_have_value("")
     await expect(editor.get_by_role("button", name="Simpan penugasan")).to_be_enabled()
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
@@ -501,9 +545,10 @@ async def verify_management_flow(page, admin, width, base_url):
     await panel.get_by_label("Nama", exact=True).fill("Nadia Petugas")
     await panel.get_by_label("Email", exact=True).fill("nadia.uat@example.test")
     await panel.get_by_label("Password awal").fill("fixture-password-123")
+    await panel.get_by_role("button", name="Lanjutkan", exact=True).click()
     event_select = panel.get_by_role("combobox", name="Event", exact=True)
     gate_select = panel.get_by_role("combobox", name="Gate", exact=True)
-    submit = panel.get_by_role("button", name="Buat akun petugas", exact=True)
+    submit = panel.get_by_role("button", name="Lanjutkan", exact=True)
     await event_select.select_option("tanpa-gate")
     await expect(gate_select).to_be_disabled()
     await expect(submit).to_be_disabled()
@@ -524,6 +569,11 @@ async def verify_management_flow(page, admin, width, base_url):
     await expect(panel.get_by_role("button", name="Tambah", exact=True)).to_be_disabled()
     await panel.get_by_role("button", name="Batalkan pilihan").click()
     await submit.click()
+    assert len(mutations) == count
+    await expect(panel.locator(".staff-review")).to_contain_text("Sudah diisi")
+    assert "fixture-password-123" not in await panel.inner_text()
+    await capture("create-review", panel.locator("h3"))
+    await panel.get_by_role("button", name="Buat akun petugas", exact=True).click()
     await expect(panel).to_have_count(0)
     person = rows[-1]
     assert person["assignments"] == [dict(eventId="musik", gate="Gate A")]
@@ -535,20 +585,27 @@ async def verify_management_flow(page, admin, width, base_url):
     await reload_saved(person)
     assert person["name"] == "Nadia Petugas Utama"
     assignments_form = editor.locator("form").nth(1)
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("combobox", name="Event", exact=True).select_option("musik")
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("combobox", name="Gate", exact=True).select_option("Gate B")
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_disabled()
     page.once("dialog", lambda dialog: dialog.dismiss())
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await expect(editor).to_have_count(1)
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("button", name="Tambah", exact=True).click()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("button", name="Hapus penugasan Gate A", exact=True).click()
     count = len(mutations)
     page.once("dialog", lambda dialog: dialog.dismiss())
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("button", name="Simpan penugasan").click()
     assert len(mutations) == count
     delay = True
     page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("button", name="Simpan penugasan").click()
     await asyncio.wait_for(started.wait(), 15)
     await assignments_form.dispatch_event("submit")
@@ -579,6 +636,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await expect(page.locator(f"#staff-account-{person['id']} .staff-status")).to_have_text("Status: Nonaktif")
     await page.locator(f"#staff-manage-{person['id']}").click()
+    await editor.get_by_role("button", name="Bagian Reset password", exact=True).click()
     await editor.get_by_label("Password baru", exact=True).fill("fixture-password-456")
     count = len(mutations)
     page.once("dialog", lambda dialog: dialog.dismiss())
@@ -606,10 +664,13 @@ async def verify_management_flow(page, admin, width, base_url):
     person["name"] = "Nadia Perubahan Terputus"
     await page.get_by_role("button", name="Muat ulang", exact=True).click()
     await expect(editor.get_by_role("button", name="Simpan profil", exact=True)).to_be_enabled()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("button", name="Hapus penugasan Gate B").click()
     mode = "truncated"
     page.once("dialog", lambda dialog: dialog.accept())
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await assignments_form.get_by_role("button", name="Simpan penugasan").click()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_disabled()
     count = len(mutations)
     await assignments_form.dispatch_event("submit")
@@ -617,16 +678,20 @@ async def verify_management_flow(page, admin, width, base_url):
     page.once("dialog", lambda dialog: dialog.accept())
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await page.locator(f"#staff-manage-{person['id']}").click()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_disabled()
     mode = "success"
     await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await expect(assignments_form.get_by_role("button", name="Simpan penugasan")).to_be_enabled()
     await expect(assignments_form.locator(".staff-assignment-list li")).to_have_count(0)
     await expect(editor.locator(".staff-edit-unsaved")).to_have_count(0)
     mode = "network"
+    await editor.get_by_role("button", name="Bagian Reset password", exact=True).click()
     await editor.get_by_label("Password baru", exact=True).fill("fixture-password-789")
     page.once("dialog", lambda dialog: dialog.accept())
     await editor.get_by_role("button", name="Reset password", exact=True).click()
+    await editor.get_by_role("button", name="Bagian Reset password", exact=True).click()
     await expect(editor.get_by_role("button", name="Reset password", exact=True)).to_be_disabled()
     count = len(mutations)
     await editor.locator("form").last.dispatch_event("submit")
@@ -634,10 +699,12 @@ async def verify_management_flow(page, admin, width, base_url):
     mode = "success"
     await page.get_by_role("button", name="Muat ulang", exact=True).click()
     await expect(page.get_by_role("button", name="Muat ulang", exact=True)).to_be_enabled()
+    await editor.get_by_role("button", name="Bagian Reset password", exact=True).click()
     await expect(editor.get_by_role("button", name="Reset password", exact=True)).to_be_disabled()
     page.once("dialog", lambda dialog: dialog.accept())
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
     await page.locator(f"#staff-manage-{person['id']}").click()
+    await editor.get_by_role("button", name="Bagian Reset password", exact=True).click()
     await expect(editor.get_by_role("button", name="Reset password", exact=True)).to_be_disabled()
     await capture("unknown-password", editor.locator("h2"))
     assert not errors, errors
@@ -689,6 +756,7 @@ async def main():
         editor = page.locator(".staff-edit-panel")
         await editor.get_by_label("Nama", exact=True).fill("Alice draft")
         await editor.get_by_label("Akun aktif", exact=True).uncheck()
+        await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
         await editor.get_by_role("button", name="Simpan penugasan", exact=True).click()
         await asyncio.wait_for(started.wait(), 15)
         bob = page.get_by_role("button", name="Kelola Bob", exact=True)
@@ -708,6 +776,7 @@ async def main():
         await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
         await bob.click()
         await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Bob")
+        await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
         await editor.get_by_role("button", name="Simpan penugasan", exact=True).click()
         await page.get_by_text("Penugasan berhasil diperbarui.", exact=True).wait_for()
         assert mutations == [dict(path=f"admin/staff/{person['id']}/assignments", body=dict(assignments=person["assignments"])) for person in people]

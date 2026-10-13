@@ -37,6 +37,7 @@
   let manualPaidAt = $state("");
   let manualNote = $state("");
   let manualConfirmed = $state(false);
+  let manualStep = $state(0);
   let manualResult = $state<HTMLParagraphElement>();
   let refundLocks = $state<Record<string, { refund?: boolean; manual?: boolean }>>({});
   const uncertainRefund = $derived(Boolean(refundLocks[selectedId]?.refund));
@@ -47,8 +48,25 @@
   let tableWrap: HTMLDivElement | undefined = $state();
   let detailHeading: HTMLElement | undefined = $state();
 
+  async function navigateManual(next: number) {
+    if (refundBusy || uncertainManual) return;
+    if (next === 1) {
+      const invalid = document.querySelector<HTMLInputElement | HTMLTextAreaElement>("#manual-evidence :invalid");
+      if (invalid) { manualStep = 0; await tick(); invalid.reportValidity(); invalid.focus(); return; }
+    }
+    manualConfirmed = false; manualStep = next;
+    await tick(); document.getElementById("manual-step-title")?.focus();
+  }
+  async function submitManual(event: SubmitEvent) {
+    event.preventDefault();
+    if (refundBusy || uncertainManual) return;
+    if (manualStep === 0) { await navigateManual(1); return; }
+    const invalid = document.querySelector<HTMLInputElement | HTMLTextAreaElement>("#manual-evidence :invalid");
+    if (invalid) { manualStep = 0; manualConfirmed = false; await tick(); invalid.reportValidity(); invalid.focus(); return; }
+    await finishManual();
+  }
   async function finishManual() {
-    if (!selected || refundBusy || uncertainManual || !manualConfirmed) return;
+    if (!selected || selected.refund?.status !== "MANUAL_REQUIRED" || manualStep !== 1 || refundBusy || uncertainManual || !manualConfirmed) return;
     const id = selected.id;
     if (!window.confirm(`Konfirmasi pencatatan refund ${money(selected.refund?.amount ?? selected.total)} untuk ${selected.reference}? Tindakan ini mencatat bukti transfer yang sudah berhasil dan tidak mengirim uang.`)) return;
     refundBusy = true; refundMessage = "";
@@ -58,7 +76,7 @@
       if (selectedId === id) {
         delete refundLocks[id]?.manual;
         refundMessage = "Refund manual tercatat dan tiket tetap dinonaktifkan.";
-        manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false;
+        manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; manualStep = 0;
         await openDetail(id);
       }
     } catch (cause) {
@@ -105,7 +123,7 @@
   async function closeDetail() {
     if (refundBusy || !allowDiscard()) return;
     const id = selectedId;
-    detailRequest?.abort(); detailGeneration++; detailLoading = false; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false;
+    detailRequest?.abort(); detailGeneration++; detailLoading = false; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; manualStep = 0;
     await tick();
     if (tableWrap) tableWrap.scrollLeft = tableScroll;
     (document.getElementById(`order-detail-${id}`) ?? document.getElementById("order-results-title"))?.focus({ preventScroll: true });
@@ -117,7 +135,7 @@
     detailRequest?.abort();
     const controller = new AbortController(); detailRequest = controller;
     const current = ++detailGeneration;
-    if (selectedId !== id) { refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; }
+    if (selectedId !== id) { refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; manualStep = 0; }
     selectedId = id; selected = null; detailLoading = true; detailError = "";
     await tick(); detailHeading?.focus();
     try {
@@ -236,16 +254,27 @@
         <div><h3>Kategori tiket</h3><ul class="order-detail-list">{#each selected.items as item (`${item.tierId}-${item.name}`)}<li><strong>{item.name}</strong><span>{item.quantity} × {money(item.unitPrice)} = {money(item.lineTotal)}</span></li>{/each}</ul><h3>E-ticket dan check-in</h3>{#if selected.tickets.length}<ul class="order-detail-list">{#each selected.tickets as ticket (ticket.id)}<li><strong>{ticket.attendeeName} · {ticket.tierName}</strong><code>{ticket.code}</code><span>{ticket.gate} · {ticket.status === "CHECKED_IN" ? `Check-in ${ticket.checkedInAt ? localTime(ticket.checkedInAt) : "berhasil"}${ticket.checkedInBy ? ` · ${ticket.checkedInBy}` : ""}` : "Belum check-in"}</span></li>{/each}</ul>{:else}<p class="staff-muted">E-ticket belum diterbitkan.</p>{/if}</div>
       </div>
       {#if selected.refund}
-       <section class="staff-form"><h3>{refundStatus(selected.refund.status).label}</h3>{#if refundStatus(selected.refund.status).label === "Status refund belum dikenali"}<details><summary>Status teknis</summary><code>{selected.refund.status}</code></details>{/if}<p>{money(selected.refund.amount)} · {selected.refund.reason}</p><p class="staff-muted">{refundStatus(selected.refund.status).next}</p>
+       <section class="staff-form manual-refund-panel"><h3>{refundStatus(selected.refund.status).label}</h3>{#if refundStatus(selected.refund.status).label === "Status refund belum dikenali"}<details><summary>Status teknis</summary><code>{selected.refund.status}</code></details>{/if}<p>{money(selected.refund.amount)} · {selected.refund.reason}</p><p class="staff-muted">{refundStatus(selected.refund.status).next}</p>
         {#if selected.refund.manualReference}<p>Referensi transfer: {selected.refund.manualReference} · {selected.refund.manualPaidAt ? localTime(selected.refund.manualPaidAt) : ""}</p>{/if}
         {#if selected.refund.status === "MANUAL_REQUIRED"}
-         <form class="staff-form" onsubmit={(e)=>{e.preventDefault();void finishManual()}}>
+         <form id="manual-refund-form" class="staff-form manual-refund-form" novalidate onsubmit={submitManual}>
+          <nav class="manual-step-nav" aria-label="Langkah pencatatan refund manual"><button class="staff-secondary-button" type="button" aria-current={manualStep === 0 ? "step" : undefined} disabled={refundBusy || uncertainManual} onclick={() => navigateManual(0)}>1. Bukti transfer</button><button class="staff-secondary-button" type="button" aria-current={manualStep === 1 ? "step" : undefined} disabled={refundBusy || uncertainManual} onclick={() => navigateManual(1)}>2. Tinjau & konfirmasi</button></nav>
+          <h4 id="manual-step-title" tabindex="-1">{manualStep === 0 ? "Bukti transfer" : "Tinjau & konfirmasi"}</h4>
+          <p aria-live="polite">Langkah {manualStep + 1} dari 2</p>
           <p>Catat hanya transfer penuh yang sudah berhasil. Form ini mencatat bukti dan tidak mengirim uang.</p>
+          <div id="manual-evidence" class="manual-evidence" hidden={manualStep !== 0}>
           <label>Referensi transfer<input bind:value={manualReference} minlength="3" maxlength="160" required disabled={refundBusy || uncertainManual}/></label>
           <label>Waktu transfer (WIB)<input type="datetime-local" step="1" bind:value={manualPaidAt} required disabled={refundBusy || uncertainManual}/></label>
-          <label>Catatan bukti<textarea bind:value={manualNote} minlength="3" maxlength="500" required disabled={refundBusy || uncertainManual}></textarea></label>
-          <label><input type="checkbox" bind:checked={manualConfirmed} required disabled={refundBusy || uncertainManual}/> Transfer {money(selected.refund.amount)} sudah berhasil dan bukti sudah diperiksa.</label>
-          <button class="staff-secondary-button" type="submit" disabled={refundBusy || uncertainManual || !manualConfirmed}>Catat refund manual selesai</button>
+          <label>Catatan bukti<textarea rows="3" bind:value={manualNote} minlength="3" maxlength="500" required disabled={refundBusy || uncertainManual}></textarea></label>
+          </div>
+          <div hidden={manualStep !== 1}>
+          <dl class="manual-review"><div><dt>Nomor pesanan</dt><dd>{selected.reference}</dd></div><div><dt>Nominal refund</dt><dd>{money(selected.refund.amount)}</dd></div><div><dt>Referensi transfer</dt><dd>{manualReference}</dd></div><div><dt>Waktu transfer (WIB)</dt><dd>{manualPaidAt.replace("T", " ")}</dd></div><div><dt>Catatan bukti</dt><dd>{manualNote}</dd></div></dl>
+          <label class="manual-confirm"><input type="checkbox" bind:checked={manualConfirmed} required disabled={refundBusy || uncertainManual}/> Transfer {money(selected.refund.amount)} sudah berhasil dan bukti sudah diperiksa.</label>
+          </div>
+          <div class="manual-actions">
+            {#if manualStep === 1}<button class="staff-secondary-button" type="button" disabled={refundBusy || uncertainManual} onclick={() => navigateManual(0)}>Sebelumnya</button>{/if}
+            <button class="staff-secondary-button" type="submit" disabled={refundBusy || uncertainManual || (manualStep === 1 && !manualConfirmed)}>{manualStep === 0 ? "Lanjutkan" : "Catat refund manual selesai"}</button>
+          </div>
           {#if uncertainManual}<button class="staff-text-button" type="button" disabled={refundBusy} onclick={() => checkUncertain("manual")}>Periksa detail refund</button>{/if}
          </form>
         {/if}
@@ -265,3 +294,31 @@
     </section>{/if}
     </div>
 </AdminLayout>
+
+<style>
+  .manual-refund-panel, .manual-refund-form { gap: 12px; }
+  .manual-refund-panel > h3 { margin: 0 0 4px; }
+  .manual-refund-panel > p { margin: 0; overflow-wrap: anywhere; }
+  .manual-refund-form { container: manual-refund / inline-size; margin: 0; }
+  .manual-refund-form [hidden] { display: none; }
+  .manual-refund-form h4 { margin: 0 0 4px; font-size: 18px; }
+  .manual-refund-form p { margin: 0; }
+  .manual-step-nav, .manual-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .manual-step-nav button { white-space: normal; }
+  .manual-step-nav [aria-current] { border-color: var(--admin-accent); background: var(--admin-input); }
+  .manual-evidence { display: grid; gap: 12px; }
+  .manual-evidence label { display: grid; gap: 6px; min-width: 0; align-content: start; }
+  .manual-evidence input, .manual-evidence textarea { min-width: 0; }
+  .manual-evidence textarea { resize: vertical; }
+  .manual-review { display: grid; gap: 12px; margin: 0 0 12px; }
+  .manual-review > div { display: grid; gap: 6px; }
+  .manual-review dt { color: var(--scan-muted); }
+  .manual-review dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .manual-confirm { display: flex; align-items: center; min-height: 44px; gap: 12px; }
+  .manual-confirm input { flex: 0 0 20px; width: 20px; min-height: 20px; }
+  @container manual-refund (min-width: 35em) {
+    .manual-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .manual-evidence label:last-child { grid-column: 1 / -1; }
+    .manual-review > div { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+  }
+</style>

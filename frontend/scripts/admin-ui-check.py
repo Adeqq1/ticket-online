@@ -171,19 +171,21 @@ def body(path, mode, role):
     return 200, {}
 
 
-async def check_help(page, width):
-    buttons = page.locator(".admin-help-button")
+async def check_help(page, width, desktop=False):
+    buttons = page.locator(".admin-help-button:visible" if desktop else ".admin-help-button")
     description = page.locator(".mobile-help-description")
-    if width >= 768:
+    if width >= 768 and not desktop:
         for button in await buttons.all(): await expect(button).not_to_be_visible()
         for paragraph in await description.all(): await expect(paragraph).to_be_visible()
         return
-    await expect(description).not_to_be_visible()
+    if width < 768: await expect(description).not_to_be_visible()
     state = """() => [...document.querySelectorAll('main input, main select, main textarea, .mobile-list-viewport, .order-list-panel .history-table-wrap')].map(el => [el.value, el.checked, el.scrollLeft])"""
     before = await page.evaluate(state)
     for button in await buttons.all():
+        assert await button.evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)", "Help icons must have a transparent background"
         popup = page.locator("#" + await button.get_attribute("aria-controls"))
-        await button.click()
+        if width < 768: await button.tap()
+        else: await button.click()
         await expect(popup).to_be_visible()
         await expect(button).to_have_attribute("aria-expanded", "true")
         assert await popup.inner_text()
@@ -217,12 +219,19 @@ async def check_help_pages(browser, base, output, width):
     await context.add_init_script(SESSION_INIT)
     page = await context.new_page()
     errors, requests = [], []
+    editor_mode = ""
     page.on("pageerror", lambda error: errors.append(str(error)))
     audit_js = run_path(str(Path(__file__).with_name("staff-review-check.py")))["STYLE_AUDIT"]
 
     async def fixture(route):
         requests.append((route.request.method, urlparse(route.request.url).path))
         status, data = body(route.request.url, "standard", "ADMIN")
+        if editor_mode and urlparse(route.request.url).path == "/api/v1/admin/events":
+            event = {**deepcopy(EVENT), "scheduleLocked": editor_mode == "locked", "locationLocked": editor_mode == "locked"}
+            if editor_mode == "changed":
+                event["currentEvent"] = {"id": EVENT["id"], "version": 1, "status": "RESCHEDULED", "salesPaused": False,
+                                         "startsAt": EVENT["startsAt"], "announcement": "Jadwal diperbarui.", "refundDeadline": None}
+            data = {"events": [event]}
         await route.fulfill(status=status, json=data)
 
     await page.route("**/api/v1/**", fixture)
@@ -258,10 +267,169 @@ async def check_help_pages(browser, base, output, width):
             await expect(page.locator('.admin-help-popup:visible')).to_have_count(0)
         else:
             await page.screenshot(path=str(output / f"help-{name}-{width}.png"), full_page=True)
+    for editor_mode in ("locked", "unlocked", "changed"):
+        await page.goto(base + "/admin/events")
+        await page.get_by_role("button", name="Kelola konser Nusa Malam", exact=True).click()
+        editor = page.locator(".event-editor-panel")
+        await expect(page.locator("#event-editor-title")).to_be_focused()
+        await expect(editor.locator(".admin-help-button")).to_have_count({"locked": 2, "unlocked": 0, "changed": 1}[editor_mode])
+        await editor.locator(".event-section-nav").get_by_role("button", name="Jadwal & lokasi", exact=True).click()
+        if editor_mode == "unlocked": await expect(page.get_by_label("Jadwal (WIB)", exact=True)).to_be_enabled()
+        else: await expect(page.get_by_label("Jadwal (WIB)", exact=True)).to_be_disabled()
+        for label in ("Kota", "Venue", "Alamat"):
+            if editor_mode == "locked": await expect(page.get_by_label(label, exact=True)).to_be_disabled()
+            else: await expect(page.get_by_label(label, exact=True)).to_be_enabled()
+        await expect(editor.locator("label button, .admin-help-popup:visible")).to_have_count(0)
+        if editor_mode != "unlocked":
+            await expect(page.get_by_label("Jadwal (WIB)", exact=True)).to_have_attribute("aria-describedby", "schedule-lock-note")
+            await expect(page.locator("#schedule-lock-note")).to_have_text("Jadwal terkunci setelah pesanan dibuat atau perubahan acara dicatat. Gunakan panel Pembatalan dan perubahan jadwal di bawah untuk menjaga hak pembeli dan riwayat keputusan.")
+            await check_help(page, width, desktop=True)
+            button = editor.locator(".admin-help-button").last
+            await button.click()
+            popup = page.locator("#" + await button.get_attribute("aria-controls"))
+            await expect(popup).to_be_visible()
+            await page.screenshot(path=str(output / f"help-editor-{editor_mode}-{width}.png"), full_page=True)
+            await page.evaluate("""() => {
+                window.helpFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+                for (const [el, , size] of window.helpFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+            }""")
+            assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (editor_mode, width, "200% text overflow")
+            assert await popup.evaluate("el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }")
+            await page.screenshot(path=str(output / f"help-editor-{editor_mode}-text200-{width}.png"), full_page=True)
+            await page.evaluate("() => { for (const [el, size] of window.helpFonts) el.style.fontSize = size; }")
+            await page.keyboard.press("Escape")
+        if editor_mode == "locked":
+            for label in ("Kota", "Venue", "Alamat"):
+                await expect(page.get_by_label(label, exact=True)).to_have_attribute("aria-describedby", "location-lock-note")
+            await expect(page.locator("#location-lock-note")).to_have_text("Kota, venue, dan alamat terkunci setelah reservasi pertama untuk menjaga informasi pada pesanan pembeli. Perubahan lokasi tidak tersedia di panel perubahan acara.")
+            await editor.locator(".event-section-nav").get_by_role("button", name="Informasi", exact=True).click()
+            await page.get_by_label("Nama konser / artis", exact=True).fill("Nusa Malam diperbarui")
+            await editor.locator(".event-section-nav").get_by_role("button", name="Jadwal & lokasi", exact=True).click()
+            await check_help(page, width, desktop=True)
+            await expect(page.get_by_label("Nama konser / artis", exact=True)).to_have_value("Nusa Malam diperbarui")
+            page.once("dialog", lambda dialog: dialog.dismiss())
+            await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+            await expect(editor).to_be_visible()
+            page.once("dialog", lambda dialog: dialog.accept())
+        await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+        await expect(page.get_by_role("button", name="Kelola konser Nusa Malam", exact=True)).to_be_focused()
     assert all(method == "GET" for method, _ in requests) and not errors, (requests, errors)
     (output / f"help-{width}.json").write_text(json.dumps({"automated": True, "humanUAT": "not performed", "width": width, "pages": ["events", "staff", "orders", "issues"], "requests": requests, "browserErrors": errors}, indent=2))
     await context.close()
-    print(f"PASS {width}: mobile help tap/hover/keyboard, one popup, unchanged filters/cards, 200% text, desktop descriptions")
+    print(f"PASS {width}: help tap/hover/keyboard, one popup, 200% text, desktop descriptions, locked/unlocked/event-change editor help, preserved drafts/focus")
+
+
+async def check_event_forms(browser, base, output, width, record_baseline=False, baseline=None):
+    """Compare every concert section with one fixed category, including enlarged text."""
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, decisions, measurements = [], [], {}
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    event = deepcopy(EVENT)
+    event.update(scheduleLocked=True, locationLocked=True, image=base + "/fixtures/nusa-malam.jpg")
+
+    async def fixture(route):
+        path, method = urlparse(route.request.url).path, route.request.method
+        if path == "/fixtures/nusa-malam.jpg":
+            await route.fulfill(path=str(ROOT / "docs/phase20/fixtures/nusa-malam.jpg"))
+        elif path.endswith("/changes/preview"):
+            await route.fulfill(json={"event": {}, "snapshot": "preview", "impact": {"activeReservations": 1234, "pendingOrders": 2, "pendingPayments": 1, "paidOrders": 5, "issuedTickets": 10, "checkIns": 3, "existingRefunds": 1, "automaticAmount": 1250000, "manualAmount": 0}})
+        elif path.endswith("/changes"):
+            if method == "POST":
+                decisions.append(route.request.post_data_json)
+                await route.fulfill(json={"id": "change-1"})
+            else: await route.fulfill(json=[])
+        elif path.endswith("/admin/events"):
+            if method == "POST":
+                event.update(route.request.post_data_json)
+                event.update(zones=[], ticketTiers=[])
+                await route.fulfill(status=201, json=event)
+            else: await route.fulfill(json={"events": [event]})
+        else:
+            status, data = body(route.request.url, "standard", "ADMIN")
+            await route.fulfill(status=status, json=data)
+
+    await page.route("**/api/v1/**", fixture)
+    await page.route("**/fixtures/nusa-malam.jpg", fixture)
+    await page.goto(base + "/admin/events")
+    await page.get_by_role("button", name="Kelola konser Nusa Malam", exact=True).click()
+
+    async def capture(name, enlarged=False):
+        content = page.locator(".event-section-content")
+        if enlarged:
+            await page.evaluate("""() => {
+                window.formFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+                for (const [el,,size] of window.formFonts) el.style.fontSize = parseFloat(size)*2+'px';
+            }""")
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (width, name, enlarged, "overflow")
+        for control in await content.locator("input:not([type=radio]):not([type=checkbox]), select, textarea, button").all():
+            if await control.is_visible():
+                assert await control.evaluate("el => el.getBoundingClientRect().height >= 44"), (width, name, "touch height")
+        if not record_baseline:
+            if not enlarged:
+                for control in await content.locator("input:not([type=radio]):not([type=checkbox]), select, textarea").all():
+                    assert await control.evaluate("el => getComputedStyle(el).fontSize === '16px'")
+            for grid in await content.locator(".event-form-row, .event-group, #zone-form, #tier-form, .event-change-panel fieldset").all():
+                if await grid.is_visible():
+                    tracks = await grid.evaluate("el => getComputedStyle(el).gridTemplateColumns")
+                    # Chromium reports authored minmax()/repeat() for fieldset's anonymous grid.
+                    count = 2 if tracks.startswith("repeat(2,") else len(re.findall(r"minmax\([^)]*\)|[\d.]+px", tracks))
+                    two = await content.evaluate("el => el.clientWidth >= 35 * parseFloat(getComputedStyle(el).fontSize)")
+                    assert count == (2 if two else 1), (name, width, enlarged, count, two, await grid.evaluate("el => [el.className, getComputedStyle(el).gridTemplateColumns]"))
+            for textarea in await content.locator("textarea").all():
+                assert await textarea.get_attribute("rows") == "3"
+                assert await textarea.evaluate("el => getComputedStyle(el).resize === 'vertical'")
+            image = content.locator(".poster-preview img")
+            if await image.is_visible():
+                assert await image.evaluate("el => el.getBoundingClientRect().height <= 240 && getComputedStyle(el).objectFit === 'contain'")
+        await content.screenshot(path=str(output / f"forms-{name}{'-text200' if enlarged else ''}-{width}.png"), animations="disabled")
+        if enlarged:
+            await page.evaluate("() => { for(const [el, original] of window.formFonts) el.style.fontSize = original; }")
+
+    for section in range(7):
+        await page.locator(".event-section-nav button").nth(section).click()
+        if section == 1:
+            for label in ("Jadwal (WIB)", "Kota", "Venue", "Alamat"):
+                await expect(page.get_by_label(label, exact=True)).to_be_disabled()
+        if section in (3, 4):
+            await page.locator(f'[data-section="{section}"] > label select').select_option("festival")
+            if section == 4:
+                await expect(page.get_by_label("Gate", exact=True)).to_be_disabled()
+                measurements["ticketHeight"] = await page.evaluate("document.querySelector('#tier-form button[type=submit]').getBoundingClientRect().bottom - document.querySelector('#event-section-title').getBoundingClientRect().top")
+        if section == 6:
+            await page.get_by_label("Keputusan").select_option("RESCHEDULED")
+            await page.get_by_label("Alasan untuk audit").fill("Alasan audit " + "panjang" * 30)
+            await page.get_by_label("Pengumuman untuk pembeli").fill("Jadwal diperbarui untuk pembeli.")
+            await page.get_by_label("Jadwal baru (WIB)").fill("2027-12-01T19:00")
+            await page.get_by_label("Tenggat permintaan refund (WIB)").fill("2027-11-01T19:00")
+            await page.get_by_role("button", name="Pratinjau dampak", exact=True).click()
+            await expect(page.get_by_role("heading", name="Dampak keputusan")).to_be_focused()
+            await expect(page.get_by_role("button", name="Terapkan keputusan")).to_be_disabled()
+            await page.get_by_role("checkbox").check()
+            await expect(page.get_by_role("button", name="Terapkan keputusan")).to_be_enabled()
+        await capture(f"edit-{section}")
+        await capture(f"edit-{section}", True)
+    await page.get_by_role("button", name="Terapkan keputusan").click()
+    assert len(decisions) == 1 and decisions[0]["reason"].startswith("Alasan audit"), decisions
+    page.once("dialog", lambda dialog: dialog.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await page.get_by_role("button", name="Tambah konser", exact=True).click()
+    await page.get_by_label("Nama konser / artis", exact=True).fill("Konser baru " + "panjang" * 15)
+    for section in range(6):
+        await capture(f"create-{section}")
+        await capture(f"create-{section}", True)
+        if section < 5:
+            name = "Simpan draf & lanjutkan" if section == 2 else "Berikutnya"
+            await page.get_by_role("button", name=name, exact=True).click()
+    if baseline and width == 1440:
+        old = json.loads((baseline / f"forms-{width}.json").read_text())["ticketHeight"]
+        measurements["reduction"] = 1 - measurements["ticketHeight"] / old
+        assert measurements["reduction"] >= .25, measurements
+    assert not errors, errors
+    (output / f"forms-{width}.json").write_text(json.dumps(measurements, indent=2))
+    await context.close()
+    print(f"PASS forms {width}px: all sections, 200% text, locks, preview/confirmation; {measurements}", flush=True)
 
 
 async def check_workflows(browser, base, output, width):
@@ -269,6 +437,7 @@ async def check_workflows(browser, base, output, width):
     await context.add_init_script(SESSION_INIT)
     page = await context.new_page()
     errors, requests, mutations, audits = [], [], [], []
+    event_failures = {"create": "", "refresh": False}
     refund_calls = []
     refund_found = False
     detail_failed = False
@@ -283,12 +452,21 @@ async def check_workflows(browser, base, output, width):
         path, method = url.path.removeprefix("/api/v1/"), route.request.method
         requests.append((method, path, parse_qs(url.query)))
         if path == "staff/me": await route.fulfill(json={"staff": ADMIN})
-        elif path == "admin/events" and method == "GET": await route.fulfill(json={"events": events})
+        elif path == "admin/events" and method == "GET":
+            if event_failures["refresh"]:
+                event_failures["refresh"] = False
+                await route.fulfill(status=503, json={"error": {"message": "Penyegaran gagal"}})
+            else: await route.fulfill(json={"events": events})
         elif path.endswith("/changes") and method == "GET": await route.fulfill(json=[])
         elif path.startswith("admin/events"):
             value = route.request.post_data_json
             mutations.append((method, path, value))
             if path == "admin/events":
+                if event_failures["create"]:
+                    code = event_failures["create"]
+                    event_failures["create"] = ""
+                    await route.fulfill(status=409 if code == "DUPLICATE_EVENT" else 503, json={"error": {"code": code, "message": "Simpan gagal. Coba lagi."}})
+                    return
                 event = {**deepcopy(EVENT), **value, "zones": [], "ticketTiers": []}
                 events.append(event)
                 await route.fulfill(status=201, json=event)
@@ -301,6 +479,11 @@ async def check_workflows(browser, base, output, width):
                     tier = {**value, "availableQuantity": value["capacity"], "boundQuantity": 0, "gateLocked": False}
                     event["ticketTiers"].append(tier)
                     await route.fulfill(status=201, json=tier)
+                elif "/zones/" in path or "/ticket-tiers/" in path:
+                    rows = event["zones" if "/zones/" in path else "ticketTiers"]
+                    row = next(row for row in rows if row["id"] == path.split("/")[-1])
+                    row.update(value)
+                    await route.fulfill(json=row)
                 else:
                     event.update(value)
                     await route.fulfill(json=event)
@@ -380,31 +563,126 @@ async def check_workflows(browser, base, output, width):
     await page.locator("#event-id").fill("id-manual")
     await name.fill("Nama setelah ID manual")
     await expect(page.locator("#event-id")).to_have_value("id-manual")
+    async def part(index):
+        if width < 768 and await page.locator(".event-progress").count():
+            await page.get_by_role("combobox", name="Pilih langkah", exact=True).select_option(str(index))
+        else:
+            await page.locator(".event-section-nav button").nth(index).click()
+        await expect(page.locator("#event-section-title")).to_be_focused()
+
     await capture("events-create")
-    await page.get_by_role("button", name="Buat konser", exact=True).click()
-    await expect(page.locator("#event-editor-title")).to_contain_text("Edit konser")
-    await expect(page.get_by_text("Draf konser dibuat.", exact=False)).to_be_visible()
-    await expect(page.locator("#event-id")).to_have_count(0)
-    await page.get_by_label("Nama zona", exact=True).fill("Zona Uji")
-    await page.get_by_role("button", name="Tambah zona", exact=True).click()
-    await expect(page.get_by_text("Zona tersimpan.", exact=True)).to_be_visible()
-    await page.get_by_label("Nama kategori", exact=True).fill("Kategori Uji")
-    await page.locator(".event-inventory-editor form").last.get_by_role("combobox").first.select_option("zona-uji")
-    await page.get_by_label("Harga (rupiah)", exact=True).fill("100000")
-    await page.get_by_label("Kapasitas", exact=True).fill("20")
-    await page.get_by_label("Gate", exact=True).fill("Gate Uji")
-    await page.get_by_role("button", name="Tambah kategori", exact=True).click()
-    await expect(page.get_by_text("Kategori tiket tersimpan.", exact=True)).to_be_visible()
+    await text200("events-create")
+    await name.press("Enter")
+    await expect(page.locator("#event-section-title")).to_have_text("Jadwal & lokasi")
     await page.get_by_label("Jadwal (WIB)", exact=True).fill("2027-12-01T19:00")
-    for label, value in [("Kota", "Jakarta"), ("Venue", "Venue Uji"), ("Alamat", "Alamat Uji"), ("Deskripsi", "Deskripsi konser uji"), ("Lineup", "Artis Uji")]:
+    for label, value in [("Kota", "Jakarta"), ("Venue", "Venue Uji"), ("Alamat", "Alamat Uji")]:
+        await page.get_by_label(label, exact=True).fill(value)
+    await page.get_by_role("button", name="Sebelumnya", exact=True).click()
+    await expect(name).to_have_value("Nama setelah ID manual")
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await expect(page.get_by_label("Kota", exact=True)).to_have_value("Jakarta")
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    for label, value in [("Deskripsi", "Deskripsi konser uji"), ("Lineup", "Artis Uji")]:
         await page.get_by_label(label, exact=label != "Lineup").fill(value)
     await page.get_by_role("radio", name="Gunakan URL gambar", exact=True).check()
     await page.get_by_label("URL poster", exact=True).fill("https://example.test/poster.jpg")
+    await capture("events-materials")
+    await text200("events-materials")
+    event_failures["create"] = "SERVICE_UNAVAILABLE"
+    await page.get_by_role("button", name="Simpan draf & lanjutkan", exact=True).click()
+    await expect(page.get_by_role("alert")).to_contain_text("Simpan gagal")
+    await expect(page.locator("#event-section-title")).to_have_text("Materi")
+    event_failures["create"] = "DUPLICATE_EVENT"
+    await page.get_by_role("button", name="Simpan draf & lanjutkan", exact=True).click()
+    await expect(page.locator("#event-id")).to_be_focused()
+    await page.locator("#event-id").fill("id-manual-baru")
+    await part(2)
+    await expect(page.get_by_label("URL poster", exact=True)).to_have_value("https://example.test/poster.jpg")
+    await page.get_by_role("button", name="Simpan draf & lanjutkan", exact=True).click()
+    await expect(page.locator("#event-editor-title")).to_have_text("Tambah konser")
+    await expect(page.locator("#event-section-title")).to_have_text("Zona")
+    await expect(page.get_by_text("Draf konser dibuat.", exact=False)).to_be_visible()
+    await expect(page.locator("#event-id")).to_have_count(0)
+    await page.get_by_label("Nama zona", exact=True).fill("Tidak disimpan")
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await expect(page.get_by_role("button", name="Simpan & lanjutkan", exact=True)).to_be_visible()
+    await page.get_by_role("button", name="Tetap di sini", exact=True).click()
+    if width < 768:
+        await page.get_by_role("combobox", name="Pilih langkah", exact=True).select_option("2")
+        await expect(page.get_by_role("combobox", name="Pilih langkah", exact=True)).to_have_value("3")
+        await page.get_by_role("button", name="Tetap di sini", exact=True).click()
+    await expect(page.get_by_label("Nama zona", exact=True)).to_have_value("Tidak disimpan")
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await page.get_by_role("button", name="Buang & lanjutkan", exact=True).click()
+    await expect(page.get_by_text("Tambahkan zona pada langkah Zona", exact=False)).to_be_visible()
+    await expect(page.get_by_role("button", name="Tambah kategori", exact=True)).to_be_disabled()
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await expect(page.get_by_role("button", name="Terbitkan konser", exact=True)).to_be_disabled()
+    await part(3)
+    await page.get_by_label("Nama zona", exact=True).fill("Zona Uji")
+    event_failures["refresh"] = True
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await page.get_by_role("button", name="Simpan & lanjutkan", exact=True).click()
+    await expect(page.locator("#event-section-title")).to_have_text("Kategori tiket")
+    await expect(page.get_by_text("Zona tersimpan; daftar belum dapat dimuat ulang.", exact=True)).to_be_visible()
+    await part(3)
+    await page.locator('[data-section="3"] > label select').select_option("")
+    await page.get_by_label("Nama zona", exact=True).fill("Zona Kedua")
+    await expect(page.locator("#zone-id")).to_have_value("zona-kedua")
+    await page.get_by_role("button", name="Tambah zona", exact=True).click()
+    await expect(page.get_by_text("Zona tersimpan.", exact=True)).to_be_visible()
+    await page.get_by_label("Deskripsi zona", exact=True).fill("Deskripsi zona diperbarui")
+    await page.get_by_role("button", name="Simpan zona", exact=True).click()
+    await expect(page.get_by_text("Zona tersimpan.", exact=True)).to_be_visible()
+    assert events[-1]["zones"][-1]["description"] == "Deskripsi zona diperbarui"
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    for suffix in ("Uji", "Kedua"):
+        if suffix == "Kedua": await page.locator('[data-section="4"] > label select').select_option("")
+        await page.get_by_label("Nama kategori", exact=True).fill("Kategori " + suffix)
+        await expect(page.locator("#tier-id")).to_have_value("kategori-" + suffix.lower())
+        await page.locator("#tier-form").get_by_role("combobox").first.select_option("zona-uji")
+        await page.get_by_label("Harga (rupiah)", exact=True).fill("100000")
+        await page.get_by_label("Kapasitas", exact=True).fill("20")
+        await page.get_by_label("Gate", exact=True).fill("Gate " + suffix)
+        await page.get_by_role("button", name="Tambah kategori", exact=True).click()
+        await expect(page.get_by_text("Kategori tiket tersimpan.", exact=True)).to_be_visible()
+    await page.get_by_label("Benefit", exact=True).fill("Benefit kategori diperbarui")
+    await page.get_by_role("button", name="Simpan kategori", exact=True).click()
+    await expect(page.get_by_text("Kategori tiket tersimpan.", exact=True)).to_be_visible()
+    assert events[-1]["ticketTiers"][-1]["benefit"] == "Benefit kategori diperbarui"
+    await capture("events-tickets")
+    await text200("events-tickets")
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await capture("events-review")
+    await text200("events-review")
+    await page.get_by_role("button", name="Terbitkan konser", exact=True).click()
+    await expect(page.get_by_text("Konser berhasil diterbitkan.", exact=True)).to_be_visible()
+    await expect(page.locator("#event-list-title")).to_be_focused()  # Existing search excludes the new concert.
+    assert events[-1]["publicationStatus"] == "PUBLISHED" and len(events[-1]["ticketTiers"]) == 2
+    assert sum(1 for method, path, value in mutations if path == "admin/events" and value["id"] == "id-manual-baru") == 1
+    # An incomplete concert can finish as a draft and resume through the feature editor.
+    await page.locator("#event-create-opener").click()
+    await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await expect(page.get_by_label("Nama konser / artis", exact=True)).to_be_focused()
+    await page.get_by_label("Nama konser / artis", exact=True).fill("Draf lanjutan")
+    for _ in range(2): await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await page.get_by_role("button", name="Simpan draf & lanjutkan", exact=True).click()
+    for _ in range(2): await page.get_by_role("button", name="Berikutnya", exact=True).click()
+    await page.get_by_role("button", name="Simpan sebagai draf", exact=True).click()
+    await expect(page.get_by_text("Draf konser tersimpan.", exact=False)).to_be_visible()
+    await page.get_by_label("Cari konser", exact=True).fill("Draf lanjutan")
+    await page.get_by_role("button", name="Kelola konser Draf lanjutan", exact=True).click()
+    await expect(page.locator('.event-section-nav svg')).to_have_count(7)
+    await part(1)
+    await page.get_by_label("Kota", exact=True).fill("Belum lengkap")
+    await part(0)
+    await expect(page.get_by_label("Kota", exact=True)).to_have_value("Belum lengkap")
+    await part(5)
     await page.get_by_role("combobox", name="Status publikasi", exact=True).select_option("PUBLISHED")
     await page.get_by_role("button", name="Simpan perubahan", exact=True).click()
-    await expect(page.get_by_text("Perubahan konser tersimpan.", exact=True)).to_be_visible()
-    await capture("events-edit")
-    assert events[-1]["publicationStatus"] == "PUBLISHED" and events[-1]["ticketTiers"][0]["gate"] == "Gate Uji"
+    await expect(page.locator("#event-section-title")).to_have_text("Jadwal & lokasi")
+    await expect(page.get_by_label("Jadwal (WIB)", exact=True)).to_be_focused()
+    page.once("dialog", lambda d: d.accept())
     await page.goto(base + "/admin/orders")
     await expect(page.locator(".order-list-panel li, .order-list-panel tbody tr")).to_have_count(5 if width < 768 else 10)
     await expect(page.get_by_role("button", name="Cari", exact=True)).to_have_count(0 if width < 768 else 1)
@@ -540,6 +818,115 @@ async def check_workflows(browser, base, output, width):
     (output / f"workflow-{width}.json").write_text(json.dumps({"automated": True, "humanUAT": "not performed", "events": 20, "orders": 22, "audits": audits, "browserErrors": errors, "mutations": mutations}, indent=2))
     await context.close()
     print(f"PASS {width}: 20 concerts, create/inventory/publish, preserved drafts/focus, 2 cursor pages, 22 unique orders, table/mobile detail")
+
+
+async def check_manual_refund(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="America/Los_Angeles")
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    errors, calls = [], []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    _, detail = body(base + f"/api/v1/admin/orders/{ORDER}", "standard", "ADMIN")
+    refund = {"status": "MANUAL_REQUIRED", "amount": 123456, "reason": "Transfer penuh diperlukan", "manualReference": "", "manualPaidAt": None}
+    mode = "success"
+    started, release = asyncio.Event(), asyncio.Event()
+    async def fixture(route):
+        path = urlparse(route.request.url).path
+        if path.endswith("/staff/me"): await route.fulfill(json={"staff": ADMIN})
+        elif path.endswith("/refund/manual"):
+            calls.append(route.request.post_data_json)
+            if mode == "delayed":
+                started.set(); await release.wait()
+            if mode == "unknown": await route.abort("connectionreset")
+            else:
+                refund.update(status="SUCCEEDED", manualReference=calls[-1]["reference"], manualPaidAt=calls[-1]["paidAt"])
+                await route.fulfill(json=refund)
+        elif path.endswith("/admin/orders"):
+            await route.fulfill(json={"items": [], "nextCursor": None, "filterOptions": {"events": []}})
+        elif "/admin/orders/" in path:
+            await route.fulfill(json={**detail, "id": path.split("/")[-1], "status": "REFUND_PENDING", "refund": refund})
+        else: raise AssertionError(path)
+    await page.route("**/api/v1/**", fixture)
+    await page.goto(base + "/admin/orders?orderId=" + ORDER)
+    form = page.locator("#manual-refund-form")
+    next_step = form.get_by_role("button", name="Lanjutkan", exact=True)
+    final = form.get_by_role("button", name="Catat refund manual selesai", exact=True)
+    evidence = [("Referensi transfer", "BANK-" + "X" * 140), ("Waktu transfer (WIB)", "2026-10-13T14:23:45"), ("Catatan bukti", "Transfer sudah diperiksa. " * 15)]
+    audit_js = run_path(str(Path(__file__).with_name("staff-review-check.py")))["STYLE_AUDIT"]
+    async def capture(label):
+        audit = await page.evaluate(audit_js)
+        assert not audit["failures"] and not audit["overflow"], (width, label, audit)
+        targets = await form.locator('button, input:not([type="checkbox"]), textarea').evaluate_all("els => els.filter(el => el.getClientRects().length).every(el => el.getBoundingClientRect().height >= 44)")
+        assert targets
+        await page.screenshot(path=str(output / f"manual-{label}-{width}.png"), full_page=True)
+        await page.evaluate("""() => {
+          window.__manualFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__manualFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        audit = await page.evaluate(audit_js)
+        if audit["overflow"]:
+            audit["elements"] = await page.evaluate("() => [...document.querySelectorAll('.admin-layout *')].filter(el => el.getClientRects().length && el.getBoundingClientRect().right > innerWidth + 1).map(el => [el.tagName, el.className, el.textContent.slice(0,70), el.getBoundingClientRect().right]).slice(-15)")
+        assert not audit["failures"] and not audit["overflow"], (width, label, "text200", audit)
+        await page.screenshot(path=str(output / f"manual-{label}-text200-{width}.png"), full_page=True)
+        await page.evaluate("() => { for (const [el, size] of window.__manualFonts) el.style.fontSize = size; }")
+    await next_step.click()
+    await expect(form.get_by_label("Referensi transfer", exact=True)).to_be_focused()
+    assert not calls
+    for label, value in evidence: await form.get_by_label(label, exact=True).fill(value)
+    first, second = form.get_by_label(evidence[0][0], exact=True), form.get_by_label(evidence[1][0], exact=True)
+    is_two = await second.evaluate("el => el.getBoundingClientRect().left") > await first.evaluate("el => el.getBoundingClientRect().left") + 1
+    metrics = await form.evaluate("el => [el.clientWidth, getComputedStyle(el).fontSize, getComputedStyle(el).containerType, getComputedStyle(el.querySelector('.manual-evidence')).gridTemplateColumns]")
+    assert is_two == (metrics[0] >= float(metrics[1].removesuffix("px")) * 35), (width, is_two, metrics)
+    await capture("evidence")
+    await first.press("Enter")
+    await expect(page.locator("#manual-step-title")).to_have_text("Tinjau & konfirmasi")
+    await expect(form.locator(".manual-review")).to_contain_text("Rp 123.456")
+    await expect(form.locator(".manual-review")).to_contain_text(evidence[0][1])
+    await expect(form).to_contain_text("tidak mengirim uang")
+    await expect(final).to_be_disabled()
+    assert not calls
+    await capture("review")
+    checkbox = form.get_by_role("checkbox")
+    await checkbox.check()
+    await form.get_by_role("button", name="Sebelumnya", exact=True).click()
+    for label, value in evidence: await expect(form.get_by_label(label, exact=True)).to_have_value(value)
+    await next_step.click()
+    await expect(checkbox).not_to_be_checked()
+    await checkbox.check()
+    page.once("dialog", lambda d: d.dismiss())
+    await final.click()
+    assert not calls
+    mode = "delayed"
+    page.once("dialog", lambda d: d.accept())
+    await final.click()
+    await asyncio.wait_for(started.wait(), 10)
+    await form.dispatch_event("submit")
+    assert len(calls) == 1
+    release.set()
+    await expect(page.locator(".order-selected-panel")).to_contain_text("Refund manual tercatat")
+    assert calls[0] == {"reference": evidence[0][1], "paidAt": "2026-10-13T14:23:45+07:00", "note": evidence[2][1].strip()}, calls
+    refund.update(status="MANUAL_REQUIRED", manualReference="", manualPaidAt=None)
+    await page.goto(base + "/admin/orders?orderId=" + "b" * 32)
+    await expect(form.get_by_label("Referensi transfer", exact=True)).to_have_value("")
+    for label, value in evidence: await form.get_by_label(label, exact=True).fill(value)
+    await next_step.click(); await checkbox.check()
+    mode = "unknown"
+    page.once("dialog", lambda d: d.accept())
+    await final.click()
+    await expect(final).to_be_disabled()
+    await form.dispatch_event("submit")
+    assert len(calls) == 2
+    await form.get_by_role("button", name="Periksa detail refund", exact=True).click()
+    await expect(final).to_be_disabled()
+    assert len(calls) == 2
+    refund.update(status="SUCCEEDED", manualReference=evidence[0][1], manualPaidAt=calls[-1]["paidAt"])
+    await form.get_by_role("button", name="Periksa detail refund", exact=True).click()
+    await expect(page.locator(".order-selected-panel")).to_contain_text("Bukti transfer sudah tercatat.")
+    assert len(calls) == 2 and not errors, errors
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await context.close()
+    print(f"PASS {width}: manual refund evidence/review, authoritative amount, confirmation reset, single mutation, unknown outcome lock, 200% text")
 
 
 async def check_mobile_lists(browser, base, output, width):
@@ -835,6 +1222,48 @@ async def check_worker_cards(browser, base, output, width):
     print(f"PASS {width}: worker cards/table, WIB, localized counts, disclosure, failed refresh retains data, automatic refresh, empty state")
 
 
+async def capture_wizard_baseline(browser, base, output, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta")
+    await context.add_init_script(SESSION_INIT)
+    page = await context.new_page()
+    _, detail = body(base + f"/api/v1/admin/orders/{ORDER}", "standard", "ADMIN")
+    voucher = {"code": "HEMAT10", "kind": "PERCENT", "value": 10, "startsAt": "2026-10-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z", "active": True, "eventId": "", "minimumSubtotal": 0, "quota": 100, "revision": 1, "usage": {"held": 0, "consumed": 0, "released": 0}}
+    async def fixture(route):
+        path = urlparse(route.request.url).path
+        assert route.request.method == "GET", "Baseline capture must not mutate data"
+        if path.endswith("/staff/me"): await route.fulfill(json={"staff": ADMIN})
+        elif path.endswith("/admin/events"): await route.fulfill(json={"events": [EVENT]})
+        elif path.endswith("/admin/staff"): await route.fulfill(json={"staff": [ADMIN, STAFF]})
+        elif path.endswith("/admin/pricing"): await route.fulfill(json={"settings": {"adminFee": 7500, "revision": 1}, "vouchers": [voucher], "history": []})
+        elif path.endswith("/admin/orders"): await route.fulfill(json={"items": [], "nextCursor": None, "filterOptions": {"events": []}})
+        elif "/admin/orders/" in path: await route.fulfill(json={**detail, "status": "REFUND_PENDING", "refund": {"status": "MANUAL_REQUIRED", "amount": 123456, "reason": "Transfer penuh diperlukan", "manualReference": "", "manualPaidAt": None}})
+        else: raise AssertionError(path)
+    await page.route("**/api/v1/**", fixture)
+    async def capture(name):
+        await page.screenshot(path=str(output / f"before-{name}-{width}.png"), full_page=True)
+        await page.evaluate("""() => {
+          window.__baselineFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__baselineFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        await page.screenshot(path=str(output / f"before-{name}-text200-{width}.png"), full_page=True)
+        await page.evaluate("() => { for (const [el, size] of window.__baselineFonts) el.style.fontSize = size; }")
+    await page.goto(base + "/admin/staff")
+    await page.locator("#staff-create-opener").click()
+    await capture("staff-create")
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    await page.locator(f"#staff-manage-{STAFF['id']}").click()
+    await capture("staff-edit")
+    await page.goto(base + "/admin/pricing")
+    await expect(page.get_by_label("Nominal tetap (Rp)", exact=True)).to_have_value("7500")
+    if not await page.locator(".voucher-editor").is_visible(): await page.locator("#voucher-create-opener").click()
+    await capture("voucher-create")
+    await page.goto(base + "/admin/orders?orderId=" + ORDER)
+    await expect(page.get_by_label("Referensi transfer", exact=True)).to_be_visible()
+    await capture("manual-refund")
+    await context.close()
+    print(f"CAPTURE {width}: existing staff, voucher and refund layouts at normal/200% text")
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
@@ -846,6 +1275,11 @@ async def main():
     parser.add_argument("--mobile-lists", action="store_true", help="Check shared mobile list groups, native scroll, and cursor recovery")
     parser.add_argument("--mobile-help", action="store_true", help="Check mobile help on concert, staff, order, and issue lists")
     parser.add_argument("--workflows", action="store_true", help="Verify the phase 55 concert/order workflows with larger fixtures")
+    parser.add_argument("--wizard-baseline", action="store_true", help="Record the existing staff/voucher/refund layouts before rebuilding the local frontend")
+    parser.add_argument("--manual-refund", action="store_true", help="Check manual refund evidence and review steps")
+    parser.add_argument("--event-forms", action="store_true", help="Check concert form density and all sections at normal/200%% text")
+    parser.add_argument("--record-form-baseline", action="store_true")
+    parser.add_argument("--form-baseline", type=Path, help="Compare ticket height against this screenshot directory")
     args = parser.parse_args()
     output = args.output_dir if args.output_dir and args.output_dir.is_absolute() else ROOT / args.output_dir if args.output_dir else OUTPUT
     output.mkdir(parents=True, exist_ok=True)
@@ -867,6 +1301,19 @@ async def main():
             parser.error(f"unknown route key: {args.only}")
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        if args.wizard_baseline:
+            for width in (320, 390, 768, 1440): await capture_wizard_baseline(browser, args.base_url, output, width)
+            await browser.close()
+            return
+        if args.manual_refund:
+            for width in (320, 390, 768, 1440): await check_manual_refund(browser, args.base_url, output, width)
+            await browser.close()
+            return
+        if args.event_forms:
+            for width in (320, 390, 768, 1440):
+                await check_event_forms(browser, args.base_url, output, width, args.record_form_baseline, args.form_baseline)
+            await browser.close()
+            return
         if args.mobile_help:
             for width in (320, 390, 768, 1440): await check_help_pages(browser, args.base_url, output, width)
             await browser.close()

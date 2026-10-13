@@ -71,15 +71,15 @@
 </script>
 
 <section class="event-change-panel" aria-labelledby="event-change-title" aria-busy={busy}>
-  <h2 id="event-change-title">Pembatalan dan perubahan jadwal</h2>
+  <h2 id="event-change-title" class="sr-only">Pembatalan dan perubahan jadwal</h2>
   <p>{eventStatus(event.currentEvent) || "Acara terjadwal"} · {eventDate(event.currentEvent?.startsAt ?? event.startsAt)}</p>
   <p>Refund penuh mencakup total order. QR tetap sama pada jadwal baru; check-in lama tetap tercatat dan tiket terpakai tidak dapat digunakan lagi.</p>
   {#if event.currentEvent?.status !== "CANCELLED"}
-    <form class="staff-form" onsubmit={prepare} oninput={edited}>
+    <form class="staff-form event-admin-form" onsubmit={prepare} oninput={edited}>
       <fieldset disabled={busy || uncertain}>
-        <label>Keputusan<select bind:value={action}><option value="POSTPONED">Tunda tanpa tanggal</option><option value="RESCHEDULED">Tetapkan jadwal baru</option><option value="CANCELLED">Batalkan acara</option></select></label>
-        <label>Alasan untuk audit<textarea bind:value={reason} minlength="3" maxlength="500" required></textarea></label>
-        <label>Pengumuman untuk pembeli<textarea bind:value={announcement} minlength="3" maxlength="2000" required></textarea></label>
+        <label class="event-full">Keputusan<select bind:value={action}><option value="POSTPONED">Tunda tanpa tanggal</option><option value="RESCHEDULED">Tetapkan jadwal baru</option><option value="CANCELLED">Batalkan acara</option></select></label>
+        <label>Alasan untuk audit<textarea bind:value={reason} rows="3" minlength="3" maxlength="500" required></textarea></label>
+        <label>Pengumuman untuk pembeli<textarea bind:value={announcement} rows="3" minlength="3" maxlength="2000" required></textarea></label>
         {#if action === "RESCHEDULED"}<div class="event-form-row"><label>Jadwal baru (WIB)<input type="datetime-local" bind:value={startsAt} required /></label><label>Tenggat permintaan refund (WIB)<input type="datetime-local" bind:value={deadline} required /></label></div><p>Tenggat harus sebelum jadwal baru dan tidak boleh memendekkan tenggat yang sudah diberikan.</p>{/if}
         <button class="staff-secondary-button" type="submit">{busy ? "Menyiapkan…" : "Pratinjau dampak"}</button>
       </fieldset>
@@ -105,11 +105,24 @@
 </section>
 
 <style>
-  .event-change-panel { margin-block: 2rem; padding-top: 1.5rem; border-top: 1px solid currentColor; }
-  fieldset { padding: 0; border: 0; display: grid; gap: 1rem; }
-  .impact, .change-history { padding: 1rem; margin-block: 1rem; border: 1px solid currentColor; border-radius: .5rem; }
-  dl { display: grid; grid-template-columns: 1fr auto; gap: .5rem 1rem; }
-  dd { margin: 0; text-align: right; }
-  .confirm { display: flex; align-items: start; gap: .5rem; margin-bottom: 1rem; }
-  .confirm input { width: auto; }
+  .event-change-panel { min-width: 0; display: grid; gap: 12px; margin: 0; overflow-wrap: anywhere; }
+  .event-admin-form { gap: 12px; margin: 0; }
+  p, h3, h4, dl { margin: 0; }
+  form label { min-width: 0; gap: 6px; align-content: start; }
+  fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+  .event-form-row { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); }
+  .event-full, fieldset > p, fieldset > button { grid-column: 1 / -1; }
+  fieldset:disabled :is(select, textarea) { opacity: .65; }
+  .staff-panel-heading { flex-wrap: wrap; gap: 12px; margin: 0; }
+  .impact, .change-history { display: grid; gap: 12px; padding: 16px; margin: 0; border: 1px solid var(--admin-border); background: var(--admin-input); }
+  dl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px 12px; }
+  dt { color: var(--admin-secondary); }
+  dd { margin: 0 0 6px; }
+  .confirm { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 0; }
+  @container concert-form (min-width: 35em) {
+    fieldset, .event-form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    dl { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    dd { margin: 0; text-align: right; }
+  }
+  .confirm input { flex: 0 0 20px; width: 20px; height: 20px; accent-color: var(--admin-accent); }
 </style>

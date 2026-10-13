@@ -219,6 +219,16 @@ async def check(browser, base, width):
     mode["hold"].set()
     await expect(page.get_by_role("status").filter(has_text="Biaya admin tersimpan")).to_be_visible()
     assert len(saves) == 2 and state["settings"]["adminFee"] == 9000
+    # An unchanged stored interval may differ only by seconds; review must preserve it.
+    original_times = voucher["startsAt"], voucher["endsAt"]
+    voucher.update(startsAt="2026-10-01T00:00:10Z", endsAt="2026-10-01T00:00:50Z")
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
+    await page.get_by_role("button", name="Kelola voucher HEMAT10", exact=True).click()
+    await page.get_by_role("button", name="3. Tinjau", exact=True).click()
+    await expect(page.locator("#voucher-section-title")).to_have_text("Tinjau")
+    await page.get_by_role("button", name="Kembali ke daftar", exact=True).click()
+    voucher.update(startsAt=original_times[0], endsAt=original_times[1])
+    await page.get_by_role("button", name="Muat ulang", exact=True).click()
     if width < 768:
         await expect(page.locator(".voucher-editor")).not_to_be_visible()
         await expect(fee).to_be_visible()
@@ -245,13 +255,53 @@ async def check(browser, base, width):
         await expect(page.locator("#voucher-create-opener")).to_be_focused()
         await page.locator("#voucher-create-opener").click()
         await expect(page.get_by_label("Kode voucher", exact=True)).to_have_value("")
+    if not await page.locator(".voucher-editor").is_visible(): await page.locator("#voucher-create-opener").click()
+    await expect(fee).not_to_be_visible()
+    await expect(page.locator(".voucher-list-panel")).not_to_be_visible()
+    await expect(page.locator(".pricing-history")).not_to_be_visible()
     await page.get_by_label("Kode voucher", exact=True).fill("dummy50")
+    before = len(saves)
+    await page.get_by_label("Kode voucher", exact=True).press("Enter")
+    await expect(page.locator("#voucher-section-title")).to_have_text("Ketentuan")
+    assert len(saves) == before
+    await page.get_by_role("button", name="1. Kode & diskon", exact=True).click()
     await page.get_by_label("Jenis diskon").select_option("FIXED")
     await page.get_by_label("Nilai diskon (Rp)", exact=True).fill("50000")
+    for step in (0, 1, 2):
+        await page.get_by_role("button", name=f"{step + 1}. " + ["Kode & diskon", "Ketentuan", "Tinjau"][step], exact=True).click()
+        assert len(saves) == before
+        audit = await page.evaluate(staff_audit)
+        assert not audit["failures"] and not audit["overflow"], (width, step, audit)
+        await page.screenshot(path=f"/tmp/phase51-55/pricing/wizard-{step}-{width}.png", full_page=True)
+        await page.evaluate("""() => {
+          window.__stepFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
+          for (const [el, , size] of window.__stepFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+        }""")
+        audit = await page.evaluate(staff_audit)
+        assert not audit["failures"] and not audit["overflow"], (width, step, "text200", audit)
+        await page.screenshot(path=f"/tmp/phase51-55/pricing/wizard-{step}-text200-{width}.png", full_page=True)
+        await page.evaluate("() => { for (const [el, size] of window.__stepFonts) el.style.fontSize = size; }")
+    await page.locator("#voucher-code").evaluate("el => el.value = ''")
+    await page.locator("#voucher-form").dispatch_event("submit")
+    await expect(page.locator("#voucher-section-title")).to_have_text("Kode & diskon")
+    await expect(page.locator("#voucher-code")).to_be_focused()
+    assert len(saves) == before
+    await page.get_by_label("Kode voucher", exact=True).fill("dummy50")
+    await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
+    await page.get_by_label("Akhir masa berlaku", exact=True).fill("2000-01-01T00:00")
+    await page.get_by_role("button", name="3. Tinjau", exact=True).click()
+    await expect(page.locator("#voucher-section-title")).to_have_text("Ketentuan")
+    await expect(page.get_by_label("Akhir masa berlaku", exact=True)).to_be_focused()
+    await page.get_by_label("Akhir masa berlaku", exact=True).fill("2099-01-01T00:00")
+    await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Cakupan konser").select_option("nusa-malam")
+    await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Minimum subtotal tiket (Rp)", exact=True).fill("100000")
+    await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Kuota order", exact=True).fill("5")
+    await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Voucher aktif", exact=True).check()
+    await page.get_by_role("button", name="3. Tinjau", exact=True).click()
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Buat voucher", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
@@ -265,8 +315,11 @@ async def check(browser, base, width):
     else:
         await expect(page.locator(".voucher-table tr").filter(has=page.locator("#voucher-manage-DUMMY50")).locator(".admin-table-pairs dd")).to_have_text(["1", "2", "1"])
         await expect(page.locator(".voucher-table tr").filter(has=page.locator("#voucher-manage-DUMMY50")).locator("td").nth(4)).to_have_text("5")
+    if not await page.locator(".voucher-editor").is_visible(): await page.locator("#voucher-manage-DUMMY50").click()
     await expect(page.get_by_label("Kode voucher", exact=True)).to_have_attribute("readonly", "")
+    await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Voucher aktif", exact=True).uncheck()
+    await page.get_by_role("button", name="3. Tinjau", exact=True).click()
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
     await expect(page.locator(".voucher-list, .voucher-table")).to_contain_text("Nonaktif")
@@ -275,8 +328,10 @@ async def check(browser, base, width):
         await expect(page.locator('.voucher-list-panel [role="status"]')).to_contain_text("1 sampai 5")
         # A successful save can precede the refreshed list: focus the result instead of a missing card.
         await page.locator("#voucher-manage-DUMMY50").click()
+        await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
         await page.get_by_label("Voucher aktif", exact=True).check()
         mode["hideSaved"] = True
+        await page.get_by_role("button", name="3. Tinjau", exact=True).click()
         page.once("dialog", lambda d: d.accept())
         await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
         await expect(page.locator("#pricing-feedback")).to_be_focused()
@@ -285,7 +340,7 @@ async def check(browser, base, width):
         await page.get_by_role("button", name="Muat ulang", exact=True).click()
         await expect(page.locator("#voucher-manage-DUMMY50")).to_be_visible()
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "admin overflow"
-    assert await page.locator("#voucher-create-opener" if width < 768 else ".voucher-desktop-action").evaluate("el => el.getBoundingClientRect().height >= 44")
+    assert await page.locator("#voucher-create-opener").evaluate("el => el.getBoundingClientRect().height >= 44")
 
     await page.goto(base + "/checkout/nusa-malam?festival=1")
     await expect(page.locator(".grand-total")).to_contain_text("284.000")
@@ -443,15 +498,19 @@ async def check_loading(browser, base, width):
     await page.get_by_role("button", name="Coba lagi", exact=True).click()
     fee = page.get_by_label("Nominal tetap (Rp)", exact=True)
     await expect(fee).to_have_value("7500")
-    if width < 768:
-        await page.locator("#voucher-create-opener").click()
-    await expect(page.locator(".voucher-editor").get_by_role("button", name="Buat voucher", exact=True)).to_be_disabled()
     await fee.fill("9000")
     await expect(page.get_by_role("button", name="Simpan biaya admin", exact=True)).to_be_enabled()
+    await page.locator("#voucher-create-opener").click()
+    await page.get_by_label("Kode voucher", exact=True).fill("CATALOG")
+    await page.get_by_role("button", name="Lanjutkan", exact=True).click()
+    await expect(page.locator(".voucher-editor").get_by_role("button", name="Lanjutkan", exact=True)).to_be_disabled()
     await page.screenshot(path=str(output / f"catalog-error-{width}.png"), full_page=True)
     mode["catalog"] = 200
     await page.get_by_role("button", name="Coba lagi katalog", exact=True).click()
-    await expect(page.locator(".voucher-editor").get_by_role("button", name="Buat voucher", exact=True)).to_be_enabled()
+    await expect(page.locator(".voucher-editor").get_by_role("button", name="Lanjutkan", exact=True)).to_be_enabled()
+    page.once("dialog", lambda d: d.accept())
+    await page.get_by_role("button", name="Batal", exact=True).click()
+    await expect(fee).to_have_value("9000")
     sample = page.get_by_label("Subtotal tiket untuk pratinjau (Rp)")
     await sample.fill("123456"); await sample.press("Tab")
     await expect(sample).to_have_value("123.456")
@@ -491,8 +550,10 @@ async def check_loading(browser, base, width):
     await page.get_by_role("button", name="Periksa hasil simpan", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Biaya admin sesuai")).to_be_visible()
     await expect(fee).to_be_enabled()
+    await page.locator("#voucher-create-opener").click()
     await page.get_by_label("Kode voucher", exact=True).fill("LOST50")
     await page.get_by_label("Nilai diskon (%)", exact=True).fill("15")
+    await page.get_by_role("button", name="3. Tinjau", exact=True).click()
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Buat voucher", exact=True).click()
     await expect(page.get_by_role("alert")).to_contain_text("belum pasti")
@@ -502,7 +563,9 @@ async def check_loading(browser, base, width):
     await page.get_by_role("button", name="Periksa hasil simpan", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Voucher sesuai")).to_be_visible()
     mode["save"] = "success"
+    await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Voucher aktif", exact=True).check()
+    await page.get_by_role("button", name="3. Tinjau", exact=True).click()
     page.once("dialog", lambda d: d.accept())
     await page.get_by_role("button", name="Simpan perubahan voucher", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Voucher tersimpan")).to_be_visible()
@@ -571,13 +634,15 @@ async def check_save_recovery(browser, base, width, operation, scenario):
         section = page.locator('[aria-labelledby="fee-recovery-title"]')
     else:
         if operation == "voucher-update": await page.get_by_role("button", name="Kelola voucher RECOVER15", exact=True).click()
-        elif width < 768: await page.locator("#voucher-create-opener").click()
+        else: await page.locator("#voucher-create-opener").click()
         if operation == "voucher-create": await page.get_by_label("Kode voucher", exact=True).fill("RECOVER15")
         field = page.get_by_label("Nilai diskon (%)", exact=True)
         await field.fill("15")
         submit = page.locator(".voucher-editor").get_by_role("button", name="Buat voucher" if operation == "voucher-create" else "Simpan perubahan voucher", exact=True)
         retry = page.get_by_role("button", name="Coba kirim perubahan voucher yang sama", exact=True)
         section = page.locator('[aria-labelledby="voucher-recovery-title"]')
+        await page.get_by_role("button", name="3. Tinjau", exact=True).click()
+        assert not requests, "Only the final review action may mutate a voucher"
     await submit.click()
     await expect(retry).to_be_disabled()
     await expect(field).to_be_disabled()
@@ -633,7 +698,7 @@ async def check_save_recovery(browser, base, width, operation, scenario):
         assert mode["commits"] == 1, mode
     assert len(requests) == (3 if scenario in ("no-commit", "concurrent") else 2), requests
     if operation == "fee": await expect(field).to_be_enabled()
-    elif width < 768:
+    else:
         if scenario == "committed": await page.locator(".voucher-editor").get_by_role("button", name="Kembali ke daftar", exact=True).click()
         await expect(page.locator(".voucher-editor")).not_to_be_visible()
         await expect(page.locator("#voucher-create-opener")).to_be_enabled()

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from "svelte";
+  import { onMount, tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
   import { mobileGroupSize, mobileListItems } from "../../lib/mobile-list.ts";
@@ -7,6 +7,8 @@
   let voucherGroup = $state(0);
   let voucherScroll = $state(0);
   let voucherOpen = $state(false);
+  let voucherStep = $state(0);
+  const voucherSteps = ["Kode & diskon", "Ketentuan", "Tinjau"];
   let voucherTrigger = "voucher-create-opener";
   let voucherListScroll = 0;
   import AdminLayout from "../../layouts/AdminLayout.svelte";
@@ -38,12 +40,10 @@
   let editing = $state(false);
   const initial = emptyVoucher();
   let draft = $state<Voucher>(initial);
-  let baseline = $state(JSON.stringify(initial));
   let starts = $state(localTime(initial.startsAt));
   let ends = $state(localTime(initial.endsAt));
   const voucherState = () => JSON.stringify({ draft, starts, ends });
   let voucherBaseline = $state(voucherState());
-  $effect(() => { if (mobile.current) untrack(() => { if (voucherState() !== voucherBaseline || document.activeElement?.closest(".voucher-editor")) voucherOpen = true; }); });
   const dirty = $derived(Boolean(data) && (fee !== data?.settings.adminFee || voucherState() !== voucherBaseline));
   const money = (v: number) => formatRupiah.format(v);
   const count = new Intl.NumberFormat("id-ID");
@@ -53,11 +53,11 @@
   function protect(event: BeforeUnloadEvent) { if (dirty || saving || pendingFee || pendingVoucher) { event.preventDefault(); event.returnValue = ""; } }
   async function choose(value?: Voucher) {
     if (saving || pendingVoucher || (voucherState() !== voucherBaseline && !window.confirm("Buang perubahan voucher yang belum disimpan?"))) return;
-    if (mobile.current) { voucherListScroll = window.scrollY; voucherTrigger = value ? `voucher-manage-${value.code}` : "voucher-create-opener"; }
-    voucherOpen = true;
+    voucherListScroll = window.scrollY; voucherTrigger = value ? `voucher-manage-${value.code}` : "voucher-create-opener";
+    voucherOpen = true; voucherStep = 0;
     draft = value ? { code: value.code, kind: value.kind, value: value.value, startsAt: value.startsAt, endsAt: value.endsAt, active: value.active, eventId: value.eventId, minimumSubtotal: value.minimumSubtotal, quota: value.quota, revision: value.revision } : emptyVoucher();
-    editing = Boolean(value); starts = localTime(draft.startsAt); ends = localTime(draft.endsAt); baseline = JSON.stringify(draft); voucherBaseline = voucherState(); error = ""; notice = "";
-    await tick(); document.getElementById(mobile.current ? "voucher-title" : "voucher-code")?.focus();
+    editing = Boolean(value); starts = localTime(draft.startsAt); ends = localTime(draft.endsAt); voucherBaseline = voucherState(); error = ""; notice = "";
+    await tick(); document.getElementById("voucher-title")?.focus();
   }
   async function closeVoucher(saved = false) {
     if (!saved && (saving || pendingVoucher)) return;
@@ -100,7 +100,7 @@
       if (pendingVoucher) {
         const found = current.vouchers.find(v => v.code === pendingVoucher?.code);
         if (found && sameVoucher(found, pendingVoucher) && (pendingVoucherCreating || found.revision > pendingVoucher.revision)) {
-          draft = { ...pendingVoucher, revision: found.revision }; editing = true; starts = localTime(draft.startsAt); ends = localTime(draft.endsAt); baseline = JSON.stringify(draft); voucherBaseline = voucherState(); pendingVoucher = undefined; error = ""; notice = "Voucher sesuai hasil penyimpanan pada data terbaru."; confirmed = true;
+          draft = { ...pendingVoucher, revision: found.revision }; editing = true; starts = localTime(draft.startsAt); ends = localTime(draft.endsAt); voucherBaseline = voucherState(); pendingVoucher = undefined; error = ""; notice = "Voucher sesuai hasil penyimpanan pada data terbaru."; confirmed = true;
         } else {
           voucherRecovery = found && (conflict === "voucher" || voucherRecovery === "conflict") ? "conflict" : "checked";
           if (conflict === "voucher") error = "Konflik voucher: data server berbeda dari draft. Periksa perbandingan sebelum memakai baseline baru.";
@@ -146,8 +146,29 @@
     notice = "Data server menjadi acuan biaya. Draft tetap tersedia; tinjau sebelum menyimpan lagi.";
     await tick(); document.getElementById("fee-amount")?.focus();
   }
+  async function validateVoucher(through: number) {
+    for (let index = 0; index <= through; index++) {
+      const invalid = document.querySelector<HTMLInputElement | HTMLSelectElement>(`#voucher-fields-${index} :invalid`);
+      if (invalid) { voucherStep = index; await tick(); invalid.reportValidity(); invalid.focus(); return false; }
+    }
+    const startAt = starts === localTime(draft.startsAt) ? draft.startsAt : starts;
+    const endAt = ends === localTime(draft.endsAt) ? draft.endsAt : ends;
+    if (through > 0 && (!Number.isFinite(Date.parse(startAt)) || !Number.isFinite(Date.parse(endAt)) || Date.parse(endAt) <= Date.parse(startAt))) {
+      error = "Akhir masa berlaku harus setelah awal masa berlaku."; voucherStep = 1;
+      await tick(); document.getElementById("voucher-ends")?.focus(); return false;
+    }
+    return true;
+  }
+  async function navigateVoucher(next: number) {
+    if (saving || pendingVoucher) return;
+    if (next > voucherStep && !await validateVoucher(next - 1)) return;
+    voucherStep = next; error = "";
+    await tick(); document.getElementById("voucher-section-title")?.focus();
+  }
   async function saveVoucher(event: SubmitEvent) {
-    event.preventDefault(); if (saving || loading || loadingEvents || eventsError || pendingVoucher || !data) return;
+    event.preventDefault(); if (saving || loading || pendingVoucher || !data) return;
+    if (voucherStep < 2) { await navigateVoucher(voucherStep + 1); return; }
+    if (loadingEvents || eventsError || !await validateVoucher(1)) return;
     if (!Number.isFinite(Date.parse(starts)) || !Number.isFinite(Date.parse(ends))) { error = "Isi awal dan akhir masa berlaku yang valid."; return; }
     const input = { ...draft, code: draft.code.trim().toUpperCase(), startsAt: starts === localTime(draft.startsAt) ? draft.startsAt : new Date(starts).toISOString(), endsAt: ends === localTime(draft.endsAt) ? draft.endsAt : new Date(ends).toISOString() };
     if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) { error = "Akhir masa berlaku harus setelah awal masa berlaku."; return; }
@@ -158,7 +179,7 @@
     if (saving || loading || !data) return;
     saving = true; error = ""; notice = "";
     let completed = false;
-    try { const saved = await saveAdminVoucher(accessToken, input, creating); pendingVoucher = undefined; draft = saved; editing = true; starts = localTime(saved.startsAt); ends = localTime(saved.endsAt); baseline = JSON.stringify(saved); voucherBaseline = voucherState(); notice = "Voucher tersimpan."; await load(); completed = true; }
+    try { const saved = await saveAdminVoucher(accessToken, input, creating); pendingVoucher = undefined; draft = saved; editing = true; starts = localTime(saved.startsAt); ends = localTime(saved.endsAt); voucherBaseline = voucherState(); notice = "Voucher tersimpan."; await load(); completed = true; }
     catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) onUnauthorized();
       else if (pendingVoucher || uncertainPricingSave(cause)) {
@@ -166,7 +187,7 @@
         if (cause instanceof ApiError && cause.status === 409) { voucherRecovery = "conflict"; await load("voucher"); }
       } else report(cause);
     } finally { saving = false; }
-    if (completed && mobile.current) await closeVoucher(true);
+    if (completed) await closeVoucher(true);
   }
   async function retryVoucher() {
     if (saving || loading || loadingEvents || eventsError || pricingError || !pendingVoucher || voucherRecovery !== "checked") return;
@@ -178,8 +199,8 @@
     if (!found) return;
     const { usage, ...server } = found;
     draft = { ...pendingVoucher, revision: server.revision }; editing = true; starts = localTime(draft.startsAt); ends = localTime(draft.endsAt);
-    baseline = JSON.stringify(server); voucherBaseline = JSON.stringify({ draft: server, starts: localTime(server.startsAt), ends: localTime(server.endsAt) });
-    pendingVoucher = undefined; error = ""; notice = "Data server menjadi acuan voucher. Draft tetap tersedia; tinjau sebelum menyimpan lagi.";
+    voucherBaseline = JSON.stringify({ draft: server, starts: localTime(server.startsAt), ends: localTime(server.endsAt) });
+    voucherStep = 2; pendingVoucher = undefined; error = ""; notice = "Data server menjadi acuan voucher. Draft tetap tersedia; tinjau sebelum menyimpan lagi.";
     await tick(); document.getElementById("voucher-title")?.focus();
   }
   onMount(() => { void load(); void loadEvents(); });
@@ -220,8 +241,8 @@
     </section>
   {/if}
   {#if data}
-  <div class="pricing-grid" class:voucher-open={voucherOpen}>
-    <section class="staff-admin-panel" aria-labelledby="fee-title">
+  <div class="pricing-grid">
+    <section class="staff-admin-panel fee-panel" hidden={voucherOpen} aria-labelledby="fee-title">
       {@render helpHeading("fee-title", "Biaya admin per order", "Biaya berlaku sekali untuk setiap pesanan baru. Pesanan lama dan refund mengikuti nilai yang tersimpan.")}
       <form onsubmit={saveFee}><fieldset disabled={saving || Boolean(pendingFee)}>
         <label>Nominal tetap (Rp)<input id="fee-amount" type="number" inputmode="numeric" min="0" max="1000000000" step="1" required bind:value={fee} /></label>
@@ -232,26 +253,49 @@
         <button class="scan-submit" type="submit" disabled={saving || loading || sampleValue === undefined || fee === data?.settings.adminFee}>{saving ? "Menyimpan…" : "Simpan biaya admin"}</button>
       </fieldset></form>
     </section>
-    <section class="staff-admin-panel voucher-editor" aria-labelledby="voucher-title">
-      <div class="voucher-editor-heading"><h2 id="voucher-title" tabindex="-1">{editing ? `Ubah voucher ${draft.code}` : "Buat voucher"}</h2><button class="staff-secondary-button voucher-mobile-action" type="button" disabled={saving || Boolean(pendingVoucher)} onclick={() => closeVoucher()}>Kembali ke daftar</button></div>
+    <section class="staff-admin-panel voucher-editor" hidden={!voucherOpen} aria-labelledby="voucher-title">
+      <div class="voucher-editor-heading"><h2 id="voucher-title" tabindex="-1">{editing ? `Ubah voucher ${draft.code}` : "Buat voucher"}</h2><button class="staff-secondary-button" type="button" disabled={saving || Boolean(pendingVoucher)} onclick={() => closeVoucher()}>Kembali ke daftar</button></div>
       {#if loadingEvents}<p role="status">Memuat katalog konser…</p>{/if}
       {#if eventsError}<p class="staff-form-message staff-form-error" role="alert">{eventsError} <button class="staff-secondary-button" type="button" onclick={loadEvents} disabled={loadingEvents || saving}>Coba lagi katalog</button></p>{/if}
-      <form onsubmit={saveVoucher}><fieldset disabled={saving || Boolean(pendingVoucher)}>
-        <label>Kode voucher<input id="voucher-code" bind:value={draft.code} readonly={editing} required minlength="2" maxlength="32" pattern={"[A-Za-z0-9][A-Za-z0-9_\\-]{1,31}"} aria-describedby="code-help" /></label>
-        <p id="code-help">2–32 huruf/angka, tanda hubung atau garis bawah. Kode tersimpan tidak dapat diganti; nonaktifkan bila promosi selesai.</p>
-        <div class="field-row"><label>Jenis diskon<select bind:value={draft.kind}><option value="PERCENT">Persentase subtotal tiket</option><option value="FIXED">Nominal rupiah</option></select></label><label>Nilai diskon ({draft.kind === "PERCENT" ? "%" : "Rp"})<input type="number" inputmode="numeric" min="1" max={draft.kind === "PERCENT" ? 100 : 1000000000} step="1" required bind:value={draft.value} /></label></div>
-        <div class="field-row"><label>Mulai berlaku<input type="datetime-local" required bind:value={starts} /></label><label>Akhir masa berlaku<input type="datetime-local" required bind:value={ends} /></label></div>
-        <p>Waktu mengikuti zona perangkat. Awal berlaku termasuk, akhir berlaku tidak termasuk.</p>
-        <label>Cakupan konser<select bind:value={draft.eventId} disabled={loadingEvents || Boolean(eventsError)}><option value="">Semua konser</option>{#each events as event}<option value={event.id}>{event.artist} · {event.city}</option>{/each}</select></label>
-        <div class="field-row"><label>Minimum subtotal tiket (Rp)<input type="number" inputmode="numeric" min="0" max="1000000000000" step="1" required bind:value={draft.minimumSubtotal} /></label><label>Kuota order<input type="number" inputmode="numeric" min="1" max="1000000000" step="1" required bind:value={draft.quota} /></label></div>
-        <label class="checkbox"><input type="checkbox" bind:checked={draft.active} />Voucher aktif</label>
-        <p>Satu voucher per order. Diskon maksimal sebesar subtotal tiket; biaya admin tetap dibayar.</p>
-        <button class="scan-submit" type="submit" disabled={loading || loadingEvents || Boolean(eventsError) || (editing && JSON.stringify(draft) === baseline && starts === localTime(draft.startsAt) && ends === localTime(draft.endsAt))}>{saving ? "Menyimpan…" : editing ? "Simpan perubahan voucher" : "Buat voucher"}</button>
-        <button class="staff-secondary-button voucher-desktop-action" type="button" onclick={() => choose()}>Voucher baru</button><button class="staff-secondary-button voucher-mobile-action" type="button" disabled={saving || Boolean(pendingVoucher)} onclick={() => closeVoucher()}>Batal</button>
+      <nav class="voucher-section-nav" aria-label={editing ? "Bagian edit voucher" : "Langkah tambah voucher"}>{#each voucherSteps as label, index}<button class="staff-secondary-button" type="button" aria-current={voucherStep === index ? "step" : undefined} disabled={saving || Boolean(pendingVoucher)} onclick={() => navigateVoucher(index)}>{index + 1}. {label}</button>{/each}</nav>
+      <h3 id="voucher-section-title" tabindex="-1">{voucherSteps[voucherStep]}</h3>
+      <p aria-live="polite">Langkah {voucherStep + 1} dari 3</p>
+      <form id="voucher-form" novalidate onsubmit={saveVoucher}><fieldset disabled={saving || Boolean(pendingVoucher)}>
+        <div id="voucher-fields-0" class="voucher-fields" hidden={voucherStep !== 0}>
+        <label class="voucher-full">Kode voucher<input id="voucher-code" bind:value={draft.code} readonly={editing} required minlength="2" maxlength="32" pattern={"[A-Za-z0-9][A-Za-z0-9_\\-]{1,31}"} aria-describedby="code-help" /></label>
+        <p id="code-help" class="voucher-full">2–32 huruf/angka, tanda hubung atau garis bawah. Kode tersimpan tidak dapat diganti; nonaktifkan bila promosi selesai.</p>
+        <label>Jenis diskon<select bind:value={draft.kind}><option value="PERCENT">Persentase subtotal tiket</option><option value="FIXED">Nominal rupiah</option></select></label><label>Nilai diskon ({draft.kind === "PERCENT" ? "%" : "Rp"})<input type="number" inputmode="numeric" min="1" max={draft.kind === "PERCENT" ? 100 : 1000000000} step="1" required bind:value={draft.value} /></label>
+        </div>
+        <div id="voucher-fields-1" class="voucher-fields" hidden={voucherStep !== 1}>
+        <label>Mulai berlaku<input type="datetime-local" required bind:value={starts} /></label><label>Akhir masa berlaku<input id="voucher-ends" type="datetime-local" required bind:value={ends} /></label>
+        <p class="voucher-full">Waktu mengikuti zona perangkat. Awal berlaku termasuk, akhir berlaku tidak termasuk.</p>
+        <label class="voucher-full">Cakupan konser<select bind:value={draft.eventId} disabled={loadingEvents || Boolean(eventsError)}><option value="">Semua konser</option>{#each events as event}<option value={event.id}>{event.artist} · {event.city}</option>{/each}</select></label>
+        <label>Minimum subtotal tiket (Rp)<input type="number" inputmode="numeric" min="0" max="1000000000000" step="1" required bind:value={draft.minimumSubtotal} /></label><label>Kuota order<input type="number" inputmode="numeric" min="1" max="1000000000" step="1" required bind:value={draft.quota} /></label>
+        <label class="checkbox voucher-full"><input type="checkbox" bind:checked={draft.active} />Voucher aktif</label>
+        <p class="voucher-full">Satu voucher per order. Diskon maksimal sebesar subtotal tiket; biaya admin tetap dibayar.</p>
+        </div>
+        <div hidden={voucherStep !== 2}>
+          <dl class="voucher-review">
+            <div><dt>Kode voucher</dt><dd>{draft.code.trim().toUpperCase()}</dd></div>
+            <div><dt>Diskon</dt><dd>{draft.kind === "PERCENT" ? `${draft.value}%` : money(draft.value)}</dd></div>
+            <div><dt>Mulai berlaku</dt><dd>{starts.replace("T", " ")} (zona perangkat)</dd></div>
+            <div><dt>Akhir masa berlaku</dt><dd>{ends.replace("T", " ")} (zona perangkat)</dd></div>
+            <div><dt>Cakupan konser</dt><dd>{events.find(event => event.id === draft.eventId)?.artist ?? (draft.eventId || "Semua konser")}</dd></div>
+            <div><dt>Minimum subtotal</dt><dd>{money(draft.minimumSubtotal)}</dd></div>
+            <div><dt>Kuota order</dt><dd>{count.format(draft.quota)}</dd></div>
+            <div><dt>Status</dt><dd>{draft.active ? "Aktif" : "Nonaktif"}</dd></div>
+          </dl>
+          <p>Order yang sudah dibuat tetap memakai snapshot sebelumnya. Satu voucher per order; diskon maksimal sebesar subtotal tiket dan biaya admin tetap dibayar.</p>
+        </div>
+        <div class="voucher-actions">
+          {#if voucherStep > 0}<button class="staff-secondary-button" type="button" onclick={() => navigateVoucher(voucherStep - 1)}>Sebelumnya</button>{/if}
+          <button class="scan-submit" type="submit" disabled={loading || (voucherStep > 0 && (loadingEvents || Boolean(eventsError))) || (voucherStep === 2 && editing && voucherState() === voucherBaseline)}>{saving ? "Menyimpan…" : voucherStep < 2 ? "Lanjutkan" : editing ? "Simpan perubahan voucher" : "Buat voucher"}</button>
+          <button class="staff-secondary-button" type="button" disabled={saving || Boolean(pendingVoucher)} onclick={() => closeVoucher()}>Batal</button>
+        </div>
       </fieldset></form>
     </section>
   </div>
-  <section class="staff-admin-panel voucher-list-panel" class:voucher-open={voucherOpen} aria-labelledby="list-title"><button id="voucher-create-opener" class="scan-submit voucher-mobile-action" type="button" disabled={saving || loading || Boolean(pendingVoucher)} onclick={() => choose()}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v5a2 2 0 0 0 0 4v5H4v-5a2 2 0 0 0 0-4Z" /><path d="M12 9v6m-3-3h6" /></svg><span>Buat voucher</span></button>{@render helpHeading("list-title", "Daftar dan penggunaan voucher", "Pesanan menunggu pembayaran menahan kuota hingga kedaluwarsa atau selesai diperiksa. Pesanan lunas memakai kuota; refund tidak mengembalikannya. Pratinjau tidak menahan kuota.")}<p class="pricing-explanation">Pending menahan kuota sampai expiry/rekonsiliasi selesai. Lunas memakai kuota permanen; refund tidak mengembalikannya. Pratinjau belum menahan kuota.</p>
+  <section class="staff-admin-panel voucher-list-panel" hidden={voucherOpen} aria-labelledby="list-title"><button id="voucher-create-opener" class="scan-submit" type="button" disabled={saving || loading || Boolean(pendingVoucher)} onclick={() => choose()}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v5a2 2 0 0 0 0 4v5H4v-5a2 2 0 0 0 0-4Z" /><path d="M12 9v6m-3-3h6" /></svg><span>Buat voucher</span></button>{@render helpHeading("list-title", "Daftar dan penggunaan voucher", "Pesanan menunggu pembayaran menahan kuota hingga kedaluwarsa atau selesai diperiksa. Pesanan lunas memakai kuota; refund tidak mengembalikannya. Pratinjau tidak menahan kuota.")}<p class="pricing-explanation">Pending menahan kuota sampai expiry/rekonsiliasi selesai. Lunas memakai kuota permanen; refund tidak mengembalikannya. Pratinjau belum menahan kuota.</p>
     {#if mobile.current && !voucherOpen}
       {#if loadingEvents}<p role="status">Memuat katalog konser…</p>{/if}
       {#if eventsError}<p class="staff-form-message staff-form-error" role="alert">{eventsError} <button class="staff-secondary-button" type="button" onclick={loadEvents} disabled={loadingEvents || saving}>Coba lagi katalog</button></p>{/if}
@@ -298,7 +342,7 @@
       </div>
     {/if}
   </section>
-  <details class="pricing-history" open={!mobile.current}>
+  <details class="pricing-history" hidden={voucherOpen} open={!mobile.current}>
     <summary>Riwayat perubahan</summary>
     <section class="staff-admin-panel" aria-labelledby="history-title">
       <h2 id="history-title">Riwayat perubahan</h2>
@@ -334,28 +378,45 @@
   .history-details dd { min-width: 0; margin: 0; color: var(--admin-text); font-size: 16px; overflow-wrap: anywhere; }
   .history-empty { margin: 0; }
   .pricing-help-heading { display: contents; }
-  .voucher-mobile-action, .pricing-history > summary { display: none; }
+  .pricing-history > summary { display: none; }
   .voucher-editor-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 12px; }
   @media (max-width: 767px) {
     .pricing-explanation { display: none; }
     .pricing-help-heading { display: block; margin-bottom: 18px; }
     #voucher-create-opener { display: flex; align-items: center; justify-content: center; gap: 10px; text-align: center; }
     #voucher-create-opener svg { flex-shrink: 0; }
-    .pricing-grid:not(.voucher-open) .voucher-editor, .voucher-list-panel.voucher-open, .voucher-desktop-action { display: none; }
-    .voucher-mobile-action { display: inline-grid; }
-    .voucher-list-panel > .voucher-mobile-action { margin-bottom: 18px; }
+
     .pricing-history > summary { display: flex; align-items: center; min-height: 44px; padding: 12px 16px; border: 1px solid var(--admin-border); font-size: 18px; cursor: pointer; }
     .pricing-history section { margin-top: 0; }
     .pricing-history h2 { display: none; }
   }
-  .pricing-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 24px; }
+  .pricing-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+  [hidden] { display: none !important; }
+  #voucher-create-opener { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .voucher-editor { container: voucher-form / inline-size; }
+  .voucher-editor h3 { margin: 0 0 16px; }
+  .voucher-editor p { margin: 0; }
+  .voucher-editor > p { margin-bottom: 12px; }
+  .voucher-section-nav, .voucher-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 16px; }
+  .voucher-section-nav button { white-space: normal; }
+  .voucher-section-nav [aria-current] { border-color: var(--admin-accent); background: var(--admin-input); }
+  .voucher-editor fieldset, .voucher-fields { display: grid; gap: 12px; }
+  .voucher-fields label { gap: 6px; }
+  .voucher-full { grid-column: 1 / -1; }
+  .voucher-review { display: grid; gap: 12px; margin: 0 0 12px; }
+  .voucher-review > div { display: grid; gap: 6px; }
+  .voucher-review dt { color: var(--scan-muted); }
+  .voucher-review dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  @container voucher-form (min-width: 35em) {
+    .voucher-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .voucher-review > div { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+  }
   section { margin: 24px 0; min-width: 0; } h2 { margin: 0 0 18px; } p { line-height: 1.6; overflow-wrap: anywhere; }
   fieldset { display: grid; gap: 16px; min-width: 0; border: 0; padding: 0; margin: 0; }
   label { display: grid; gap: 8px; min-width: 0; } input,select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 10px; border: 1px solid var(--scan-line); border-radius: 0; background: var(--scan-panel); color: var(--scan-text); font: inherit; }
   .checkbox { display: flex; align-items: center; min-height: 44px; } .checkbox input { width: 20px; min-height: 20px; }
-  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } button { min-height: 44px; }
+  button { min-height: 44px; }
   .history { padding: 0; list-style: none; } .history li { padding: 20px 0; border-top: 1px solid var(--scan-line); overflow-wrap: anywhere; }
   :is(input,select):focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
-  @media(max-width: 1000px) { .pricing-grid { grid-template-columns: 1fr; gap: 0; } }
-  @media(max-width: 600px) { .field-row { grid-template-columns: 1fr; } button { width: 100%; } }
+  @media(max-width: 600px) { button { width: 100%; } }
 </style>
