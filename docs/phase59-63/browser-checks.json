@@ -1,0 +1,802 @@
+{
+  "capturedAt": "2026-10-13T14:22:08.081774+00:00",
+  "evidence": "Automated Chrome checks with intercepted API fixtures, not staging or human UAT. Text 200% is computed font/line-height enlargement, not browser zoom.",
+  "fixtures": [
+    {
+      "id": "fixture-0",
+      "artist": "Konser dengan nama panjang untuk membandingkan harga dan jadwal",
+      "city": "Jakarta",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-24T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Presale",
+      "publicationStatus": "PUBLISHED",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22400%22%20height%3D%22500%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%231358d8%22/%3E%3Ctext%20x%3D%2210%22%20y%3D%2224%22%20fill%3D%22white%22%20font-size%3D%2216%22%3EPOSTER%20UJI%201%3C/text%3E%3C/svg%3E",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 100000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 100000,
+          "availableQuantity": 5,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 100000,
+          "availableQuantity": 18,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 100000,
+          "availableQuantity": 42,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 100000,
+          "availableQuantity": 24,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false
+    },
+    {
+      "id": "fixture-1",
+      "artist": "Konser Uji 2",
+      "city": "Bandung",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-25T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Presale",
+      "publicationStatus": "PUBLISHED",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%221200%22%20height%3D%22300%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%231358d8%22/%3E%3Ctext%20x%3D%2210%22%20y%3D%2224%22%20fill%3D%22white%22%20font-size%3D%2216%22%3EPOSTER%20UJI%202%3C/text%3E%3C/svg%3E",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 125000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 125000,
+          "availableQuantity": 5,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 125000,
+          "availableQuantity": 18,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 125000,
+          "availableQuantity": 42,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 125000,
+          "availableQuantity": 24,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false
+    },
+    {
+      "id": "fixture-2",
+      "artist": "Konser Uji 3",
+      "city": "Jakarta",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-26T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Sold Out",
+      "publicationStatus": "PUBLISHED",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22300%22%20height%3D%221600%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%231358d8%22/%3E%3Ctext%20x%3D%2210%22%20y%3D%2224%22%20fill%3D%22white%22%20font-size%3D%2216%22%3EPOSTER%20UJI%203%3C/text%3E%3C/svg%3E",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 150000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 150000,
+          "availableQuantity": 0,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 150000,
+          "availableQuantity": 0,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 150000,
+          "availableQuantity": 0,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 150000,
+          "availableQuantity": 0,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false
+    },
+    {
+      "id": "fixture-3",
+      "artist": "Konser Uji 4",
+      "city": "Bandung",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-27T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Presale",
+      "publicationStatus": "PUBLISHED",
+      "image": "/missing-official-poster.jpg",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 175000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 175000,
+          "availableQuantity": 5,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 175000,
+          "availableQuantity": 18,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 175000,
+          "availableQuantity": 42,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 175000,
+          "availableQuantity": 24,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false
+    },
+    {
+      "id": "fixture-4",
+      "artist": "Konser Uji 5",
+      "city": "Jakarta",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-28T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Presale",
+      "publicationStatus": "PUBLISHED",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%221200%22%20height%3D%22300%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%231358d8%22/%3E%3Ctext%20x%3D%2210%22%20y%3D%2224%22%20fill%3D%22white%22%20font-size%3D%2216%22%3EPOSTER%20UJI%205%3C/text%3E%3C/svg%3E",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 200000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 200000,
+          "availableQuantity": 5,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 200000,
+          "availableQuantity": 18,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 200000,
+          "availableQuantity": 42,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 200000,
+          "availableQuantity": 24,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false,
+      "currentEvent": {
+        "id": "nusa-malam",
+        "status": "RESCHEDULED",
+        "version": 1,
+        "salesPaused": false,
+        "startsAt": "2027-08-23T17:00:00Z",
+        "announcement": "Jadwal acara telah diperbarui. Periksa detail pesanan untuk informasi refund.",
+        "refundDeadline": "2027-08-30T23:59:00+07:00"
+      }
+    },
+    {
+      "id": "fixture-5",
+      "artist": "Konser Uji 6",
+      "city": "Bandung",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-29T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Presale",
+      "publicationStatus": "PUBLISHED",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22300%22%20height%3D%221600%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%231358d8%22/%3E%3Ctext%20x%3D%2210%22%20y%3D%2224%22%20fill%3D%22white%22%20font-size%3D%2216%22%3EPOSTER%20UJI%206%3C/text%3E%3C/svg%3E",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 225000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 225000,
+          "availableQuantity": 5,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 225000,
+          "availableQuantity": 18,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 225000,
+          "availableQuantity": 42,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 225000,
+          "availableQuantity": 24,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false,
+      "currentEvent": {
+        "id": "nusa-malam",
+        "status": "POSTPONED",
+        "version": 1,
+        "salesPaused": true,
+        "startsAt": null,
+        "announcement": "Jadwal acara telah diperbarui. Periksa detail pesanan untuk informasi refund.",
+        "refundDeadline": "2027-08-30T23:59:00+07:00"
+      }
+    },
+    {
+      "id": "fixture-6",
+      "artist": "Konser Uji 7",
+      "city": "Jakarta",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-30T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Presale",
+      "publicationStatus": "PUBLISHED",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22400%22%20height%3D%22500%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%231358d8%22/%3E%3Ctext%20x%3D%2210%22%20y%3D%2224%22%20fill%3D%22white%22%20font-size%3D%2216%22%3EPOSTER%20UJI%207%3C/text%3E%3C/svg%3E",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 250000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 250000,
+          "availableQuantity": 5,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 250000,
+          "availableQuantity": 18,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 250000,
+          "availableQuantity": 42,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 250000,
+          "availableQuantity": 24,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false,
+      "currentEvent": {
+        "id": "nusa-malam",
+        "status": "CANCELLED",
+        "version": 1,
+        "salesPaused": true,
+        "startsAt": "2027-09-01T19:30:00+07:00",
+        "announcement": "Jadwal acara telah diperbarui. Periksa detail pesanan untuk informasi refund.",
+        "refundDeadline": "2027-08-30T23:59:00+07:00"
+      }
+    },
+    {
+      "id": "fixture-7",
+      "artist": "Konser Uji 8",
+      "city": "Bandung",
+      "venue": "Ruang Selatan",
+      "address": "Jl. Musik Raya, Jakarta",
+      "startsAt": "2027-08-31T19:00:00+07:00",
+      "genre": "Indie",
+      "status": "Presale",
+      "publicationStatus": "PUBLISHED",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%221200%22%20height%3D%22300%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%231358d8%22/%3E%3Ctext%20x%3D%2210%22%20y%3D%2224%22%20fill%3D%22white%22%20font-size%3D%2216%22%3EPOSTER%20UJI%208%3C/text%3E%3C/svg%3E",
+      "description": "Konser Nusa Malam dengan pilihan tiket untuk area panggung dan penonton.",
+      "lineup": [
+        "Nusa Malam",
+        "Pembuka Sore",
+        "Tamu Spesial"
+      ],
+      "price": 275000,
+      "zones": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "description": "Area depan panggung"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "description": "Area samping panggung"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "description": "Area berdiri umum"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "description": "Area duduk bertingkat"
+        }
+      ],
+      "ticketTiers": [
+        {
+          "id": "vip-a",
+          "name": "VIP A",
+          "zoneId": "vip-a",
+          "price": 275000,
+          "availableQuantity": 5,
+          "maxPerOrder": 4,
+          "benefit": "Area depan panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "vip-b",
+          "name": "VIP B",
+          "zoneId": "vip-b",
+          "price": 275000,
+          "availableQuantity": 18,
+          "maxPerOrder": 4,
+          "benefit": "Area samping panggung",
+          "gate": "Gate A",
+          "seating": "free-standing"
+        },
+        {
+          "id": "festival",
+          "name": "Festival",
+          "zoneId": "festival",
+          "price": 275000,
+          "availableQuantity": 42,
+          "maxPerOrder": 6,
+          "benefit": "Area berdiri umum",
+          "gate": "Gate B",
+          "seating": "free-standing"
+        },
+        {
+          "id": "tribune",
+          "name": "Tribune",
+          "zoneId": "tribune",
+          "price": 275000,
+          "availableQuantity": 24,
+          "maxPerOrder": 4,
+          "benefit": "Area duduk",
+          "gate": "Gate C",
+          "seating": "assigned"
+        }
+      ],
+      "scheduleLocked": false,
+      "currentEvent": {
+        "id": "fixture-7",
+        "status": "SCHEDULED",
+        "version": 1,
+        "salesPaused": true,
+        "startsAt": "2027-08-31T19:00:00+07:00",
+        "announcement": "",
+        "refundDeadline": null
+      }
+    }
+  ],
+  "checks": [
+    "Home: all eight results, focus on newly loaded result, reset to four, AND filters, latest WIB date, reversed range, unavailable states and poster fallback.",
+    "Home and catalog: loading, API failure, empty catalog and no matching results are distinct.",
+    "Catalog: date/city filters and list scroll survive returning from detail without BFCache.",
+    "Explicit submit; invalid dates preserve results; native price slider supports pointer, keyboard, exact inclusive limits and session restoration; reset clears filters and disables slider.",
+    "/ 320px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 320px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 320px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 320px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 320px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 320px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 320px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 320px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 390px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 390px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 390px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 390px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 390px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 390px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 390px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 390px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 768px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 768px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 768px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 768px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 768px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 768px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 768px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 768px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1024px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1024px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1024px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1024px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1024px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1024px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1024px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1024px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1366px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1366px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1366px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1366px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1366px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1366px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1366px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1366px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1440px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1440px light text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1440px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1440px light text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1440px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1440px dark text 100%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/ 1440px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "/konser 1440px dark text 200%: no page overflow, keyboard focus/disclosure, poster ratio and columns.",
+    "Guide and checkout: shared terms, refund/help before confirmation, dialog keyboard focus retained. API fixtures only; no payment sent."
+  ],
+  "pageErrors": []
+}
