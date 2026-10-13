@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminDateField from "./AdminDateField.svelte";
   import { tick } from "svelte";
   import { ApiError, commitEventChange, getEventChanges, previewEventChange, type AdminApiEvent, type EventChange, type EventChangeInput, type EventChangePreview } from "../../lib/api.ts";
   import { eventDate, formatRupiah } from "../../lib/concerts.ts";
@@ -9,6 +10,7 @@
   let announcement = $state("");
   let startsAt = $state("");
   let deadline = $state("");
+  let startsPending = $state(false), deadlinePending = $state(false);
   let preview = $state<EventChangePreview | null>(null);
   let input: EventChangeInput | null = null;
   let key = "";
@@ -21,7 +23,7 @@
   let historyBusy = $state(false);
   let impactHeading = $state<HTMLHeadingElement>();
   let resultMessage = $state<HTMLParagraphElement>();
-  $effect(() => onDirtyChange?.(action !== "POSTPONED" || Boolean(reason || announcement || startsAt || deadline)));
+  $effect(() => onDirtyChange?.(action !== "POSTPONED" || Boolean(reason || announcement || startsAt || deadline || startsPending || deadlinePending)));
   $effect(() => {
     const id = event.id;
     const controller = new AbortController();
@@ -80,7 +82,7 @@
         <label class="event-full">Keputusan<select bind:value={action}><option value="POSTPONED">Tunda tanpa tanggal</option><option value="RESCHEDULED">Tetapkan jadwal baru</option><option value="CANCELLED">Batalkan acara</option></select></label>
         <label>Alasan untuk audit<textarea bind:value={reason} rows="3" minlength="3" maxlength="500" required></textarea></label>
         <label>Pengumuman untuk pembeli<textarea bind:value={announcement} rows="3" minlength="3" maxlength="2000" required></textarea></label>
-        {#if action === "RESCHEDULED"}<div class="event-form-row"><label>Jadwal baru (WIB)<input type="datetime-local" bind:value={startsAt} required /></label><label>Tenggat permintaan refund (WIB)<input type="datetime-local" bind:value={deadline} required /></label></div><p>Tenggat harus sebelum jadwal baru dan tidak boleh memendekkan tenggat yang sudah diberikan.</p>{/if}
+        {#if action === "RESCHEDULED"}<div class="event-form-row"><AdminDateField id="change-starts-at" label="Jadwal baru (WIB)" mode="datetime" bind:value={startsAt} bind:pending={startsPending} required disabled={busy || uncertain} /><AdminDateField id="change-deadline" label="Tenggat permintaan refund (WIB)" mode="datetime" bind:value={deadline} bind:pending={deadlinePending} required disabled={busy || uncertain} /></div><p>Tenggat harus sebelum jadwal baru dan tidak boleh memendekkan tenggat yang sudah diberikan.</p>{/if}
         <button class="staff-secondary-button" type="submit">{busy ? "Menyiapkan…" : "Pratinjau dampak"}</button>
       </fieldset>
     </form>

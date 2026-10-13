@@ -23,13 +23,6 @@ export function pricingHistoryFields(value: unknown): Array<[string, string]> {
   ];
 }
 
-export function parseRupiahInput(value: string): number | undefined {
-  const text = value.trim();
-  if (!/^(?:\d+|\d{1,3}(?:\.\d{3})+)$/.test(text)) return;
-  const amount = Number(text.replaceAll(".", ""));
-  return Number.isSafeInteger(amount) && amount <= 1_000_000_000_000 ? amount : undefined;
-}
-
 export function uncertainPricingSave(cause: unknown): boolean {
   return cause instanceof ApiError && (cause.code === "UNKNOWN_OUTCOME" || cause.code === "NETWORK_ERROR" || cause.status >= 500);
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminDateField from "../../components/admin/AdminDateField.svelte";
   import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
@@ -49,7 +50,7 @@
     <form class="history-filter-form sales-report-filters report-filter-form" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each eventOptions as event (event.eventId)}<option value={event.eventId}>{event.eventName}</option>{/each}</select></label>
       <label>Perangkat<select bind:value={device}><option value="">Semua perangkat</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option><option value="unknown">Tidak diketahui</option></select></label>
-      <label>Dari tanggal WIB<input type="date" bind:value={dateFrom} required /></label><label>Sampai tanggal WIB<input type="date" bind:value={dateTo} required /></label>
+      <AdminDateField id="conversion-date-from" label="Dari tanggal WIB" bind:value={dateFrom} required /><AdminDateField id="conversion-date-to" label="Sampai tanggal WIB" bind:value={dateTo} required />
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button></div>
     </form>
     </AdminMobileFilters>

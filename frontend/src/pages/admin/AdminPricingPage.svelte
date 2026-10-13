@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminDateField from "../../components/admin/AdminDateField.svelte";
   import { onMount, tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
@@ -16,7 +17,7 @@
   import { ApiError, getAdminPricing, getAdminEvents, saveAdminFee, saveAdminVoucher, type PricingData, type PricingSettings, type Voucher, type AdminApiEvent } from "../../lib/api.ts";
   import { adminDate, adminTime } from "../../lib/admin-operations.ts";
   import { formatRupiah } from "../../lib/concerts.ts";
-  import { parseRupiahInput, pricingHistoryFields, sameVoucher, uncertainPricingSave } from "../../lib/pricing-editor.ts";
+  import { pricingHistoryFields, sameVoucher, uncertainPricingSave } from "../../lib/pricing-editor.ts";
 
   let layout: ReturnType<typeof AdminLayout>;
   async function confirmAction(title: string, message: string, confirmLabel: string) {
@@ -41,15 +42,18 @@
   let error = $state("");
   let notice = $state("");
   let fee = $state<number | undefined>();
-  let sample = $state("100.000");
-  let sampleError = $state("");
-  const sampleValue = $derived(parseRupiahInput(sample));
+  const feePresets = [0, 2500, 5000, 7500, 10000];
+  let customFee = $state(false);
+  const feeChoice = $derived(customFee || fee === undefined || !feePresets.includes(fee) ? "custom" : String(fee));
+  const validFee = $derived(fee !== undefined && Number.isSafeInteger(fee) && fee >= 0 && fee <= 1_000_000_000);
   let editing = $state(false);
   const initial = emptyVoucher();
   let draft = $state<Voucher>(initial);
   let starts = $state(localTime(initial.startsAt));
   let ends = $state(localTime(initial.endsAt));
-  const voucherState = () => JSON.stringify({ draft, starts, ends });
+  let startsPending = $state(false), endsPending = $state(false);
+  let voucherDateReset = $state(0);
+  const voucherState = () => JSON.stringify({ draft, starts, ends, ...(startsPending || endsPending ? { startsPending, endsPending } : {}) });
   let voucherBaseline = $state(voucherState());
   const dirty = $derived(Boolean(data) && (fee !== data?.settings.adminFee || voucherState() !== voucherBaseline));
   const money = (v: number) => formatRupiah.format(v);
@@ -57,11 +61,15 @@
   function localTime(value: string) { const d = new Date(value); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
   function emptyVoucher(): Voucher { return { code: "", kind: "PERCENT", value: 10, startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 7 * 86400000).toISOString(), active: false, eventId: "", minimumSubtotal: 0, quota: 100, revision: 0 }; }
   async function discard() { return !dirty || (await confirmAction("Buang perubahan?", "Perubahan biaya atau voucher belum disimpan. Lanjutkan?", "Buang perubahan")); }
-  function protect(event: BeforeUnloadEvent) { if (dirty || saving || pendingFee || pendingVoucher) { event.preventDefault(); event.returnValue = ""; } }
+  function protect(event: BeforeUnloadEvent) { if (!layout?.consumeNavigationApproval() && (dirty || saving || pendingFee || pendingVoucher)) { event.preventDefault(); event.returnValue = ""; } }
+  async function allowNavigation() {
+    if (saving || pendingFee || pendingVoucher) { notice = "Selesaikan pemeriksaan hasil penyimpanan sebelum meninggalkan halaman."; return false; }
+    return discard();
+  }
   async function choose(value?: Voucher) {
     if (saving || pendingVoucher || (voucherState() !== voucherBaseline && !(await confirmAction("Buang perubahan?", "Buang perubahan voucher yang belum disimpan?", "Buang perubahan")))) return;
     voucherListScroll = window.scrollY; voucherTrigger = value ? `voucher-manage-${value.code}` : "voucher-create-opener";
-    voucherOpen = true; voucherStep = 0;
+    voucherOpen = true; voucherStep = 0; startsPending = endsPending = false; voucherDateReset++;
     draft = value ? { code: value.code, kind: value.kind, value: value.value, startsAt: value.startsAt, endsAt: value.endsAt, active: value.active, eventId: value.eventId, minimumSubtotal: value.minimumSubtotal, quota: value.quota, revision: value.revision } : emptyVoucher();
     editing = Boolean(value); starts = localTime(draft.startsAt); ends = localTime(draft.endsAt); voucherBaseline = voucherState(); error = ""; notice = "";
     await tick(); document.getElementById("voucher-title")?.focus();
@@ -76,7 +84,7 @@
       await tick();
     }
     if (saved && index < 0) notice = "Voucher tersimpan, tetapi belum tersedia di daftar. Muat ulang untuk memeriksa hasilnya.";
-    voucherOpen = false;
+    voucherOpen = false; startsPending = endsPending = false; voucherDateReset++;
     await tick();
     const trigger = document.getElementById(saved ? `voucher-manage-${draft.code}` : voucherTrigger);
     trigger?.focus({ preventScroll: !saved });
@@ -84,10 +92,11 @@
     if (!trigger) document.getElementById("pricing-feedback")?.focus();
   }
   function report(cause: unknown) { if (cause instanceof ApiError && cause.status === 401) onUnauthorized(); else error = `Penyimpanan ditolak. ${cause instanceof Error ? cause.message : "Pengaturan belum dapat diproses."}`; }
-  function formatSample(event: FocusEvent) {
-    sampleError = sampleValue === undefined ? "Isi rupiah bulat yang valid, misalnya 100.000 (maksimal 1.000.000.000.000)." : "";
-    (event.currentTarget as HTMLInputElement).setCustomValidity(sampleError);
-    if (sampleValue !== undefined) sample = new Intl.NumberFormat("id-ID").format(sampleValue);
+  async function chooseFee(event: Event) {
+    const choice = (event.currentTarget as HTMLSelectElement).value;
+    customFee = choice === "custom";
+    if (!customFee) fee = Number(choice);
+    else { await tick(); document.getElementById("fee-amount")?.focus(); }
   }
   async function load(conflict?: "fee" | "voucher") {
     loading = true; pricingError = "";
@@ -126,7 +135,7 @@
     finally { loadingEvents = false; }
   }
   async function saveFee(event: SubmitEvent) {
-    event.preventDefault(); if (saving || loading || pendingFee || !data || fee === undefined || !Number.isSafeInteger(fee) || fee < 0 || fee > 1_000_000_000 || sampleValue === undefined) return;
+    event.preventDefault(); if (saving || loading || pendingFee || !data || fee === undefined || !validFee) return;
     if (!(await confirmAction("Simpan biaya admin?", `Ubah biaya admin per order dari ${money(data.settings.adminFee)} menjadi ${money(fee)}? Hanya order baru yang terpengaruh.`, "Simpan biaya"))) return;
     const input = { adminFee: fee, revision: data.settings.revision };
     await sendFee(input);
@@ -151,7 +160,7 @@
     if (saving || loading || pricingError || !data || !pendingFee || feeRecovery !== "conflict") return;
     fee = pendingFee.adminFee; pendingFee = undefined; error = "";
     notice = "Data server menjadi acuan biaya. Draft tetap tersedia; tinjau sebelum menyimpan lagi.";
-    await tick(); document.getElementById("fee-amount")?.focus();
+    await tick(); (document.getElementById("fee-amount") ?? document.getElementById("fee-preset"))?.focus();
   }
   async function validateVoucher(through: number) {
     for (let index = 0; index <= through; index++) {
@@ -226,7 +235,7 @@
   {:else}<p class="history-empty staff-muted">{value == null ? "Belum ada" : "Rincian perubahan tidak tersedia."}</p>{/if}
 {/snippet}
 <svelte:head><title>Biaya dan voucher | Gate Control</title><meta name="robots" content="noindex" /></svelte:head>
-<AdminLayout bind:this={layout} page="pricing" contentId="pricing-content" skipLabel="Lewati ke biaya dan voucher" kicker="PENGATURAN BISNIS" title="Biaya dan voucher." description="Atur biaya per order dan promosi tanpa mengubah transaksi lama." onLogout={async () => { if (!saving && await discard()) onLogout(); }} {loggingOut} logoutDisabled={saving || loggingOut} secondaryAction={{ label: "Muat ulang", disabled: saving || loading, onclick: () => { void load(); } }}>
+<AdminLayout bind:this={layout} onBeforeNavigate={allowNavigation} page="pricing" contentId="pricing-content" skipLabel="Lewati ke biaya dan voucher" kicker="PENGATURAN BISNIS" title="Biaya dan voucher." description="Atur biaya per order dan promosi tanpa mengubah transaksi lama." onLogout={async () => { if (!saving && await discard()) onLogout(); }} {loggingOut} logoutDisabled={saving || loggingOut} secondaryAction={{ label: "Muat ulang", disabled: saving || loading, onclick: () => { void load(); } }}>
   <div aria-live="polite">{#if loading}<p role="status">Memuat pengaturan…</p>{/if}{#if notice}<p id="pricing-feedback" tabindex="-1" class="staff-form-message" role="status">{notice}</p>{/if}{#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}{#if dirty}<p>Perubahan belum disimpan.</p>{/if}</div>
   {#if pricingError}<p class="staff-form-message staff-form-error" role="alert">{pricingError} <button class="staff-secondary-button" type="button" disabled={loading || saving} onclick={() => load()}>Coba lagi</button></p>{/if}
   {#if pendingFee || pendingVoucher}<p class="staff-form-message" role="status">Penyimpanan belum terkonfirmasi. Periksa hasilnya; jika belum terbukti, gunakan tindakan di bawah untuk mengirim perubahan awal yang sama.</p><button class="staff-secondary-button" type="button" disabled={loading || saving} onclick={() => load()}>Periksa hasil simpan</button>{/if}
@@ -252,19 +261,21 @@
     <section class="staff-admin-panel fee-panel" hidden={voucherOpen} aria-labelledby="fee-title">
       {@render helpHeading("fee-title", "Biaya admin per order", "Biaya berlaku sekali untuk setiap pesanan baru. Pesanan lama dan refund mengikuti nilai yang tersimpan.")}
       <form onsubmit={saveFee}><fieldset disabled={saving || Boolean(pendingFee)}>
-        <label>Nominal tetap (Rp)<input id="fee-amount" type="number" inputmode="numeric" min="0" max="1000000000" step="1" required bind:value={fee} /></label>
-        <label>Subtotal tiket untuk pratinjau (Rp)<input type="text" inputmode="numeric" required bind:value={sample} onblur={formatSample} oninput={(event) => { sampleError = ""; event.currentTarget.setCustomValidity(""); }} aria-invalid={Boolean(sampleError)} aria-describedby={sampleError ? "preview-error" : undefined} /></label>
-        {#if sampleError}<p id="preview-error" role="alert">{sampleError}</p>{/if}
-        <p aria-live="polite">{#if fee !== undefined && sampleValue !== undefined}Pratinjau tanpa voucher: {money(sampleValue)} + {money(fee)} = <strong>{money(sampleValue + fee)}</strong>.{/if}</p>
+        <label><span id="fee-preset-label">Nominal tetap (Rp)</span><select id="fee-preset" aria-labelledby="fee-preset-label" value={feeChoice} onchange={chooseFee}>{#each feePresets as amount}<option value={String(amount)}>{money(amount)}</option>{/each}<option value="custom">Isi sendiri</option></select></label>
+        {#if feeChoice === "custom"}<label>Nominal kustom (Rp)<input id="fee-amount" type="number" inputmode="numeric" min="0" max="1000000000" step="1" required bind:value={fee} oninput={() => customFee = true} /></label>{/if}
+        <label>Subtotal tiket untuk pratinjau (Rp)<input type="text" value="100.000" readonly /></label>
+        <p aria-live="polite">{#if validFee && fee !== undefined}Pratinjau tanpa voucher: {money(100000)} + {money(fee)} = <strong>{money(100000 + fee)}</strong>.{/if}</p>
         <p class="pricing-explanation">Nominal ini berlaku sekali per order baru. Biaya order lama dan nilai refund mengikuti transaksi yang tersimpan.</p>
-        <button class="scan-submit" type="submit" disabled={saving || loading || sampleValue === undefined || fee === data?.settings.adminFee}>{saving ? "Menyimpan…" : "Simpan biaya admin"}</button>
+        <button class="scan-submit" type="submit" disabled={saving || loading || !validFee || fee === data?.settings.adminFee}>{saving ? "Menyimpan…" : "Simpan biaya admin"}</button>
       </fieldset></form>
     </section>
     <section class="staff-admin-panel voucher-editor" hidden={!voucherOpen} aria-labelledby="voucher-title">
       <div class="voucher-editor-heading"><h2 id="voucher-title" tabindex="-1">{editing ? `Ubah voucher ${draft.code}` : "Buat voucher"}</h2><button class="staff-secondary-button" type="button" disabled={saving || Boolean(pendingVoucher)} onclick={() => closeVoucher()}>Kembali ke daftar</button></div>
       {#if loadingEvents}<p role="status">Memuat katalog konser…</p>{/if}
       {#if eventsError}<p class="staff-form-message staff-form-error" role="alert">{eventsError} <button class="staff-secondary-button" type="button" onclick={loadEvents} disabled={loadingEvents || saving}>Coba lagi katalog</button></p>{/if}
-      <nav class="voucher-section-nav" aria-label={editing ? "Bagian edit voucher" : "Langkah tambah voucher"}>{#each voucherSteps as label, index}<button class="staff-secondary-button" type="button" aria-current={voucherStep === index ? "step" : undefined} disabled={saving || Boolean(pendingVoucher)} onclick={() => navigateVoucher(index)}>{index + 1}. {label}</button>{/each}</nav>
+      <div class="admin-wizard">
+      <nav class="voucher-section-nav admin-wizard-nav" aria-label={editing ? "Bagian edit voucher" : "Langkah tambah voucher"}>{#each voucherSteps as label, index}<button class="staff-secondary-button" type="button" title={`${index + 1}. ${label}`} aria-current={voucherStep === index ? "step" : undefined} disabled={saving || Boolean(pendingVoucher)} onclick={() => navigateVoucher(index)}><svg class="admin-wizard-mobile-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={["M4 5h16v5a2 2 0 0 0 0 4v5H4v-5a2 2 0 0 0 0-4Z", "M4 4h16v16H4ZM8 8h8M8 12h8M8 16h5", "m5 12 4 4L19 6"][index]} /></svg><span>{index + 1}. {label}</span></button>{/each}</nav>
+      <div class="admin-wizard-content admin-wizard-body voucher-content">
       <h3 id="voucher-section-title" tabindex="-1">{voucherSteps[voucherStep]}</h3>
       <p aria-live="polite">Langkah {voucherStep + 1} dari 3</p>
       <form id="voucher-form" novalidate onsubmit={saveVoucher}><fieldset disabled={saving || Boolean(pendingVoucher)}>
@@ -274,7 +285,7 @@
         <label>Jenis diskon<select bind:value={draft.kind}><option value="PERCENT">Persentase subtotal tiket</option><option value="FIXED">Nominal rupiah</option></select></label><label>Nilai diskon ({draft.kind === "PERCENT" ? "%" : "Rp"})<input type="number" inputmode="numeric" min="1" max={draft.kind === "PERCENT" ? 100 : 1000000000} step="1" required bind:value={draft.value} /></label>
         </div>
         <div id="voucher-fields-1" class="voucher-fields" hidden={voucherStep !== 1}>
-        <label>Mulai berlaku<input type="datetime-local" required bind:value={starts} /></label><label>Akhir masa berlaku<input id="voucher-ends" type="datetime-local" required bind:value={ends} /></label>
+        <AdminDateField id="voucher-starts" label="Mulai berlaku" mode="datetime" required bind:value={starts} bind:pending={startsPending} resetKey={voucherDateReset} active={voucherStep === 1} disabled={saving || Boolean(pendingVoucher)} /><AdminDateField id="voucher-ends" label="Akhir masa berlaku" mode="datetime" required bind:value={ends} bind:pending={endsPending} resetKey={voucherDateReset} active={voucherStep === 1} disabled={saving || Boolean(pendingVoucher)} />
         <p class="voucher-full">Waktu mengikuti zona perangkat. Awal berlaku termasuk, akhir berlaku tidak termasuk.</p>
         <label class="voucher-full">Cakupan konser<select bind:value={draft.eventId} disabled={loadingEvents || Boolean(eventsError)}><option value="">Semua konser</option>{#each events as event}<option value={event.id}>{event.artist} · {event.city}</option>{/each}</select></label>
         <label>Minimum subtotal tiket (Rp)<input type="number" inputmode="numeric" min="0" max="1000000000000" step="1" required bind:value={draft.minimumSubtotal} /></label><label>Kuota order<input type="number" inputmode="numeric" min="1" max="1000000000" step="1" required bind:value={draft.quota} /></label>
@@ -300,6 +311,7 @@
           <button class="staff-secondary-button" type="button" disabled={saving || Boolean(pendingVoucher)} onclick={() => closeVoucher()}>Batal</button>
         </div>
       </fieldset></form>
+      </div></div>
     </section>
   </div>
   <section class="staff-admin-panel voucher-list-panel" hidden={voucherOpen} aria-labelledby="list-title"><button id="voucher-create-opener" class="scan-submit" type="button" disabled={saving || loading || Boolean(pendingVoucher)} onclick={() => choose()}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v5a2 2 0 0 0 0 4v5H4v-5a2 2 0 0 0 0-4Z" /><path d="M12 9v6m-3-3h6" /></svg><span>Buat voucher</span></button>{@render helpHeading("list-title", "Daftar dan penggunaan voucher", "Pesanan menunggu pembayaran menahan kuota hingga kedaluwarsa atau selesai diperiksa. Pesanan lunas memakai kuota; refund tidak mengembalikannya. Pratinjau tidak menahan kuota.")}<p class="pricing-explanation">Pending menahan kuota sampai expiry/rekonsiliasi selesai. Lunas memakai kuota permanen; refund tidak mengembalikannya. Pratinjau belum menahan kuota.</p>
@@ -404,6 +416,7 @@
   .voucher-editor h3 { margin: 0 0 16px; }
   .voucher-editor p { margin: 0; }
   .voucher-editor > p { margin-bottom: 12px; }
+  @media (min-width: 768px) { .voucher-content > p { margin-bottom: 12px; } }
   .voucher-section-nav, .voucher-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 16px; }
   .voucher-section-nav button { white-space: normal; }
   .voucher-section-nav [aria-current] { border-color: var(--admin-accent); background: var(--admin-input); }
@@ -425,5 +438,6 @@
   button { min-height: 44px; }
   .history { padding: 0; list-style: none; } .history li { padding: 20px 0; border-top: 1px solid var(--scan-line); overflow-wrap: anywhere; }
   :is(input,select):focus-visible { outline: 2px solid var(--scan-lime); outline-offset: 3px; }
+  @media (max-width: 767px) { .voucher-content { container: voucher-form / inline-size; } }
   @media(max-width: 600px) { button { width: 100%; } }
 </style>

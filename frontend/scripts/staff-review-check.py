@@ -13,6 +13,7 @@ from playwright.async_api import async_playwright, expect
 
 confirmation_helpers = run_path(str(Path(__file__).with_name('admin-confirm.py')))
 answer_confirmation = confirmation_helpers['answer_confirmation']
+check_wizard = run_path(str(Path(__file__).with_name('admin-ui-check.py')))['check_wizard']
 
 
 STYLE_AUDIT = """() => {
@@ -123,6 +124,7 @@ async def verify_create_flow(page, people, admin, width, base_url):
         await expect(page.locator("[id^=staff-account-]")).to_have_count(len(rows))
 
     async def audit(label):
+        await check_wizard(page, width)
         result = await page.evaluate(STYLE_AUDIT)
         assert not result["failures"] and not result["overflow"], (width, label, result)
         audits.append(dict(state=label, **result))
@@ -404,6 +406,7 @@ async def verify_management_flow(page, admin, width, base_url):
             else: await route.fulfill(status=204)
 
     async def audit(label):
+        await check_wizard(page, width)
         result = await page.evaluate(STYLE_AUDIT)
         assert not result["failures"] and not result["overflow"], (width, label, result)
         audits.append(dict(state=label, **result))
@@ -412,13 +415,15 @@ async def verify_management_flow(page, admin, width, base_url):
         if target is not None: await target.evaluate("element => element.scrollIntoView({block: 'start', behavior: 'instant'})")
         else: await page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
         await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        await check_wizard(page, width, stress=True)
         await audit(name)
         await page.screenshot(path=str(output / f"roster20-{name}-{width}.png"), animations="disabled")
-        if name in ("create-open", "event-gate-selection", "create-review", "edit", "manage", "unknown-password"):
+        if name in ("create-open", "event-gate-selection", "create-review", "edit", "edit-assignments", "edit-password", "manage", "unknown-password"):
             await page.evaluate("""() => {
               window.__sectionFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
               for (const [el, , size] of window.__sectionFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
             }""")
+            await check_wizard(page, width, stress=True)
             await audit(name + "-text200")
             await page.screenshot(path=str(output / f"roster20-{name}-text200-{width}.png"), full_page=True)
             await page.evaluate("() => { for (const [el, size] of window.__sectionFonts) el.style.fontSize = size; }")
@@ -466,7 +471,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await summary.focus(); await page.keyboard.press("Enter")
     await expect(page.locator(f"#staff-account-{rows[1]['id']} details span").last).to_be_visible()
     await page.keyboard.press("Enter")
-    if width <= 600:
+    if width < 768:
         await expect(page.get_by_role("combobox", name="Status akun")).not_to_be_visible()
         await page.get_by_role("button", name="Filter lainnya", exact=True).click()
     search = page.get_by_label("Cari nama atau email", exact=True)
@@ -476,7 +481,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await page.get_by_role("combobox", name="Event penugasan", exact=True).select_option("musik")
     await expect(page.locator("[id^=staff-account-]")).to_have_count(1)
     await page.get_by_label("Hanya akun tanpa penugasan", exact=True).check()
-    if width <= 600:
+    if width < 768:
         await page.get_by_role("button", name="Filter lainnya (3 aktif)", exact=True).click()
         await expect(page.get_by_role("combobox", name="Status akun")).not_to_be_visible()
         await expect(search).to_be_visible()
@@ -497,6 +502,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await editor.get_by_label("Nama", exact=True).fill("Draft Ayu")
     await editor.get_by_role("button", name="Bagian Penugasan", exact=True).click()
     await expect(page.locator("#staff-assignments")).to_be_focused()
+    await capture("edit-assignments")
     await editor.get_by_role("button", name="Bagian Profil dan akses", exact=True).click()
     await expect(editor.get_by_label("Nama", exact=True)).to_have_value("Draft Ayu")
     await capture("edit", editor.locator("h2"))
@@ -618,7 +624,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await reload_saved(person)
     assert person["assignments"] == [dict(eventId="musik", gate="Gate B")]
     await editor.get_by_role("button", name="Kembali ke daftar", exact=True).click()
-    if width <= 600: await page.get_by_role("button", name="Filter lainnya", exact=True).click()
+    if width < 768: await page.get_by_role("button", name="Filter lainnya", exact=True).click()
     await page.get_by_role("combobox", name="Status akun", exact=True).select_option("active")
     await page.locator(f"#staff-manage-{person['id']}").click()
     await editor.get_by_label("Akun aktif", exact=True).uncheck()
@@ -641,6 +647,7 @@ async def verify_management_flow(page, admin, width, base_url):
     await page.locator(f"#staff-manage-{person['id']}").click()
     await editor.get_by_role("button", name="Bagian Reset password", exact=True).click()
     await editor.get_by_label("Password baru", exact=True).fill("fixture-password-456")
+    await capture("edit-password")
     count = len(mutations)
     await editor.get_by_role("button", name="Reset password", exact=True).click()
     await answer_confirmation(page, False)
@@ -725,7 +732,7 @@ async def main():
     width = int(sys.argv[2]) if len(sys.argv) > 2 else 1440
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
-        context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 600, has_touch=width < 600)
+        context = await browser.new_context(viewport={"width": width, "height": 900}, is_mobile=width < 768, has_touch=width < 768)
         await context.add_init_script("sessionStorage.setItem('ticket-online:staff-session', JSON.stringify({accessToken:'s'.repeat(43),expiresAt:new Date(Date.now()+3600000).toISOString()}))")
         page = await context.new_page()
         admin = dict(id="c" * 32, name="Admin", email="admin@example.com", role="ADMIN", active=True, assignments=[])

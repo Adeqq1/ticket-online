@@ -159,34 +159,17 @@
   }
   function time(value: string | null) { return value ? new Date(value).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", dateStyle: "medium", timeStyle: "medium" }) + " WIB" : "Belum pernah"; }
   function money(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value); }
-  let approvedNavigation = false;
-  function protectUnload(event: BeforeUnloadEvent) { if (!approvedNavigation && (busy || uncertainOperation || note.trim())) { event.preventDefault(); event.returnValue = ""; } }
-  onMount(() => {
-    void load();
-    const protectNavigation = (event: MouseEvent) => {
-      if (!(event.target instanceof Element)) return;
-      const link = event.target.closest<HTMLAnchorElement>("a[href]");
-      if (!link) return;
-      if (busy || uncertainOperation) { event.preventDefault(); message = "Selesaikan pemeriksaan hasil tindakan sebelum meninggalkan halaman."; return; }
-      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.hasAttribute("download") || (link.target && link.target !== "_self")) return;
-      const destination = new URL(link.href);
-      if (destination.origin === location.origin && destination.pathname === location.pathname && destination.search === location.search && destination.hash) return;
-      if (!note.trim()) return;
-      event.preventDefault();
-      void confirmAction("Buang perubahan?", "Tinggalkan catatan yang belum disimpan?", "Buang perubahan").then((accepted) => {
-        if (!accepted) return;
-        approvedNavigation = true;
-        window.location.assign(destination.href);
-      });
-    };
-    document.addEventListener("click", protectNavigation, true);
-    return () => document.removeEventListener("click", protectNavigation, true);
-  });
+  function protectUnload(event: BeforeUnloadEvent) { if (!layout?.consumeNavigationApproval() && (busy || uncertainOperation || note.trim())) { event.preventDefault(); event.returnValue = ""; } }
+  async function allowNavigation() {
+    if (busy || uncertainOperation) { message = "Selesaikan pemeriksaan hasil tindakan sebelum meninggalkan halaman."; return false; }
+    return !note.trim() || await confirmAction("Buang perubahan?", "Tinggalkan catatan yang belum disimpan?", "Buang perubahan");
+  }
+  onMount(() => { void load(); });
 </script>
 
 <svelte:window onbeforeunload={protectUnload} />
 <svelte:head><title>Penanganan masalah | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
-  <AdminLayout bind:this={layout} page="issues" mobileDescriptionHelp={view === "list"} contentId="issues-content" skipLabel="Lewati ke penanganan masalah" kicker="OPERASIONAL EVENT • ADMIN" title="Penanganan masalah." description="Periksa pembayaran terlambat dan email yang gagal dikirim." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || busy || Boolean(uncertainOperation)} secondaryAction={view !== "email" ? { label: "Muat ulang", onclick: refresh, disabled: loading || busy || detailLoading } : undefined}>
+  <AdminLayout bind:this={layout} onBeforeNavigate={allowNavigation} page="issues" mobileDescriptionHelp={view === "list"} contentId="issues-content" skipLabel="Lewati ke penanganan masalah" kicker="OPERASIONAL EVENT • ADMIN" title="Penanganan masalah." description="Periksa pembayaran terlambat dan email yang gagal dikirim." onLogout={onLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || busy || Boolean(uncertainOperation)} secondaryAction={view !== "email" ? { label: "Muat ulang", onclick: refresh, disabled: loading || busy || detailLoading } : undefined}>
     {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
     {#if message}<div id="issue-feedback" tabindex="-1" class="issue-action-feedback" role="status">{message}</div>{/if}
     {#if view !== "list" && (caseError || emailError)}<p class="staff-form-message staff-form-error" role="alert">Pembaruan daftar gagal. Data terakhir tetap tersedia; hasil tindakan yang sudah berhasil tetap berlaku. {caseError} {emailError}</p>{/if}

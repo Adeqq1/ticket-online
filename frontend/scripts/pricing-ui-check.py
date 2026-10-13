@@ -32,6 +32,96 @@ public = fixture("public_fixture", "public-ui-check.py")
 staff_audit = fixture("staff_audit", "staff-review-check.py").STYLE_AUDIT
 
 
+async def check_fee_choices(browser, base, width):
+    context = await browser.new_context(viewport={"width": width, "height": 900})
+    await context.add_init_script(admin.SESSION_INIT)
+    page = await context.new_page()
+    errors, saves = [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    settings = {"adminFee": 1210000, "revision": 1}
+
+    async def api(route):
+        path = urlparse(route.request.url).path
+        if path.endswith("/admin/pricing"):
+            if route.request.method != "GET":
+                payload = route.request.post_data_json
+                saves.append(payload)
+                assert payload["revision"] == settings["revision"]
+                settings.update(adminFee=payload["adminFee"], revision=settings["revision"] + 1)
+                return await route.fulfill(json=settings)
+            return await route.fulfill(json={"settings": settings, "vouchers": [], "history": []})
+        status, payload = admin.body(path, "standard", "ADMIN")
+        await route.fulfill(status=status, json=payload)
+
+    await page.route("**/api/v1/**", api)
+    await page.goto(base + "/admin/pricing")
+    preset = page.get_by_label("Nominal tetap (Rp)", exact=True)
+    custom = page.get_by_label("Nominal kustom (Rp)", exact=True)
+    sample = page.get_by_label("Subtotal tiket untuk pratinjau (Rp)", exact=True)
+    submit = page.get_by_role("button", name="Simpan biaya admin", exact=True)
+    preview = page.get_by_text("Pratinjau tanpa voucher:", exact=False)
+    await expect(preset).to_have_value("custom")
+    await expect(custom).to_have_value("1210000")
+    await expect(submit).to_be_disabled()
+    await expect(preset.locator("option")).to_have_text(["Rp 0", "Rp 2.500", "Rp 5.000", "Rp 7.500", "Rp 10.000", "Isi sendiri"])
+    # A custom amount matching a preset keeps the input mounted while typing.
+    await custom.fill("7500")
+    await expect(preset).to_have_value("custom")
+    await expect(custom).to_have_value("7500")
+    for amount in (0, 2500, 5000, 7500, 10000):
+        await preset.select_option(str(amount))
+        await expect(custom).to_have_count(0)
+        await expect(submit).to_be_enabled()
+        total = f"{100000 + amount:,}".replace(",", ".")
+        await expect(preview).to_contain_text(total)
+    await preset.select_option("0")
+    await submit.click(); await answer_confirmation(page)
+    await expect(page.get_by_role("status").filter(has_text="Biaya admin tersimpan")).to_be_visible()
+    assert saves == [{"adminFee": 0, "revision": 1}], saves
+    await page.reload()
+    await expect(preset).to_have_value("0")
+    await expect(custom).to_have_count(0)
+    await preset.focus(); await preset.select_option("custom")
+    await expect(custom).to_be_focused()
+    await expect(custom).to_have_value("0")
+    for invalid in ("", "-1", "1.5", "1000000001"):
+        await custom.fill(invalid)
+        await expect(submit).to_be_disabled()
+        await page.locator(".fee-panel form").dispatch_event("submit")
+        await expect(page.locator(".admin-confirm[open]")).to_have_count(0)
+        assert len(saves) == 1
+    await custom.fill("1000000000")
+    await expect(submit).to_be_enabled()
+    await custom.fill("12345")
+    await expect(sample).to_have_attribute("readonly", "")
+    await sample.focus(); await sample.press("Control+A"); await sample.press("9")
+    await expect(sample).to_have_value("100.000")
+    await expect(preview).to_contain_text("112.345")
+    await submit.click(); await answer_confirmation(page, False)
+    assert len(saves) == 1
+    await expect(custom).to_have_value("12345")
+    await submit.click(); await answer_confirmation(page)
+    await expect(page.get_by_role("status").filter(has_text="Biaya admin tersimpan")).to_be_visible()
+    assert saves[-1] == {"adminFee": 12345, "revision": 2}, saves
+    await page.reload()
+    await expect(preset).to_have_value("custom")
+    await expect(custom).to_have_value("12345")
+    await expect(preview).to_contain_text("112.345")
+    output = Path('/tmp/phase51-55/pricing')
+    output.mkdir(parents=True, exist_ok=True)
+    await page.screenshot(path=str(output / f"fee-choices-{width}.png"), full_page=True)
+    await custom.focus()
+    await page.evaluate("""() => {
+      const fonts = [...document.querySelectorAll('.fee-panel *')].map(el => [el, getComputedStyle(el).fontSize]);
+      for (const [el, size] of fonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
+    }""")
+    audit = await page.evaluate(staff_audit)
+    assert not errors and not audit["failures"] and not audit["overflow"], (errors, audit)
+    await page.screenshot(path=str(output / f"fee-choices-{width}-text200.png"), full_page=True)
+    await context.close()
+    print(f"PASS {width}: fee presets/custom, zero, validation, fixed subtotal, confirmation, reload, focus and text200")
+
+
 async def check(browser, base, width):
     context = await browser.new_context(viewport={"width": width, "height": 900}, timezone_id="Asia/Jakarta", is_mobile=width < 768, has_touch=width < 768)
     await context.add_init_script(admin.SESSION_INIT)
@@ -205,6 +295,9 @@ async def check(browser, base, width):
         await expect(page.locator(".voucher-card-details")).to_have_count(0)
         for trigger in await help_buttons.all(): await expect(trigger).not_to_be_visible()
         for explanation in await explanations.all(): await expect(explanation).to_be_visible()
+    await fee.select_option("custom")
+    fee = page.get_by_label("Nominal kustom (Rp)", exact=True)
+    await expect(fee).to_be_focused()
     await fee.fill("9000")
     await expect(page.get_by_text("Perubahan belum disimpan.", exact=True)).to_be_visible()
     await expect(page.get_by_text("Pratinjau tanpa voucher:", exact=False)).to_contain_text("109.000")
@@ -275,6 +368,7 @@ async def check(browser, base, width):
     for step in (0, 1, 2):
         await page.get_by_role("button", name=f"{step + 1}. " + ["Kode & diskon", "Ketentuan", "Tinjau"][step], exact=True).click()
         assert len(saves) == before
+        await admin.check_wizard(page, width, stress=True)
         audit = await page.evaluate(staff_audit)
         assert not audit["failures"] and not audit["overflow"], (width, step, audit)
         await page.screenshot(path=f"/tmp/phase51-55/pricing/wizard-{step}-{width}.png", full_page=True)
@@ -282,6 +376,7 @@ async def check(browser, base, width):
           window.__stepFonts = [...document.querySelectorAll('.admin-layout *')].map(el => [el, el.style.fontSize, getComputedStyle(el).fontSize]);
           for (const [el, , size] of window.__stepFonts) el.style.fontSize = parseFloat(size) * 2 + 'px';
         }""")
+        await admin.check_wizard(page, width, stress=True)
         audit = await page.evaluate(staff_audit)
         assert not audit["failures"] and not audit["overflow"], (width, step, "text200", audit)
         await page.screenshot(path=f"/tmp/phase51-55/pricing/wizard-{step}-text200-{width}.png", full_page=True)
@@ -293,11 +388,11 @@ async def check(browser, base, width):
     assert len(saves) == before
     await page.get_by_label("Kode voucher", exact=True).fill("dummy50")
     await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
-    await page.get_by_label("Akhir masa berlaku", exact=True).fill("2000-01-01T00:00")
+    await admin.fill_admin_date(page, "Akhir masa berlaku", "2000-01-01T00:00")
     await page.get_by_role("button", name="3. Tinjau", exact=True).click()
     await expect(page.locator("#voucher-section-title")).to_have_text("Ketentuan")
     await expect(page.get_by_label("Akhir masa berlaku", exact=True)).to_be_focused()
-    await page.get_by_label("Akhir masa berlaku", exact=True).fill("2099-01-01T00:00")
+    await admin.fill_admin_date(page, "Akhir masa berlaku", "2099-01-01T00:00")
     await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
     await page.get_by_label("Cakupan konser").select_option("nusa-malam")
     await page.get_by_role("button", name="2. Ketentuan", exact=True).click()
@@ -349,7 +444,7 @@ async def check(browser, base, width):
 
     await page.goto(base + "/checkout/nusa-malam?festival=1")
     await expect(page.locator(".grand-total")).to_contain_text("284.000")
-    if width < 600:
+    if not await page.get_by_label("Kode promo", exact=True).is_visible():
         await page.locator(".summary-breakdown summary").click()
     await page.get_by_label("Kode promo", exact=True).fill("DUMMY50")
     await page.get_by_role("button", name="Gunakan", exact=True).click()
@@ -503,6 +598,8 @@ async def check_loading(browser, base, width):
     await page.get_by_role("button", name="Coba lagi", exact=True).click()
     fee = page.get_by_label("Nominal tetap (Rp)", exact=True)
     await expect(fee).to_have_value("7500")
+    await fee.select_option("custom")
+    fee = page.get_by_label("Nominal kustom (Rp)", exact=True)
     await fee.fill("9000")
     await expect(page.get_by_role("button", name="Simpan biaya admin", exact=True)).to_be_enabled()
     await page.locator("#voucher-create-opener").click()
@@ -517,12 +614,10 @@ async def check_loading(browser, base, width):
     await answer_confirmation(page, True)
     await expect(fee).to_have_value("9000")
     sample = page.get_by_label("Subtotal tiket untuk pratinjau (Rp)")
-    await sample.fill("123456"); await sample.press("Tab")
-    await expect(sample).to_have_value("123.456")
-    await sample.fill("12.34"); await sample.press("Tab")
-    await expect(sample).to_have_attribute("aria-invalid", "true")
-    await expect(page.get_by_role("button", name="Simpan biaya admin", exact=True)).to_be_disabled()
-    await sample.fill("100000"); await sample.press("Tab")
+    await expect(sample).to_have_value("100.000")
+    await expect(sample).to_have_attribute("readonly", "")
+    await sample.focus(); await sample.press("Control+A"); await sample.press("9")
+    await expect(sample).to_have_value("100.000")
     mode["read"] = 503
     await page.get_by_role("button", name="Muat ulang", exact=True).click()
     await expect(page.get_by_text("Pembaruan data biaya dan voucher gagal.", exact=False)).to_be_visible()
@@ -552,6 +647,18 @@ async def check_loading(browser, base, width):
     count = len(saves)
     await page.locator("form").first.dispatch_event("submit")
     assert len(saves) == count
+    async def check_navigation_locked():
+        original_url = page.url
+        if width < 1024:
+            await page.get_by_role("button", name="Menu", exact=True).click()
+            nav = page.locator("#admin-mobile-menu")
+        else: nav = page.locator(".admin-sidebar")
+        await nav.get_by_role("link", name="Konser", exact=True).click()
+        await expect(page.locator(".admin-confirm[open]")).to_have_count(0)
+        assert page.url == original_url and len(saves) == count
+        if width < 1024: await nav.get_by_role("button", name="Tutup", exact=True).click()
+        await expect(page.get_by_role("status").filter(has_text="Selesaikan pemeriksaan hasil penyimpanan")).to_be_visible()
+    await check_navigation_locked()
     await page.get_by_role("button", name="Periksa hasil simpan", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Biaya admin sesuai")).to_be_visible()
     await expect(fee).to_be_enabled()
@@ -565,6 +672,7 @@ async def check_loading(browser, base, width):
     count = len(saves)
     await page.locator("form").nth(1).dispatch_event("submit")
     assert len(saves) == count
+    await check_navigation_locked()
     await page.get_by_role("button", name="Periksa hasil simpan", exact=True).click()
     await expect(page.get_by_role("status").filter(has_text="Voucher sesuai")).to_be_visible()
     mode["save"] = "success"
@@ -586,7 +694,7 @@ async def check_loading(browser, base, width):
     await page.screenshot(path=str(output / f"text200-{width}.png"), full_page=True)
     (output / f"checks-{width}.json").write_text(json.dumps({"automated": True, "fixture": True, "width": width, "saves": len(saves), "browserErrors": errors, "text200Audit": audit}))
     await context.close()
-    print(f"PASS {width}: initial/partial/refresh failures, formatting, revision conflict, saved success, unknown fee/voucher verification")
+    print(f"PASS {width}: initial/partial/refresh failures, fixed preview, revision conflict, saved success, unknown fee/voucher verification")
 
 
 async def check_save_recovery(browser, base, width, operation, scenario):
@@ -634,6 +742,8 @@ async def check_save_recovery(browser, base, width, operation, scenario):
     field = page.get_by_label("Nominal tetap (Rp)", exact=True)
     await expect(field).to_have_value("7500")
     if operation == "fee":
+        await field.select_option("custom")
+        field = page.get_by_label("Nominal kustom (Rp)", exact=True)
         await field.fill("9000")
         submit = page.get_by_role("button", name="Simpan biaya admin", exact=True)
         retry = page.get_by_role("button", name="Coba kirim perubahan biaya yang sama", exact=True)
@@ -720,7 +830,8 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(channel="chrome", headless=True)
         try:
-            for width in (1440, 320, 390, 768):
+            for width in (1440, 320, 390, 767, 768):
+                await check_fee_choices(browser, base, width)
                 await check_loading(browser, base, width)
                 await check(browser, base, width)
                 for scenario in (("same-quote", "auto-replay", "manual-replay") if width in (1440, 390) else ()):

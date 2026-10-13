@@ -72,11 +72,16 @@
     return `${event ? `${event.artist} · ${event.city}` : `Event ${assignment.eventId}`} · ${assignment.gate}`;
   }
   function protectUnsaved(event: BeforeUnloadEvent) {
-    if (staffEditorDirty || createDirty || saving || hasUncertain) { event.preventDefault(); event.returnValue = ""; }
+    if (!layout?.consumeNavigationApproval() && (staffEditorDirty || createDirty || saving || hasUncertain)) { event.preventDefault(); event.returnValue = ""; }
   }
   async function allowStaffDiscard() {
     if (createUncertain || selectedUncertain?.profile || selectedUncertain?.assignments || selectedUncertain?.password) return (await confirmAction("Keluar dari panel?", "Hasil tindakan akun belum pasti. Jangan mengulang tindakan sebelum hasilnya diperiksa. Lanjutkan keluar dari panel?", "Keluar dari panel"));
     return !(staffEditorDirty || createDirty) || (await confirmAction("Buang perubahan?", "Perubahan akun petugas yang belum disimpan akan hilang. Lanjutkan?", "Buang perubahan"));
+  }
+  async function allowNavigation() {
+    if (saving) { notice = "Tunggu penyimpanan selesai sebelum meninggalkan halaman."; return false; }
+    if (hasUncertain) return confirmAction("Keluar dari panel?", "Hasil tindakan akun belum pasti. Jangan mengulang tindakan sebelum hasilnya diperiksa. Lanjutkan keluar dari panel?", "Keluar dari panel");
+    return allowStaffDiscard();
   }
   async function requestLogout() { if (!saving && await allowStaffDiscard()) onLogout(); }
   function resetFilters() { filters = { query: "", status: "all", eventId: "", unassigned: false }; void focusElement("staff-search"); }
@@ -295,7 +300,7 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-  <AdminLayout bind:this={layout} page="staff" mobileDescriptionHelp={mode === "list"} contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title={mode === "list" ? "Daftar petugas." : mode === "create" ? "Tambah petugas." : "Edit petugas."} description={mode === "list" ? "Temukan akun dan periksa akses tim pada event dan gate." : mode === "create" ? "Buat akun petugas beserta penugasan awalnya." : "Ubah profil, penugasan, atau password akun yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah petugas", onclick: openCreate, disabled: saving, id: "staff-create-opener" } : undefined} secondaryAction={mode === "edit" ? { label: "Muat ulang", onclick: () => { void loadStaff(); }, disabled: loadingStaff || saving } : undefined}>
+  <AdminLayout bind:this={layout} onBeforeNavigate={allowNavigation} page="staff" mobileDescriptionHelp={mode === "list"} contentId="staff-admin-content" skipLabel="Lewati ke pengelolaan petugas" kicker="OPERASIONAL EVENT • ADMINISTRASI" title={mode === "list" ? "Daftar petugas." : mode === "create" ? "Tambah petugas." : "Edit petugas."} description={mode === "list" ? "Temukan akun dan periksa akses tim pada event dan gate." : mode === "create" ? "Buat akun petugas beserta penugasan awalnya." : "Ubah profil, penugasan, atau password akun yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah petugas", onclick: openCreate, disabled: saving, id: "staff-create-opener" } : undefined} secondaryAction={mode === "edit" ? { label: "Muat ulang", onclick: () => { void loadStaff(); }, disabled: loadingStaff || saving } : undefined}>
     <div id="staff-result" role="status" aria-live="polite" tabindex="-1">
       {#if notice}<p class="staff-form-message staff-form-success">{notice}</p>{/if}
     </div>
@@ -358,9 +363,11 @@
       </section>
       {:else if creating}<section id="staff-work-panel" class="staff-admin-panel staff-create-panel" aria-labelledby="staff-create-title">
         <div class="staff-panel-heading"><h2 id="staff-create-title" tabindex="-1">Tambah petugas</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
-        <nav class="staff-section-nav" aria-label="Langkah tambah petugas">
-          {#each createSteps as label, index}<button class="staff-secondary-button" type="button" aria-current={createStep === index ? "step" : undefined} disabled={saving || createUncertain} onclick={() => navigateCreate(index)}>{index + 1}. {label}</button>{/each}
+        <div class="admin-wizard">
+        <nav class="staff-section-nav admin-wizard-nav" aria-label="Langkah tambah petugas">
+          {#each createSteps as label, index}<button class="staff-secondary-button" type="button" title={`${index + 1}. ${label}`} aria-current={createStep === index ? "step" : undefined} disabled={saving || createUncertain} onclick={() => navigateCreate(index)}><svg class="admin-wizard-mobile-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={index === 2 ? "m5 12 4 4L19 6" : sectionIcons[index]} /></svg><span>{index + 1}. {label}</span></button>{/each}
         </nav>
+        <div class="admin-wizard-content admin-wizard-body staff-create-content">
         <h3 id="staff-create-section-title" tabindex="-1">{createSteps[createStep]}</h3>
         <p class="staff-action-note" aria-live="polite">Langkah {createStep + 1} dari 3</p>
         <form id="staff-create-form" class="staff-form" novalidate onsubmit={create} aria-busy={saving}>
@@ -386,16 +393,18 @@
             <button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Batal</button>
           </div>
         </form>
+        </div></div>
       </section>
     {:else if selected}<section id="staff-work-panel" class="staff-admin-panel staff-edit-panel" aria-labelledby="staff-edit-title">
       <div class="staff-panel-heading"><h2 id="staff-edit-title" tabindex="-1">Edit petugas: {selected.name}</h2><button class="staff-secondary-button" type="button" disabled={saving} onclick={closePanel}>Kembali ke daftar</button></div>
       <p class="staff-list-help">{selected.email}</p>
       {#if !filteredStaff.some((person) => person.id === selectedId)}<p class="staff-list-help" role="status">{selected.name} tidak termasuk hasil saat ini. Editor dan draft tetap terbuka.</p>{/if}
-      <nav class="staff-section-nav" aria-label="Bagian pengelolaan akun">{#each editSections as label, index}<button class="staff-secondary-button" type="button" aria-label={`Bagian ${label}`} aria-current={editSection === index ? "page" : undefined} disabled={saving} onclick={() => navigateEdit(index)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={sectionIcons[index]} /></svg><span>{label}</span></button>{/each}</nav>
       {#if selectedUncertain?.profile || selectedUncertain?.assignments}<p class="staff-list-help" role="alert">Hasil perubahan {selectedUncertain.profile ? "profil" : "penugasan"} belum pasti. Tindakan tersebut ditahan. Muat ulang daftar dan periksa hasilnya sebelum melanjutkan.</p>{/if}
       {#if selectedUncertain?.password}<p class="staff-list-help" role="alert">Hasil reset password belum pasti. Jangan mengulang reset. Minta petugas memeriksa apakah password baru dapat digunakan; daftar akun tidak dapat membuktikan hasil reset.</p>{/if}
       {#if staffEditorDirty}<p class="staff-edit-unsaved" role="status">Perubahan akun belum disimpan</p>{/if}
-      <div class="staff-edit-grid">
+      <div class="admin-wizard">
+      <nav class="staff-section-nav admin-wizard-nav" aria-label="Bagian pengelolaan akun">{#each editSections as label, index}<button class="staff-secondary-button" type="button" aria-label={`Bagian ${label}`} title={`Bagian ${label}`} aria-current={editSection === index ? "page" : undefined} disabled={saving} onclick={() => navigateEdit(index)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={sectionIcons[index]} /></svg><span>{label}</span></button>{/each}</nav>
+      <div class="staff-edit-grid admin-wizard-content">
         <form class="staff-form" hidden={editSection !== 0} onsubmit={saveDetails} aria-busy={saving}>
           <h3 id="staff-profile" tabindex="-1">Profil dan akses</h3>
           <p class="staff-action-note">Simpan nama dan status akun. Menonaktifkan akun langsung mencabut semua sesi.</p>
@@ -417,7 +426,7 @@
           <small>Reset password mencabut semua sesi aktif milik petugas.</small>
           <button class="staff-secondary-button" type="submit" disabled={saving || Boolean(selectedUncertain?.password)}>Reset password</button>
         </form>
-      </div>
+      </div></div>
     </section>{/if}
     </div>
     <footer class="scan-footer"><span>Ticket Online · Admin tools</span><span>Pengaturan akun dan akses event</span></footer>
@@ -454,6 +463,7 @@
   .staff-edit-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .staff-create-actions { display: flex; flex-wrap: wrap; gap: 12px; }
   .staff-create-actions > button { flex: 1 1 auto; margin: 0; }
+  .staff-create-panel .staff-submit { width: 100%; }
   .staff-panel-heading { flex-wrap: wrap; }
   .staff-panel-heading h2 { overflow-wrap: anywhere; }
   #staff-result:not(:empty) { margin-bottom: 16px; }
@@ -469,7 +479,7 @@
   .staff-form-fields label, .staff-edit-grid label { display: grid; gap: 6px; min-width: 0; }
   .staff-create-panel h3 { margin: 0 0 16px; }
   .staff-edit-grid h3 { margin: 0 0 4px; }
-  .staff-create-panel > .staff-action-note { margin-bottom: 12px; }
+  .staff-create-content > .staff-action-note { margin-bottom: 12px; }
   .staff-review { display: grid; gap: 12px; margin: 0; }
   .staff-review > div { display: grid; gap: 6px; }
   .staff-review dt { color: var(--scan-muted); }
@@ -483,6 +493,7 @@
     .staff-workspace :global(.staff-assignment-controls) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
   }
   @media (max-width: 767px) {
+    .staff-create-content { container: staff-form / inline-size; }
     .staff-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
     .staff-list li > button { justify-self: end; }
     .staff-filter-toggle { display: inline-flex; justify-content: center; }

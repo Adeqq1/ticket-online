@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminDateField from "../../components/admin/AdminDateField.svelte";
   import AdminMobileFilters from "../../components/admin/AdminMobileFilters.svelte";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
   import { onDestroy, onMount } from "svelte";
@@ -7,6 +8,7 @@
   import AdminReportDetails from "../../components/admin/AdminReportDetails.svelte";
 
   let { accessToken, onUnauthorized, onLogout, loggingOut }: { accessToken: string; onUnauthorized: () => void; onLogout: () => void; loggingOut: boolean } = $props();
+  let dateReset = $state(0);
   function jakartaToday() {
     const values = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
     return `${values.find((part) => part.type === "year")?.value}-${values.find((part) => part.type === "month")?.value}-${values.find((part) => part.type === "day")?.value}`;
@@ -68,7 +70,7 @@
   }
 
   function reset() {
-    eventId = ""; dateFrom = shiftDate(today, -29); dateTo = today;
+    eventId = ""; dateFrom = shiftDate(today, -29); dateTo = today; dateReset++;
     void load({ dateFrom, dateTo });
   }
 
@@ -92,8 +94,8 @@
     <AdminMobileFilters id="reports-mobile-filters" title="Filter laporan">
     <form class="history-filter-form sales-report-filters" onsubmit={search}>
       <label>Event<select bind:value={eventId}><option value="">Semua event</option>{#each eventOptions as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
-      <label>Dari tanggal WIB<input type="date" bind:value={dateFrom} required /></label>
-      <label>Sampai tanggal WIB<input type="date" bind:value={dateTo} required /></label>
+      <AdminDateField id="sales-date-from" label="Dari tanggal WIB" bind:value={dateFrom} resetKey={dateReset} required />
+      <AdminDateField id="sales-date-to" label="Sampai tanggal WIB" bind:value={dateTo} resetKey={dateReset} required />
       <div class="history-filter-actions"><button class="scan-submit staff-submit" type="submit" disabled={loading}>Terapkan</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
     </form>
     </AdminMobileFilters>

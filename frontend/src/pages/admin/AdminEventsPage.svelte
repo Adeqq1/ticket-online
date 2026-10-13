@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminDateField from "../../components/admin/AdminDateField.svelte";
   import { MediaQuery } from "svelte/reactivity";
   import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
   import { mobileListItems } from "../../lib/mobile-list.ts";
@@ -67,18 +68,23 @@
   let posterUploading = $state(false);
   let posterPending = $state(false);
   let changePanelDirty = $state(false);
+  let schedulePending = $state(false);
   const eventState = () => JSON.stringify({ draft, lineupText });
   const zoneState = () => JSON.stringify(zoneDraft);
   const tierState = () => JSON.stringify(tierDraft);
-  const hasUnsaved = $derived(mode !== "list" && (eventState() !== eventBaseline || posterPending || posterUploading || changePanelDirty || (Boolean(selectedId) && (zoneState() !== zoneBaseline || tierState() !== tierBaseline))));
+  const hasUnsaved = $derived(mode !== "list" && (eventState() !== eventBaseline || schedulePending || posterPending || posterUploading || changePanelDirty || (Boolean(selectedId) && (zoneState() !== zoneBaseline || tierState() !== tierBaseline))));
   const gaps = $derived(publicationGaps({ ...draft, lineup: lineupText.split("\n") }, selectedEvent?.zones ?? [], selectedEvent?.ticketTiers ?? []));
   const inventoryDirty = $derived(zoneState() !== zoneBaseline || tierState() !== tierBaseline);
 
   function emptyEvent(): AdminEventInput { return { id: "", artist: "", city: "", venue: "", address: "", startsAt: "", genre: "Pop", status: "Presale", publicationStatus: "DRAFT", image: "", description: "", lineup: [] }; }
   function protectUnsaved(event: BeforeUnloadEvent) {
-    if (hasUnsaved || saving) { event.preventDefault(); event.returnValue = ""; }
+    if (!layout?.consumeNavigationApproval() && (hasUnsaved || saving)) { event.preventDefault(); event.returnValue = ""; }
   }
   async function allowDiscard() { return !hasUnsaved || (await confirmAction("Buang perubahan?", "Perubahan yang belum disimpan akan hilang. Lanjutkan?", "Buang perubahan")); }
+  async function allowNavigation() {
+    if (saving) { notice = "Tunggu penyimpanan selesai sebelum meninggalkan halaman."; return false; }
+    return allowDiscard();
+  }
   async function requestLogout() { if (!saving && await allowDiscard()) onLogout(); }
   function setChangePanelDirty(dirty: boolean) { changePanelDirty = dirty; }
   function suggestEventId() { if (!eventIdManual) draft.id = suggestAdminId(draft.artist); }
@@ -101,7 +107,7 @@
   async function select(event: AdminApiEvent, discardChecked = false) {
     if ((saving && !discardChecked) || event.id === selectedId || (!discardChecked && !await allowDiscard())) return;
     if (mode === "list") { listScroll = window.scrollY; listTrigger = `event-manage-${event.id}`; }
-    mode = "edit"; section = 0; visited = 0; pendingSection = null;
+    mode = "edit"; section = 0; visited = 0; pendingSection = null; schedulePending = false;
     selectedId = event.id;
     draft = { id: event.id, artist: event.artist, city: event.city, venue: event.venue, address: event.address, startsAt: localDateTime(event.startsAt), genre: event.genre, status: event.status, publicationStatus: event.publicationStatus, image: event.image, description: event.description, lineup: event.lineup };
     lineupText = event.lineup.join("\n");
@@ -117,7 +123,7 @@
   async function startNew() {
     if (saving || !await allowDiscard()) return;
     if (mode === "list") listScroll = window.scrollY;
-    listTrigger = "event-create-opener"; mode = "create"; section = 0; visited = 0; pendingSection = null;
+    listTrigger = "event-create-opener"; mode = "create"; section = 0; visited = 0; pendingSection = null; schedulePending = false;
     selectedId = ""; draft = emptyEvent(); lineupText = ""; eventIdManual = false; zoneIdManual = false; tierIdManual = false;
     zoneSelected = ""; zoneDraft = { id: "", name: "", description: "" }; tierSelected = ""; tierDraft = { id: "", name: "", zoneId: "", price: 0, capacity: 0, maxPerOrder: 1, benefit: "", gate: "", seating: "free-standing" };
     eventBaseline = eventState(); zoneBaseline = zoneState(); tierBaseline = tierState(); posterGeneration++; posterPending = false; posterUploading = false; changePanelDirty = false; error = ""; notice = "";
@@ -277,7 +283,7 @@
 
 <svelte:head><title>Kelola Konser | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 
-  <AdminLayout bind:this={layout} page="events" mobileDescriptionHelp={mode === "list"} contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
+  <AdminLayout bind:this={layout} onBeforeNavigate={allowNavigation} page="events" mobileDescriptionHelp={mode === "list"} contentId="event-admin-content" skipLabel="Lewati ke pengelolaan konser" kicker="KATALOG EVENT • ADMIN" title={mode === "list" ? "Daftar konser." : mode === "create" ? "Tambah konser." : "Edit konser."} description={mode === "list" ? "Temukan konser atau buat draf baru." : mode === "create" ? "Buat draf konser, lalu lengkapi zona dan kategori tiket." : "Ubah informasi, tiket, dan publikasi konser yang dipilih."} onLogout={requestLogout} loggingOut={loggingOut} logoutDisabled={loggingOut || saving} primaryAction={mode === "list" ? { label: "Tambah konser", onclick: startNew, disabled: saving, id: "event-create-opener" } : undefined}>
     <div class="staff-admin-grid event-admin-grid">
       {#if mode === "list"}
       <section class="staff-admin-panel" aria-labelledby="event-list-title">
@@ -310,15 +316,16 @@
         {#if error}<p class="staff-form-message staff-form-error" role="alert">{error}</p>{/if}
         {#if notice}<p class="staff-form-message event-save-notice" role="status">{notice}</p>{/if}
         {#if hasUnsaved}<p class="event-unsaved" role="status">Perubahan belum disimpan</p>{/if}
-        <div class="event-workspace">
-        <nav class="event-section-nav" aria-label={mode === "create" ? "Langkah tambah konser" : "Fitur edit konser"}>
+        <div class="event-workspace admin-wizard">
+        <nav class="event-section-nav admin-wizard-nav" aria-label={mode === "create" ? "Langkah tambah konser" : "Fitur edit konser"}>
           {#if mode === "create"}<p class="event-progress" aria-live="polite">Langkah {section + 1} dari 6</p><label class="event-step-picker">Pilih langkah<select value={section} disabled={saving} onchange={(event) => { const next = Number(event.currentTarget.value); event.currentTarget.value = String(section); void navigate(next); }}>{#each sections.slice(0, 6) as label, index}<option value={index} disabled={index > visited}>{index + 1}. {index === 5 ? "Tinjau" : label}</option>{/each}</select></label>{/if}
           <ol class:create-steps={mode === "create"}>
-            {#each sections.slice(0, mode === "create" ? 6 : 7) as label, index}<li><button type="button" aria-current={section === index ? "step" : undefined} disabled={saving || (mode === "create" && index > visited)} onclick={() => navigate(index)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={icons[index]} /></svg><span>{mode === "create" && index === 5 ? "Tinjau" : label}</span></button></li>{/each}
+            {#each sections.slice(0, mode === "create" ? 6 : 7) as label, index}<li><button type="button" title={mode === "create" && index === 5 ? "Tinjau" : label} aria-current={section === index ? "step" : undefined} disabled={saving || (mode === "create" && index > visited)} onclick={() => navigate(index)}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={icons[index]} /></svg><span>{mode === "create" && index === 5 ? "Tinjau" : label}</span></button></li>{/each}
           </ol>
         </nav>
-        <div class="event-section-content">
+        <div class="event-section-content admin-wizard-content">
         <h3 id="event-section-title" tabindex="-1">{sectionLabel}</h3>
+        {#if mode === "create"}<p class="event-progress admin-wizard-progress" aria-live="polite">Langkah {section + 1} dari 6</p>{/if}
         {#if pendingSection !== null}<div class="event-leave-prompt" role="alert"><p>Perubahan {section === 3 ? "zona" : "kategori tiket"} belum disimpan.</p><div class="event-actions"><button class="staff-secondary-button" type="submit" form={section === 3 ? "zone-form" : "tier-form"} disabled={saving}>Simpan & lanjutkan</button><button class="staff-secondary-button" type="button" disabled={saving} onclick={discardInventory}>Buang & lanjutkan</button><button class="staff-text-button" type="button" disabled={saving} onclick={() => pendingSection = null}>Tetap di sini</button></div></div>{/if}
         <form id="event-form" hidden={[3, 4, 6].includes(section)} novalidate class="staff-form event-admin-form" onsubmit={save} aria-busy={saving}>
           <fieldset class="event-group" data-section="0" hidden={section !== 0}><legend class="sr-only">Informasi dasar</legend>
@@ -330,7 +337,7 @@
           <fieldset class="event-group" data-section="1" hidden={section !== 1}><legend class="sr-only">Jadwal dan lokasi</legend>
           <div class="event-field event-full">
             {#if selectedId && scheduleLocked}<AdminHelp id="schedule-lock-note" label="Penjelasan jadwal terkunci" desktop text="Jadwal terkunci setelah pesanan dibuat atau perubahan acara dicatat. Gunakan panel Pembatalan dan perubahan jadwal di bawah untuk menjaga hak pembeli dan riwayat keputusan."><label for="event-starts-at">Jadwal (WIB)</label></AdminHelp>{:else}<label for="event-starts-at">Jadwal (WIB)</label>{/if}
-            <input id="event-starts-at" type="datetime-local" bind:value={draft.startsAt} aria-describedby={scheduleLocked ? "schedule-lock-note" : undefined} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || scheduleLocked} />
+            <AdminDateField id="event-starts-at" label="Jadwal (WIB)" showLabel={false} mode="datetime" bind:value={draft.startsAt} bind:pending={schedulePending} resetKey={posterGeneration} active={section === 1} aria-describedby={scheduleLocked ? "schedule-lock-note" : undefined} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || scheduleLocked} />
           </div>
           <div class="event-form-row"><label>Kota<input bind:value={draft.city} maxlength="100" aria-describedby={locationLocked ? "location-lock-note" : undefined} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || locationLocked} /></label><label>Venue<input bind:value={draft.venue} maxlength="160" aria-describedby={locationLocked ? "location-lock-note" : undefined} required={draft.publicationStatus === "PUBLISHED"} disabled={saving || locationLocked} /></label></div>
           <div class="event-field event-full">
@@ -425,11 +432,6 @@
   .event-review p { margin: 0; }
   .event-gaps { margin: 0; padding-left: 20px; }
   @media (max-width: 767px) {
-    .event-workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; }
-    .event-section-nav ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .event-section-nav .create-steps { display: none; }
-    .event-step-picker { display: grid; gap: 8px; color: var(--admin-secondary); }
-    .event-section-nav button { height: 100%; gap: 8px; }
     .event-actions button { flex-basis: 100%; }
   }
   .event-admin-grid { grid-template-columns: minmax(0, 1fr); }

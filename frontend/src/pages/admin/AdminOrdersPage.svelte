@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AdminDateField from "../../components/admin/AdminDateField.svelte";
   import AdminMobileList from "../../components/admin/AdminMobileList.svelte";
   import { mobileListItems } from "../../lib/mobile-list.ts";
   import AdminLayout from "../../layouts/AdminLayout.svelte";
@@ -31,6 +32,7 @@
   let status = $state<"" | OrderStatus>("");
   let dateFrom = $state("");
   let dateTo = $state("");
+  let dateReset = $state(0);
   let applied: AdminOrderFilter = {};
   let loading = $state(true);
   let loadingMore = $state(false);
@@ -42,6 +44,7 @@
   let refundMessage = $state("");
   let manualReference = $state("");
   let manualPaidAt = $state("");
+  let manualDatePending = $state(false);
   let manualNote = $state("");
   let manualConfirmed = $state(false);
   let manualStep = $state(0);
@@ -49,7 +52,7 @@
   let refundLocks = $state<Record<string, { refund?: boolean; manual?: boolean }>>({});
   const uncertainRefund = $derived(Boolean(refundLocks[selectedId]?.refund));
   const uncertainManual = $derived(Boolean(refundLocks[selectedId]?.manual));
-  const detailDirty = $derived(Boolean(refundReason || manualReference || manualPaidAt || manualNote || manualConfirmed));
+  const detailDirty = $derived(Boolean(refundReason || manualReference || manualPaidAt || manualDatePending || manualNote || manualConfirmed));
   let listScroll = 0;
   let tableScroll = 0;
   let tableWrap: HTMLDivElement | undefined = $state();
@@ -83,7 +86,7 @@
       if (selectedId === id) {
         delete refundLocks[id]?.manual;
         refundMessage = "Refund manual tercatat dan tiket tetap dinonaktifkan.";
-        manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; manualStep = 0;
+        manualReference = ""; manualPaidAt = ""; manualDatePending = false; manualNote = ""; manualConfirmed = false; manualStep = 0;
         await openDetail(id);
       }
     } catch (cause) {
@@ -123,14 +126,22 @@
   }
 
   function search(event: SubmitEvent) { event.preventDefault(); applied = filters(); void load(applied); }
-  function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; applied = {}; void load(applied); }
+  function reset() { query = ""; eventId = ""; status = ""; dateFrom = ""; dateTo = ""; dateReset++; applied = {}; void load(applied); }
 
   async function allowDiscard() { return !detailDirty || (await confirmAction("Buang perubahan?", "Isian refund belum disimpan. Kembali ke daftar dan buang isian?", "Buang perubahan")); }
-  function protectUnsaved(event: BeforeUnloadEvent) { if (detailDirty || refundBusy || Object.values(refundLocks).some(lock => lock.refund || lock.manual)) { event.preventDefault(); event.returnValue = ""; } }
+  function protectUnsaved(event: BeforeUnloadEvent) { if (!layout?.consumeNavigationApproval() && (detailDirty || refundBusy || Object.values(refundLocks).some(lock => lock.refund || lock.manual))) { event.preventDefault(); event.returnValue = ""; } }
+  async function allowNavigation() {
+    if (refundBusy || Object.values(refundLocks).some(lock => lock.refund || lock.manual)) {
+      const message = "Selesaikan pemeriksaan hasil refund sebelum meninggalkan halaman.";
+      if (selectedId) refundMessage = message; else error = message;
+      return false;
+    }
+    return allowDiscard();
+  }
   async function closeDetail() {
     if (refundBusy || !await allowDiscard()) return;
     const id = selectedId;
-    detailRequest?.abort(); detailGeneration++; detailLoading = false; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; manualStep = 0;
+    detailRequest?.abort(); detailGeneration++; detailLoading = false; selected = null; selectedId = ""; detailError = ""; refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualDatePending = false; manualNote = ""; manualConfirmed = false; manualStep = 0;
     await tick();
     if (tableWrap) tableWrap.scrollLeft = tableScroll;
     (document.getElementById(`order-detail-${id}`) ?? document.getElementById("order-results-title"))?.focus({ preventScroll: true });
@@ -142,7 +153,7 @@
     detailRequest?.abort();
     const controller = new AbortController(); detailRequest = controller;
     const current = ++detailGeneration;
-    if (selectedId !== id) { refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualNote = ""; manualConfirmed = false; manualStep = 0; }
+    if (selectedId !== id) { refundReason = ""; refundMessage = ""; manualReference = ""; manualPaidAt = ""; manualDatePending = false; manualNote = ""; manualConfirmed = false; manualStep = 0; }
     selectedId = id; selected = null; detailLoading = true; detailError = "";
     await tick(); detailHeading?.focus();
     try {
@@ -209,7 +220,7 @@
 <svelte:head><title>Pesanan | Tiket Online</title><meta name="robots" content="noindex" /></svelte:head>
 <svelte:window onbeforeunload={protectUnsaved} />
 
-  <AdminLayout bind:this={layout} page="orders" mobileDescriptionHelp={!selectedId} contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title={selectedId ? "Detail pesanan." : "Daftar pesanan."} description={selectedId ? "Periksa pembeli, pembayaran, tiket, dan tindakan pesanan yang dipilih." : "Temukan dan bandingkan pembayaran serta status pesanan."} onLogout={async () => { if (!refundBusy && await allowDiscard()) onLogout(); }} loggingOut={loggingOut} logoutDisabled={refundBusy || loggingOut}>
+  <AdminLayout bind:this={layout} onBeforeNavigate={allowNavigation} page="orders" mobileDescriptionHelp={!selectedId} contentId="order-admin-content" skipLabel="Lewati ke pengelolaan pesanan" kicker="OPERASIONAL EVENT • ADMIN" title={selectedId ? "Detail pesanan." : "Daftar pesanan."} description={selectedId ? "Periksa pembeli, pembayaran, tiket, dan tindakan pesanan yang dipilih." : "Temukan dan bandingkan pembayaran serta status pesanan."} onLogout={async () => { if (!refundBusy && await allowDiscard()) onLogout(); }} loggingOut={loggingOut} logoutDisabled={refundBusy || loggingOut}>
     <div class="order-workspace">
     {#if !selectedId}
     <section class="staff-admin-panel checkin-history-panel order-search-panel" class:is-expanded={searchOpen} aria-labelledby="order-filter-title">
@@ -218,8 +229,8 @@
         <label>Nomor pesanan<input bind:value={query} maxlength="32" placeholder="Cari nomor pesanan" disabled={loading} /></label>
         <label>Event<select bind:value={eventId} disabled={loading}><option value="">Semua event</option>{#each events as event (event.id)}<option value={event.id}>{event.name}</option>{/each}</select></label>
         <label>Status<select bind:value={status} disabled={loading}><option value="">Semua status</option><option value="PENDING">Menunggu pembayaran</option><option value="PAID">Lunas</option><option value="CANCELLED">Dibatalkan</option><option value="EXPIRED">Kedaluwarsa</option><option value="REFUND_PENDING">Refund diproses</option><option value="REFUNDED">Refund berhasil</option></select></label>
-        <label>Dibuat sejak (WIB)<input type="date" bind:value={dateFrom} disabled={loading} /></label>
-        <label>Dibuat sampai (WIB)<input type="date" bind:value={dateTo} disabled={loading} /></label>
+        <AdminDateField id="orders-date-from" label="Dibuat sejak (WIB)" bind:value={dateFrom} resetKey={dateReset} disabled={loading} active={!mobile || searchOpen} />
+        <AdminDateField id="orders-date-to" label="Dibuat sampai (WIB)" bind:value={dateTo} resetKey={dateReset} disabled={loading} active={!mobile || searchOpen} />
         <div class="history-filter-actions"><button class="scan-submit" type="submit" disabled={loading}>Cari</button><button class="staff-secondary-button" type="button" onclick={reset} disabled={loading}>Reset</button></div>
       </form>
     </section>
@@ -264,14 +275,15 @@
        <section class="staff-form manual-refund-panel"><h3>{refundStatus(selected.refund.status).label}</h3>{#if refundStatus(selected.refund.status).label === "Status refund belum dikenali"}<details><summary>Status teknis</summary><code>{selected.refund.status}</code></details>{/if}<p>{money(selected.refund.amount)} · {selected.refund.reason}</p><p class="staff-muted">{refundStatus(selected.refund.status).next}</p>
         {#if selected.refund.manualReference}<p>Referensi transfer: {selected.refund.manualReference} · {selected.refund.manualPaidAt ? localTime(selected.refund.manualPaidAt) : ""}</p>{/if}
         {#if selected.refund.status === "MANUAL_REQUIRED"}
-         <form id="manual-refund-form" class="staff-form manual-refund-form" novalidate onsubmit={submitManual}>
-          <nav class="manual-step-nav" aria-label="Langkah pencatatan refund manual"><button class="staff-secondary-button" type="button" aria-current={manualStep === 0 ? "step" : undefined} disabled={refundBusy || uncertainManual} onclick={() => navigateManual(0)}>1. Bukti transfer</button><button class="staff-secondary-button" type="button" aria-current={manualStep === 1 ? "step" : undefined} disabled={refundBusy || uncertainManual} onclick={() => navigateManual(1)}>2. Tinjau & konfirmasi</button></nav>
+         <form id="manual-refund-form" class="staff-form manual-refund-form admin-wizard" novalidate onsubmit={submitManual}>
+          <nav class="manual-step-nav admin-wizard-nav" aria-label="Langkah pencatatan refund manual"><button class="staff-secondary-button" type="button" title="1. Bukti transfer" aria-current={manualStep === 0 ? "step" : undefined} disabled={refundBusy || uncertainManual} onclick={() => navigateManual(0)}><svg class="admin-wizard-mobile-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10v18l-3-2-2 2-2-2-3 2ZM9 7h6M9 11h6" /></svg><span>1. Bukti transfer</span></button><button class="staff-secondary-button" type="button" title="2. Tinjau & konfirmasi" aria-current={manualStep === 1 ? "step" : undefined} disabled={refundBusy || uncertainManual} onclick={() => navigateManual(1)}><svg class="admin-wizard-mobile-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg><span>2. Tinjau & konfirmasi</span></button></nav>
+          <div class="admin-wizard-content admin-wizard-body manual-content">
           <h4 id="manual-step-title" tabindex="-1">{manualStep === 0 ? "Bukti transfer" : "Tinjau & konfirmasi"}</h4>
           <p aria-live="polite">Langkah {manualStep + 1} dari 2</p>
           <p>Catat hanya transfer penuh yang sudah berhasil. Form ini mencatat bukti dan tidak mengirim uang.</p>
           <div id="manual-evidence" class="manual-evidence" hidden={manualStep !== 0}>
           <label>Referensi transfer<input bind:value={manualReference} minlength="3" maxlength="160" required disabled={refundBusy || uncertainManual}/></label>
-          <label>Waktu transfer (WIB)<input type="datetime-local" step="1" bind:value={manualPaidAt} required disabled={refundBusy || uncertainManual}/></label>
+          <AdminDateField id="manual-paid-at" label="Waktu transfer (WIB)" mode="datetime" precision="second" bind:value={manualPaidAt} bind:pending={manualDatePending} active={manualStep === 0} required disabled={refundBusy || uncertainManual} />
           <label>Catatan bukti<textarea rows="3" bind:value={manualNote} minlength="3" maxlength="500" required disabled={refundBusy || uncertainManual}></textarea></label>
           </div>
           <div hidden={manualStep !== 1}>
@@ -283,6 +295,7 @@
             <button class="staff-secondary-button" type="submit" disabled={refundBusy || uncertainManual || (manualStep === 1 && !manualConfirmed)}>{manualStep === 0 ? "Lanjutkan" : "Catat refund manual selesai"}</button>
           </div>
           {#if uncertainManual}<button class="staff-text-button" type="button" disabled={refundBusy} onclick={() => checkUncertain("manual")}>Periksa detail refund</button>{/if}
+          </div>
          </form>
         {/if}
         <p role="status" aria-live="polite" tabindex="-1" bind:this={manualResult}>{refundMessage}</p>
@@ -323,6 +336,7 @@
   .manual-review dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
   .manual-confirm { display: flex; align-items: center; min-height: 44px; gap: 12px; }
   .manual-confirm input { flex: 0 0 20px; width: 20px; min-height: 20px; }
+  @media (max-width: 767px) { .manual-content { container: manual-refund / inline-size; } }
   @container manual-refund (min-width: 35em) {
     .manual-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .manual-evidence label:last-child { grid-column: 1 / -1; }

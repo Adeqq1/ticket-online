@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ApiError, type Voucher } from "./api.ts";
-import { parseRupiahInput, pricingHistoryFields, sameVoucher, uncertainPricingSave } from "./pricing-editor.ts";
+import { pricingHistoryFields, sameVoucher, uncertainPricingSave } from "./pricing-editor.ts";
 
 test("pricing history keeps readable values, WIB dates, zero amounts, and explicit status without guessing malformed data", () => {
   expect(pricingHistoryFields({ adminFee: 7500 })).toEqual([["Biaya admin", "Rp\u00a07.500"]]);
@@ -11,13 +11,6 @@ test("pricing history keeps readable values, WIB dates, zero amounts, and explic
   const malformed = Object.fromEntries(pricingHistoryFields({ code: "TEST", active: "false", kind: "FUTURE", quota: Infinity }));
   for (const field of ["Status", "Diskon", "Kuota order", "Mulai berlaku"]) expect(malformed[field]).toBe("Tidak tersedia");
   expect(Object.fromEntries(pricingHistoryFields({ code: "TEST", kind: "FIXED", value: 100000 })).Diskon).toBe("Rp\u00a0100.000");
-});
-
-test("rupiah preview accepts Indonesian integer grouping and rejects ambiguous or invalid amounts", () => {
-  for (const text of ["100000", "100.000", " 100.000 "]) expect(parseRupiahInput(text)).toBe(100000);
-  expect(parseRupiahInput("0")).toBe(0);
-  expect(parseRupiahInput("1.000.000.000.000")).toBe(1e12);
-  for (const text of ["", "-1", "1,5", "1.50", "1e5", "Rp 100", "1 000", "1000000000001", "Infinity"]) expect(parseRupiahInput(text)).toBeUndefined();
 });
 
 test("only unconfirmed mutation outcomes require verification before repeating", () => {
