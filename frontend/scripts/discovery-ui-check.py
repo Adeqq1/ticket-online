@@ -240,7 +240,7 @@ async def main():
                         await page.get_by_role('button', name='Cari', exact=True).click()
                         await expect(actions.locator('button')).to_have_count(2)
                         sizes = await actions.locator('button').evaluate_all('es=>es.map(e=>e.getBoundingClientRect().width)')
-                        assert sizes[0] >= 48 and abs((await actions.bounding_box())['width']-initial_width) < 1, sizes
+                        assert all(width >= 48 for width in sizes) and abs((await actions.bounding_box())['width']-initial_width) < 1, sizes
                         assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                         query = '#event-query' if path == '/' else '#concert-query'
                         await page.locator(query).fill('Tidak cocok')

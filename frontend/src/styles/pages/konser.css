@@ -81,7 +81,6 @@
   .filter-tools { gap: 8px; flex-direction: column; }
   .catalog-search-row { flex-wrap: wrap; }
   .catalog-search-row > input { flex-basis: 240px; }
-  .catalog-form .search-actions { flex: 0 0 220px; }
   .filters { width: 100%; }
   .filters summary { gap: 5px 8px; }
   .filters summary span { flex: 1; }
