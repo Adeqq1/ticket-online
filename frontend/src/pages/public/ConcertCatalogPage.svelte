@@ -96,7 +96,7 @@
     <form class="catalog-form" role="search" onsubmit={search}>
     <div class="results">
       <div class="catalog-search"><label for="concert-query">Cari konser</label><div class="catalog-search-row"><input bind:this={input} bind:value={query} id="concert-query" name="query" type="search" autocomplete="off" placeholder="Artis, venue, atau kota" />
-      <div class="search-actions"><button class="button search-submit" type="submit" aria-label="Cari" title="Cari"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg></button>{#if searched}<button class="button reset-filters" type="button" onclick={reset}>Reset filter</button>{/if}</div>
+      <div class="search-actions"><button class="button search-submit" type="submit"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>Cari</button>{#if searched}<button class="button reset-filters" type="button" onclick={reset}>Reset filter</button>{/if}</div>
       </div></div>
       {#if loading}<p class="results-count" role="status" aria-live="polite">Memuat katalog konser...</p>{:else if error}<div class="empty-state" role="alert"><p>{error}</p><button class="text-button" type="button" onclick={() => load()}>Coba lagi</button></div>{:else}<div class="results-topline"><p class="sample-note">Katalog terbaru.</p><p class="results-count" aria-live="polite">{matches.length ? `${matches.length} konser ditemukan` : "Tidak ada konser ditemukan"}</p></div>{/if}
     </div>

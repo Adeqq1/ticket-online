@@ -24,6 +24,10 @@ function tiers(status: TicketStatus): TicketTier[] {
 
 export const formatEventDate = new Intl.DateTimeFormat("id-ID", { dateStyle: "full", timeStyle: "short", timeZone: "Asia/Jakarta" });
 export function eventDate(startsAt: string | null | undefined) { if (!startsAt || !Number.isFinite(Date.parse(startsAt))) return "Jadwal belum diumumkan"; return `${formatEventDate.format(new Date(startsAt))} WIB`; }
+const formatCardDay = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Jakarta" });
+const formatCardTime = new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+/** Compact card date, e.g. "24 Agu 2027 · 19.30 WIB". */
+export function cardDate(startsAt: string | null | undefined) { if (!startsAt || !Number.isFinite(Date.parse(startsAt))) return "Jadwal belum diumumkan"; const date = new Date(startsAt); return `${formatCardDay.format(date)} · ${formatCardTime.format(date)} WIB`; }
 
 function concert(id: string, artist: string, city: string, venue: string, startsAt: string, genre: Genre, price: number, status: TicketStatus): Concert {
   return { id, artist, city, venue, address: `Jl. Musik Raya, ${city}`, date: eventDate(startsAt), startsAt, genre, price, status, image: `https://picsum.photos/seed/${id}/900/1100`, description: `${artist} hadir dalam konser contoh dengan pilihan tiket untuk area panggung dan penonton.`, lineup: [artist, "Pembuka Sore", "Tamu Spesial"], zones, ticketTiers: tiers(status).map((tier) => tier.name === "Festival" ? { ...tier, price } : tier) };

@@ -34,7 +34,7 @@
 <section class="guide-hero shell" aria-labelledby="guide-title">
   <div>
     <p class="eyebrow">PANDUAN TIKET</p>
-    <h1 id="guide-title">Semua yang perlu kamu tahu sebelum datang.</h1>
+    <h1 id="guide-title">Panduan tiket dan konser</h1>
   </div>
   <p class="guide-intro">Temukan cara mengakses tiket, menyelesaikan pembayaran, dan menyiapkan QR sebelum tiba di gate.</p>
 </section>

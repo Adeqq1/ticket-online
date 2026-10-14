@@ -55,7 +55,7 @@
         </div>
       </details>
     </div>
-    <div class="search-actions"><button class="button search-submit" type="submit" aria-label="Cari" title="Cari"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg></button>{#if searched}<button class="button reset-filters" type="button" onclick={reset}>Reset filter</button>{/if}</div>
+    <div class="search-actions"><button class="button search-submit" type="submit"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>Cari</button>{#if searched}<button class="button reset-filters" type="button" onclick={reset}>Reset filter</button>{/if}</div>
   </form>
 </section>
 <section class="event-section shell" id="konser" aria-labelledby="event-title">
