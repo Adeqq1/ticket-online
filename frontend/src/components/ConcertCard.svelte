@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { eventDate, formatRupiah, type Concert } from "../lib/concerts.ts";
+  import { cardDate, formatRupiah, type Concert } from "../lib/concerts.ts";
   import { canBuy, eventStatus } from "../lib/event-changes.ts";
   let { concert, featuredPoster = false }: { concert: Concert; featuredPoster?: boolean } = $props();
   const changedStatus = $derived(eventStatus(concert.currentEvent));
@@ -16,7 +16,7 @@
     </div>
     <div class="concert-card-body">
       <h3>{concert.artist}</h3>
-      <p class="concert-meta">{eventDate(concert.currentEvent ? concert.currentEvent.startsAt : concert.startsAt)}</p>
+      <p class="concert-meta">{cardDate(concert.currentEvent ? concert.currentEvent.startsAt : concert.startsAt)}</p>
       <p class="concert-venue">{concert.venue}, {concert.city}</p>
       <p class="concert-price">{concert.ticketTiers.length ? `Mulai ${formatRupiah.format(Math.min(...concert.ticketTiers.map((tier) => tier.price)))}` : "Tiket belum tersedia"}</p>
       {#if changedStatus}<p class="concert-change">{changedStatus}</p>{/if}

@@ -18,7 +18,7 @@
 .filter-chip { min-height: 44px; padding: 0 12px; border: 1px solid var(--control-line); border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
 .filter-chip span { margin-left: 6px; color: var(--accent); font-size: 17px; }
 .filter-tools { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 8px; }
-.catalog-form .search-actions { flex: 0 0 170px; }
+.catalog-form .search-actions { flex: 0 0 220px; }
 .filters { min-width: 0; flex: 1; }
 .filters summary { min-height: 48px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; cursor: pointer; list-style: none; }
 .filters summary::-webkit-details-marker { display: none; }
@@ -59,13 +59,13 @@
 .poster-fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 10px; color: var(--muted); text-align: center; font-size: 13px; }
 .concert-card.is-sold-out .concert-poster { filter: grayscale(1) contrast(.9); }
 .concert-card-body { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; padding: 14px; }
-.concert-meta, .concert-change { margin: 0 0 10px; color: var(--accent); font-size: 12px; font-weight: 700; line-height: 1.4; }
+.concert-meta, .concert-change { margin: 0 0 10px; color: var(--accent); font-size: 14px; font-weight: 700; line-height: 1.4; }
 .concert-change { margin: 6px 0 0; }
-.concert-action { margin-top: auto; padding-top: 10px; color: var(--accent); font-size: 13px; font-weight: 700; }
+.concert-action { margin-top: auto; padding-top: 10px; color: var(--accent); font-size: 15px; font-weight: 700; }
 .concert-card h3 { margin: 0 0 6px; font-size: 20px; line-height: 1.25; letter-spacing: -.03em; overflow-wrap: anywhere; }
-.concert-venue, .concert-price { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.concert-venue, .concert-price { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
 .concert-price { margin-top: 8px; color: var(--ink); font-weight: 700; }
-.concert-status { display: inline-flex; min-height: 26px; align-items: center; margin-top: 0; padding-top: 6px; color: var(--accent); font-size: 12px; font-weight: 700; }
+.concert-status { display: inline-flex; min-height: 26px; align-items: center; margin-top: 0; padding-top: 6px; color: var(--accent); font-size: 14px; font-weight: 700; }
 .is-sold-out .concert-status { color: var(--muted); }
 .catalog-empty { max-width: 620px; padding: 30px 0; border-top: 1px solid var(--line); }
 .catalog-empty p { margin: 0 0 14px; color: var(--muted); }
@@ -81,7 +81,6 @@
   .filter-tools { gap: 8px; flex-direction: column; }
   .catalog-search-row { flex-wrap: wrap; }
   .catalog-search-row > input { flex-basis: 240px; }
-  .catalog-form .search-actions { flex: 0 0 170px; }
   .filters { width: 100%; }
   .filters summary { gap: 5px 8px; }
   .filters summary span { flex: 1; }
@@ -92,9 +91,8 @@
   .concert-card-link { display: grid; grid-template-columns: 104px minmax(0, 1fr); min-height: 154px; }
   .concert-poster-frame { align-self: start; }
   .concert-card-body { min-height: 154px; padding: 12px; }
-  .concert-meta { margin-bottom: 6px; font-size: 11px; }
+  .concert-meta { margin-bottom: 6px; }
   .concert-card h3 { font-size: 19px; }
-  .concert-venue, .concert-price { font-size: 12px; }
-  .concert-status { padding-top: 6px; font-size: 11px; }
+  .concert-status { padding-top: 6px; }
 }
 @media (prefers-reduced-motion: reduce) { .concert-card:hover { transform: none; } }

@@ -224,13 +224,13 @@ async def main():
                         assert await page.locator('.concert-card-link').first.evaluate("e=>document.activeElement===e && getComputedStyle(e).outlineStyle !== 'none'")
                         columns = await page.locator('.event-list' if path == '/' else '.concert-grid').evaluate("e=>getComputedStyle(e).gridTemplateColumns.split(' ').length")
                         assert columns == (1 if width < 768 else 2 if width < 1024 else 4)
-                        # Both routes use a compact icon and one stable action area.
+                        # Both routes use an icon + "Cari" label and one stable action area.
                         actions = page.locator('.search-actions')
                         await expect(actions.locator('button')).to_have_count(1)
                         initial_width = (await actions.bounding_box())['width']
                         await expect(actions.locator('button')).to_have_css('min-height', '48px')
                         await expect(actions.locator('.search-submit')).to_have_accessible_name('Cari')
-                        await expect(actions.locator('.search-submit')).to_have_css('width', '48px')
+                        await expect(actions.locator('.search-submit')).to_have_text('Cari')
                         await expect(actions.locator('.search-submit')).to_have_css('height', '48px')
                         await expect(actions.locator('.search-submit svg')).to_be_visible()
                         if path == '/konser' and width >= 768:
@@ -240,7 +240,7 @@ async def main():
                         await page.get_by_role('button', name='Cari', exact=True).click()
                         await expect(actions.locator('button')).to_have_count(2)
                         sizes = await actions.locator('button').evaluate_all('es=>es.map(e=>e.getBoundingClientRect().width)')
-                        assert abs(sizes[0]-48) < 1 and abs((await actions.bounding_box())['width']-initial_width) < 1, sizes
+                        assert all(width >= 48 for width in sizes) and abs((await actions.bounding_box())['width']-initial_width) < 1, sizes
                         assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                         query = '#event-query' if path == '/' else '#concert-query'
                         await page.locator(query).fill('Tidak cocok')

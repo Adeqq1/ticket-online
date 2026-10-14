@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { concerts, getConcertById, parseCheckoutQuantities } from "./concerts.ts";
+import { cardDate, concerts, getConcertById, parseCheckoutQuantities } from "./concerts.ts";
+
+test("formats compact card dates in WIB", () => {
+  expect(cardDate("2027-08-24T19:30:00+07:00")).toBe("24 Agu 2027 · 19.30 WIB");
+  expect(cardDate("2027-08-24T23:30:00Z")).toBe("25 Agu 2027 · 06.30 WIB");
+  expect(cardDate(null)).toBe("Jadwal belum diumumkan");
+  expect(cardDate("bukan tanggal")).toBe("Jadwal belum diumumkan");
+});
 
 test("resolves unique URL-safe concert IDs", () => {
   expect(new Set(concerts.map((concert) => concert.id)).size).toBe(concerts.length);

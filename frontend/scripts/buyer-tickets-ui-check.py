@@ -99,7 +99,7 @@ async def main():
             await expect(active.locator('article')).to_have_count(2)
             await expect(active.locator('.my-ticket-mark')).to_have_text(['E-ticket', 'E-ticket'])
             await expect(review.locator('article')).to_have_count(4)
-            await expect(page.get_by_role('button', name='Tiket aktif 2', exact=True)).to_have_attribute('aria-pressed', 'true')
+            await expect(page.get_by_role('button', name='Aktif 2', exact=True)).to_have_attribute('aria-pressed', 'true')
             await expect(active.get_by_text('2 tiket dipesan · 1 dapat digunakan', exact=True)).to_be_visible()
             await audit(page)
             await page.screenshot(path=str(OUTPUT / f'active-{width}.png'), full_page=True)
@@ -107,10 +107,10 @@ async def main():
             await audit(page)
             await page.screenshot(path=str(OUTPUT / f'active-dark-{width}.png'), full_page=True)
             await page.emulate_media(color_scheme='light')
-            await page.get_by_role('button', name='Menunggu pembayaran 4', exact=True).focus()
+            await page.get_by_role('button', name='Belum dibayar 4', exact=True).focus()
             await page.keyboard.press('Space')
-            await expect(page.get_by_role('button', name='Menunggu pembayaran 4', exact=True)).to_have_attribute('aria-pressed', 'true')
-            await page.get_by_role('button', name='Tiket aktif 2', exact=True).click()
+            await expect(page.get_by_role('button', name='Belum dibayar 4', exact=True)).to_have_attribute('aria-pressed', 'true')
+            await page.get_by_role('button', name='Aktif 2', exact=True).click()
 
             await expect(active.locator('a.button').first).to_have_attribute('href', '/tiket/' + tickets['single'][0]['id'])
             await active.locator('summary').click()
@@ -118,8 +118,8 @@ async def main():
             await active.get_by_role('link', name='Dimas Pratama · Tribune').click()
             await expect(page.locator('.pass-grid')).to_contain_text('Dimas Pratama')
             await page.goto(BASE + '/tiket-saya')
-            await page.get_by_role('button', name='Menunggu pembayaran 4', exact=True).click()
-            pending = page.get_by_role('region', name='Menunggu pembayaran', exact=True)
+            await page.get_by_role('button', name='Belum dibayar 4', exact=True).click()
+            pending = page.get_by_role('region', name='Pesanan belum dibayar', exact=True)
             await expect(pending.locator('article')).to_have_count(4)
             await expect(pending.locator('.my-ticket-mark')).to_have_text(['Menunggu pembayaran'] * 4)
             await expect(pending.get_by_role('button', name='Lanjutkan pembayaran', exact=True)).to_have_count(2)
@@ -128,7 +128,7 @@ async def main():
             await audit(page)
             await page.screenshot(path=str(OUTPUT / f'pending-{width}.png'), full_page=True)
             await page.get_by_role('button', name='Riwayat 5', exact=True).click()
-            history = page.get_by_role('region', name='Riwayat', exact=True)
+            history = page.get_by_role('region', name='Riwayat pesanan', exact=True)
             await expect(history.locator('.my-ticket-status').filter(has_text='Pesanan kedaluwarsa')).to_be_visible()
             await expect(history.locator('article').filter(has_text='Konser expired').locator('.my-ticket-mark')).to_have_text('Pesanan kedaluwarsa')
             await expect(history.locator('article').filter(has_text='Konser cancelled').locator('.my-ticket-mark')).to_have_text('Pesanan dibatalkan')
@@ -140,17 +140,17 @@ async def main():
             state['fail'] = False
             await review.locator('article').filter(has_text='0000000000000000000d').get_by_role('button', name='Coba lagi').click()
             await expect(review.locator('article')).to_have_count(4)
-            await page.get_by_role('button', name='Menunggu pembayaran 4', exact=True).click()
+            await page.get_by_role('button', name='Belum dibayar 4', exact=True).click()
             # A late payment confirmation during the click moves categories without starting a payment.
             orders['pending']['status'] = 'PAID'
             tickets['pending'] = copy.deepcopy(tickets['multiple'])
             await pending.locator('article').filter(has_text='Konser pending').get_by_role('button', name='Lanjutkan pembayaran').click()
-            await expect(page.get_by_role('button', name='Tiket aktif 3', exact=True)).to_be_visible()
+            await expect(page.get_by_role('button', name='Aktif 3', exact=True)).to_be_visible()
             assert not state['posts']
             orders['pending']['status'] = 'PENDING'
             tickets['pending'] = []
             await page.goto(BASE + '/tiket-saya')
-            await page.get_by_role('button', name='Menunggu pembayaran 4', exact=True).click()
+            await page.get_by_role('button', name='Belum dibayar 4', exact=True).click()
             await pending.locator('article').filter(has_text='Konser pending').get_by_role('button', name='Lanjutkan pembayaran').click()
             await expect(page).to_have_url(BASE + '/pesanan/' + orders['pending']['id'] + '#pembayaran')
             await page.locator('#order-payment-method').select_option('GOPAY')
@@ -178,10 +178,10 @@ async def main():
             orders['pending']['status'] = 'PAID'
             tickets['pending'] = copy.deepcopy(tickets['multiple'])
             await page.goto(BASE + '/tiket-saya')
-            await expect(page.get_by_role('button', name='Tiket aktif 3', exact=True)).to_be_visible()
+            await expect(page.get_by_role('button', name='Aktif 3', exact=True)).to_be_visible()
             for item in tickets['pending']: item['usable'] = False
             await active.get_by_role('button', name='Periksa lagi').click()
-            await expect(page.get_by_role('button', name='Tiket aktif 2', exact=True)).to_be_visible()
+            await expect(page.get_by_role('button', name='Aktif 2', exact=True)).to_be_visible()
             await expect(page.get_by_role('button', name='Riwayat 6', exact=True)).to_be_visible()
             await page.goto(BASE + '/pesanan/' + orders['deadline']['id'] + '#pembayaran')
             await expect(page.locator('#pembayaran').get_by_role('button', name='Periksa status pembayaran')).to_be_visible()

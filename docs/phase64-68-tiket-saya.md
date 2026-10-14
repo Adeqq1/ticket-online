@@ -6,7 +6,7 @@ Implementasi Phase 64-67 selesai. Phase 68 memiliki bukti otomatis dan screensho
 
 - Detail pesanan menambahkan `eventId`, `eventArtist`, `eventVenue`, dan `eventCity` melalui relasi pesanan → reservasi → konser. Endpoint, migrasi, autentikasi, dan filter katalog publik tidak ditambahkan atau diubah.
 - Satu kartu per pesanan, dengan konser, `currentEvent.startsAt`, venue/kota, total `items.quantity`, kelayakan tiket, dan nomor pesanan. Respons lama tidak ditebak dari katalog atau e-ticket.
-- Default selalu Tiket aktif. Menunggu pembayaran dan Riwayat memiliki jumlah pesanan sendiri. Kegagalan akses/pemeriksaan tiket lunas berada di Perlu diperiksa di luar kategori. Jam mulai yang lewat tidak menentukan kelayakan.
+- Default selalu tab Aktif. Tab Belum dibayar dan Riwayat memiliki jumlah pesanan sendiri. Label tab dibuat ringkas untuk mobile; nama region untuk pembaca layar tetap deskriptif (Tiket aktif, Pesanan belum dibayar, Riwayat pesanan), dan kartu pesanan tetap memakai status lengkap seperti Menunggu pembayaran. Kegagalan akses/pemeriksaan tiket lunas berada di Perlu diperiksa di luar kategori. Jam mulai yang lewat tidak menentukan kelayakan.
 - Pemilih peserta hanya memuat e-ticket dengan `usable: true`. Pembayaran diperiksa ulang sebelum membuka bagian pembayaran dan sebelum POST. POST hanya memakai endpoint pembayaran pesanan yang sama, termasuk akses tanpa metadata checkout. Sesi pembayaran PENDING dapat dibuka kembali memakai metode yang sama; pembayaran SUCCEEDED yang menunggu konfirmasi hanya diperiksa statusnya.
 - Backend menerima URL kembali `/pesanan/{id}` hanya untuk pesanan yang sedang dibayar pada origin yang dikonfigurasi, tanpa query atau fragment. URL checkout yang sudah ada tetap didukung. Respons pengalihan yang tidak valid menjaga hasil pembayaran sebagai belum pasti.
 - Pesan publik, tautan pemulihan, perbedaan nomor pesanan/kode e-ticket, dan pemberitahuan penyimpanan gagal diperjelas. Pesan demo dihapus dari halaman. Format akses tersimpan serta aturan refund/check-in tetap sama.
@@ -50,9 +50,9 @@ Semua screenshot menggunakan data uji. Screenshot merupakan bukti tampilan, buka
 
 | Tampilan | Contoh |
 | --- | --- |
-| Tiket aktif | [1440px](phase64-68/active-1440.png), [320px](phase64-68/active-320.png) |
+| Aktif | [1440px](phase64-68/active-1440.png), [320px](phase64-68/active-320.png) |
 | Mode gelap | [320px](phase64-68/active-dark-320.png) |
-| Menunggu pembayaran | [390px](phase64-68/pending-390.png) |
+| Belum dibayar | [390px](phase64-68/pending-390.png) |
 | Riwayat | [390px](phase64-68/history-390.png) |
 | Pembayaran belum pasti | [390px](phase64-68/payment-uncertain-390.png) |
 | Daftar kosong | [320px](phase64-68/empty-320.png) |
@@ -67,7 +67,7 @@ Email dukungan yang aktif dan dipantau tim belum tersedia. Sesuai pilihan penggu
 
 ## Verifikasi sandbox nyata yang masih terbuka
 
-Staging sandbox belum tersedia. Setelah dikonfigurasi, gunakan pesanan PENDING yang sama dan akses hasil email/pemulihan tanpa `basketKey`/`idempotencyKey`. Pilih metode, selesaikan pembayaran sandbox, dan catat bahwa ID pesanan tidak berubah, notifikasi valid mengubahnya menjadi PAID, serta Tiket aktif muncul setelah konfirmasi. Ulangi dengan tenggat lewat, hasil terputus, tiket yang telah digunakan, dan sesi lain yang hanya memperoleh akses melalui email. Catat waktu, ID pesanan yang sudah disamarkan, respons status, serta bukti provider/worker; jangan merekam token atau secret.
+Staging sandbox belum tersedia. Setelah dikonfigurasi, gunakan pesanan PENDING yang sama dan akses hasil email/pemulihan tanpa `basketKey`/`idempotencyKey`. Pilih metode, selesaikan pembayaran sandbox, dan catat bahwa ID pesanan tidak berubah, notifikasi valid mengubahnya menjadi PAID, serta pesanan muncul di tab Aktif setelah konfirmasi. Ulangi dengan tenggat lewat, hasil terputus, tiket yang telah digunakan, dan sesi lain yang hanya memperoleh akses melalui email. Catat waktu, ID pesanan yang sudah disamarkan, respons status, serta bukti provider/worker; jangan merekam token atau secret.
 
 ## UAT manusia yang masih terbuka
 

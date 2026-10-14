@@ -18,7 +18,7 @@
   const groups = $derived(groupBuyerOrders(orders));
   const followups = $derived(orders.filter(({ detail }) => detail?.currentEvent?.status === "POSTPONED" || detail?.status === "REFUND_PENDING" || detail?.refundRight?.requested && detail.refund?.status !== "SUCCEEDED" || detail?.refund && detail.refund.status !== "SUCCEEDED"));
   const storageFailed = $derived(orders.some((order) => order.accessSaved === false));
-  const categories = [{ id: "active", label: "Tiket aktif" }, { id: "pending", label: "Menunggu pembayaran" }, { id: "history", label: "Riwayat" }] as const;
+  const categories = [{ id: "active", label: "Aktif", region: "Tiket aktif" }, { id: "pending", label: "Belum dibayar", region: "Pesanan belum dibayar" }, { id: "history", label: "Riwayat", region: "Riwayat pesanan" }] as const;
 
   async function refreshOrder(order: BuyerOrderTickets) {
     const id = order.access.orderId;
@@ -133,7 +133,7 @@
     <nav class="ticket-categories" aria-label="Kategori pesanan">
       {#each categories as category}<button type="button" aria-pressed={selected === category.id} onclick={() => { selected = category.id; }}>{category.label} <span>{groups[category.id].length}</span></button>{/each}
     </nav>
-    <section aria-label={categories.find((category) => category.id === selected)!.label}>
+    <section aria-label={categories.find((category) => category.id === selected)!.region}>
       {#if groups[selected].length}
         <div class="my-tickets-summary"><strong>{groups[selected].length} pesanan</strong><button class="text-button" type="button" disabled={loadingOrders.length > 0} onclick={() => { for (const order of orders) void refreshOrder(order); }}>Periksa lagi</button></div>
         <ul class="my-tickets-list" aria-label="Daftar pesanan">{#each groups[selected] as order (order.access.orderId)}{@render orderCard(order)}{/each}</ul>
@@ -168,8 +168,8 @@
     .my-ticket-card-link { grid-template-columns: minmax(0, 1fr); }
     .my-ticket-mark { display: none; }
     .my-ticket-card-body { padding: 18px; }
-    .ticket-categories { gap: 6px; }
-    .ticket-categories button { padding: 10px; font-size: 14px; }
+    .ticket-categories { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .ticket-categories button { justify-content: center; min-height: 48px; padding: 8px 6px; font-size: 14px; text-align: center; }
     .my-order-actions .button { width: 100%; }
   }
 </style>
